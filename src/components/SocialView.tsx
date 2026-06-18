@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, doc, setDoc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, doc, setDoc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
@@ -87,10 +87,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
       if (profileIds.length > 0) {
         const uProfiles: UserProfile[] = [];
         for (const fId of profileIds) {
-          const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', fId)));
-          uSnap.forEach((docSnap) => {
-            uProfiles.push(docSnap.data() as UserProfile);
-          });
+          try {
+            const docSnap = await getDoc(doc(db, 'users', fId));
+            if (docSnap.exists()) {
+              uProfiles.push(docSnap.data() as UserProfile);
+            }
+          } catch (err) {
+            console.warn("Failed to fetch friend profile:", err);
+          }
         }
         setFriendsProfiles(uProfiles);
       } else {
@@ -114,10 +118,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         list.push(data);
 
         if (!reqProfiles[data.requesterUid]) {
-          const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', data.requesterUid)));
-          uSnap.forEach((uDoc) => {
-            reqProfiles[data.requesterUid] = uDoc.data() as UserProfile;
-          });
+          try {
+            const uDoc = await getDoc(doc(db, 'users', data.requesterUid));
+            if (uDoc.exists()) {
+              reqProfiles[data.requesterUid] = uDoc.data() as UserProfile;
+            }
+          } catch (err) {
+            console.warn("Failed to fetch requester profile:", err);
+          }
         }
       }
       setIncomingRequests(list);
@@ -140,10 +148,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         list.push(data);
 
         if (!reqProfiles[data.receiverUid]) {
-          const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', data.receiverUid)));
-          uSnap.forEach((uDoc) => {
-            reqProfiles[data.receiverUid] = uDoc.data() as UserProfile;
-          });
+          try {
+            const uDoc = await getDoc(doc(db, 'users', data.receiverUid));
+            if (uDoc.exists()) {
+              reqProfiles[data.receiverUid] = uDoc.data() as UserProfile;
+            }
+          } catch (err) {
+            console.warn("Failed to fetch receiver profile:", err);
+          }
         }
       }
       setOutgoingRequests(list);
@@ -166,10 +178,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         list.push(data);
 
         if (!reqProfiles[data.challengerUid]) {
-          const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', data.challengerUid)));
-          uSnap.forEach((uDoc) => {
-            reqProfiles[data.challengerUid] = uDoc.data() as UserProfile;
-          });
+          try {
+            const uDoc = await getDoc(doc(db, 'users', data.challengerUid));
+            if (uDoc.exists()) {
+              reqProfiles[data.challengerUid] = uDoc.data() as UserProfile;
+            }
+          } catch (err) {
+            console.warn("Failed to fetch challenger profile:", err);
+          }
         }
       }
       setReceivedChallenges(list);
@@ -192,10 +208,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         list.push(data);
 
         if (!reqProfiles[data.challengedUid]) {
-          const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', data.challengedUid)));
-          uSnap.forEach((uDoc) => {
-            reqProfiles[data.challengedUid] = uDoc.data() as UserProfile;
-          });
+          try {
+            const uDoc = await getDoc(doc(db, 'users', data.challengedUid));
+            if (uDoc.exists()) {
+              reqProfiles[data.challengedUid] = uDoc.data() as UserProfile;
+            }
+          } catch (err) {
+            console.warn("Failed to fetch challenged profile:", err);
+          }
         }
       }
       setSentChallenges(list);

@@ -33,12 +33,15 @@ const PIECE_IMAGES: Record<string, string> = {
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 
 // Board colour themes
-const BOARD_THEMES: Record<string, { dark: string; light: string; label: string }> = {
-  green:  { dark: '#779556', light: '#ebecd0', label: 'Green' },
-  wood:   { dark: '#b58863', light: '#f0d9b5', label: 'Wood' },
-  blue:   { dark: '#4b7db8', light: '#dee3e6', label: 'Blue' },
-  walnut: { dark: '#7a4a2e', light: '#d8b98a', label: 'Walnut' },
-  ice:    { dark: '#6f8fa9', light: '#dce9f0', label: 'Ice' },
+const BOARD_THEMES: Record<string, { dark: string; light: string; label: string; isAngle?: boolean }> = {
+  green:         { dark: '#779556', light: '#ebecd0', label: 'Green' },
+  wood:          { dark: '#b58863', light: '#f0d9b5', label: 'Wood' },
+  'green-angle': { dark: '#779556', light: '#ebecd0', label: 'Green Angle', isAngle: true },
+  'wood-angle':  { dark: '#b58863', light: '#f0d9b5', label: 'Wood Angle', isAngle: true },
+  blue:          { dark: '#4b7db8', light: '#dee3e6', label: 'Blue' },
+  'blue-angle':  { dark: '#4b7db8', light: '#dee3e6', label: 'Blue Angle', isAngle: true },
+  walnut:        { dark: '#7a4a2e', light: '#d8b98a', label: 'Walnut' },
+  ice:           { dark: '#6f8fa9', light: '#dce9f0', label: 'Ice' },
 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
@@ -117,7 +120,27 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     };
   }, [matchId, user]);
 
-  // 1. Fetch match and players profiles
+  // 1. Fetch players profiles separately when match is loaded
+  useEffect(() => {
+    if (!match) return;
+    const fetchProfiles = async () => {
+      try {
+        if (!whiteProfile) {
+          const snap = await getDoc(doc(db, 'users', match.whiteUid));
+          if (snap.exists()) setWhiteProfile(snap.data() as UserProfile);
+        }
+        if (!blackProfile) {
+          const snap = await getDoc(doc(db, 'users', match.blackUid));
+          if (snap.exists()) setBlackProfile(snap.data() as UserProfile);
+        }
+      } catch (err) {
+        console.warn("Failed to load player profiles:", err);
+      }
+    };
+    fetchProfiles();
+  }, [match?.whiteUid, match?.blackUid, whiteProfile, blackProfile]);
+
+  // 2. Fetch match updates in real-time
   useEffect(() => {
     const matchRef = doc(db, 'matches', matchId);
 
@@ -186,14 +209,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         }
       }
 
-      // Fetch profiles if they are not loaded yet
-      if (!whiteProfile || !blackProfile) {
-        const whiteSnap = await getDoc(doc(db, 'users', matchData.whiteUid));
-        const blackSnap = await getDoc(doc(db, 'users', matchData.blackUid));
-        
-        if (whiteSnap.exists()) setWhiteProfile(whiteSnap.data() as UserProfile);
-        if (blackSnap.exists()) setBlackProfile(blackSnap.data() as UserProfile);
-      }
+      // Profiles are fetched in a separate effect
 
       // Sync player disconnection states & initialization timers using heartbeats
       if (matchData.status === 'active') {

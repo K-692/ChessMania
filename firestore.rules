@@ -13,7 +13,7 @@ service cloud.firestore {
     }
     
     match /users/{uid} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       // Allow creation of own profile with starting parameters
       allow create: if isOwner(uid) 
         && request.resource.data.bankBalance == 1000

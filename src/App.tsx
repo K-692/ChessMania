@@ -10,7 +10,7 @@ import { ProfileView } from './components/ProfileView';
 import { SocialView } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import type { GameMode, Match, UserProfile } from './types';
-import { collection, query, where, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
@@ -103,7 +103,7 @@ const AppContent: React.FC = () => {
 
   // 1a. Periodically update lastActiveAt for online logged-in users to keep them active in DB
   useEffect(() => {
-    if (!user || !profile) return;
+    if (!user) return;
     const userDocRef = doc(db, 'users', user.uid);
     const updateActiveStatus = async () => {
       try {
@@ -116,7 +116,7 @@ const AppContent: React.FC = () => {
     updateActiveStatus();
     const interval = setInterval(updateActiveStatus, 2 * 60 * 1000); // every 2 minutes
     return () => clearInterval(interval);
-  }, [user, profile]);
+  }, [user?.uid]);
 
   // 1b. Real-time sliding active players query listener (active in last 5 minutes)
   useEffect(() => {
@@ -224,10 +224,14 @@ const AppContent: React.FC = () => {
       setAcceptedChallenge(chData);
 
       // Fetch profile details of challenged friend
-      const friendSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', chData.challengedUid)));
-      friendSnap.forEach((docSnap) => {
-        setAcceptedChallengerProfile(docSnap.data());
-      });
+      try {
+        const friendSnap = await getDoc(doc(db, 'users', chData.challengedUid));
+        if (friendSnap.exists()) {
+          setAcceptedChallengerProfile(friendSnap.data());
+        }
+      } catch (err) {
+        console.warn("Failed to fetch challenged friend profile:", err);
+      }
     });
 
     return () => unsubscribe();
@@ -273,10 +277,14 @@ const AppContent: React.FC = () => {
 
       for (const oppUid of uniqueOpponentUids) {
         // Fetch profile
-        const uSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', oppUid)));
-        uSnap.forEach((docSnap) => {
-          profileCache[oppUid] = docSnap.data() as UserProfile;
-        });
+        try {
+          const uSnap = await getDoc(doc(db, 'users', oppUid));
+          if (uSnap.exists()) {
+            profileCache[oppUid] = uSnap.data() as UserProfile;
+          }
+        } catch (err) {
+          console.warn("Failed to fetch opponent profile:", err);
+        }
 
         // Check friendship status
         const fSnap1 = await getDocs(query(
