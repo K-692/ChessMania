@@ -70,6 +70,7 @@ export interface Match {
   presence?: Record<string, boolean>; // Presence map for each player (UID -> online/offline)
   disconnectedAt?: number | null; // Timestamp when connection was lost
   disconnectedUid?: string | null; // UID of player who disconnected
+  heartbeats?: Record<string, number>; // Live client heartbeats (UID -> timestamp)
 }
 
 export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'game_escrow' | 'game_payout';

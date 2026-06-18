@@ -547,6 +547,10 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                             <span className={online ? "text-emerald-400 font-medium" : "text-slate-500"}>
                               {online ? 'Online' : 'Offline'}
                             </span>
+                            <span>•</span>
+                            <span>
+                              Record: <span className="text-emerald-400">{fProfile.wins || 0}W</span> - <span className="text-red-400">{fProfile.losses || 0}L</span> - <span className="text-amber-400">{fProfile.draws || 0}D</span>
+                            </span>
                             {userStats && (userStats.wins > 0 || userStats.losses > 0 || userStats.draws > 0) && (
                               <>
                                 <span>•</span>
@@ -691,8 +695,11 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
 
       {/* ── Challenge Mode Selection Modal ── */}
       {activeChallengeFriend && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-          <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl">
+        <div 
+          className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in"
+          style={{ zIndex: 9999 }}
+        >
+          <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl max-h-[calc(100vh-120px)] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/5 bg-slate-900/40">
               <h3 className="text-base font-bold text-slate-200 flex items-center space-x-2">
                 <Swords className="w-5 h-5 text-violet-400" />

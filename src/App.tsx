@@ -486,6 +486,7 @@ const AppContent: React.FC = () => {
           setActiveMatchId(null);
         }}
         currentView={view}
+        isGameActive={view === 'game'}
       />
 
       <main className="flex-grow">

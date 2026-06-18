@@ -6,9 +6,9 @@ import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo } from '../game/gameService';
 import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Clock, ShieldAlert, Award, ArrowLeft } from 'lucide-react';
+import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X } from 'lucide-react';
 import { formatCoins } from '../utils/format';
-import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings } from '../utils/sound';
+import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { getBestAchievement } from '../utils/achievements';
 
 interface ChessGameProps {
@@ -39,6 +39,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   // Selected square for click-to-move and legal move dots
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   
+  // Settings and Profile dialog visibility states
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
+  const [selectedProfileGameplay, setSelectedProfileGameplay] = useState<Record<string, number>>({});
+  
+  // Sound settings state
+  const [settings, setSettings] = useState(getSoundSettings());
+
   // Countdown for reconnection / starting wait limit
   const [reconnectCountdown, setReconnectCountdown] = useState<number>(60);
 
@@ -59,18 +67,35 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const isBlack = user?.uid === match?.blackUid;
   const isMyTurn = match ? (match.turn === 'w' && isWhite) || (match.turn === 'b' && isBlack) : false;
 
-  // Track player presence in database
+  // Real-time synchronization of local settings hook
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSettings(getSoundSettings());
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Update client presence and heartbeat to Firestore
   useEffect(() => {
     if (!user) return;
     const matchRef = doc(db, 'matches', matchId);
-    
-    // Set presence to true
+
+    // Initial presence
     updateDoc(matchRef, {
-      [`presence.${user.uid}`]: true
+      [`presence.${user.uid}`]: true,
+      [`heartbeats.${user.uid}`]: Date.now()
     }).catch(console.warn);
 
+    // 3-second heartbeat loops
+    const heartbeatInterval = setInterval(() => {
+      updateDoc(matchRef, {
+        [`heartbeats.${user.uid}`]: Date.now()
+      }).catch(console.warn);
+    }, 3000);
+
     return () => {
-      // Set presence to false on unmount
+      clearInterval(heartbeatInterval);
+      // Offline on cleanup
       updateDoc(matchRef, {
         [`presence.${user.uid}`]: false
       }).catch(console.warn);
@@ -146,18 +171,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         if (blackSnap.exists()) setBlackProfile(blackSnap.data() as UserProfile);
       }
 
-      // Sync player disconnection states & initialization timers
+      // Sync player disconnection states & initialization timers using heartbeats
       if (matchData.status === 'active') {
-        const pWhiteOnline = !!matchData.presence?.[matchData.whiteUid];
-        const pBlackOnline = !!matchData.presence?.[matchData.blackUid];
-        const bothOnline = pWhiteOnline && pBlackOnline;
+        const myUid = user?.uid;
+        const oppUid = myUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
 
-        if (bothOnline) {
+        const oppLastActive = matchData.heartbeats?.[oppUid] || 0;
+        // Consider opponent offline if heartbeat is older than 10 seconds or not present
+        const isOpponentStale = oppLastActive === 0 || (Date.now() - oppLastActive > 10000);
+
+        if (!isOpponentStale) {
           if (matchData.disconnectedUid) {
             updateDoc(matchRef, {
               disconnectedUid: null,
               disconnectedAt: null,
-              lastMoveAt: Date.now()
+              lastMoveAt: Date.now() // Offset clocks on reconnection
             }).catch(console.warn);
           }
           // Reset lastMoveAt when both join for the first time
@@ -167,11 +195,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             }).catch(console.warn);
           }
         } else {
-          // If a player is offline, mark them as disconnected
-          const offlineUid = !pWhiteOnline ? matchData.whiteUid : matchData.blackUid;
+          // Opponent detected as stale
           if (!matchData.disconnectedUid) {
             updateDoc(matchRef, {
-              disconnectedUid: offlineUid,
+              disconnectedUid: oppUid,
               disconnectedAt: Date.now()
             }).catch(console.warn);
           }
@@ -205,12 +232,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     setBlackClock(match.clocks[match.blackUid]);
 
     const interval = setInterval(() => {
-      const pWhiteOnline = !!match.presence?.[match.whiteUid];
-      const pBlackOnline = !!match.presence?.[match.blackUid];
-      const bothJoined = pWhiteOnline && pBlackOnline;
-
-      // Do not count down standard chess timers unless both players have joined and no disconnections
-      if (!bothJoined || match.disconnectedUid) {
+      // Pause clocks if opponent is disconnected
+      if (match.disconnectedUid) {
         return;
       }
 
@@ -243,27 +266,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     const interval = setInterval(() => {
       const now = Date.now();
-      const pWhiteOnline = !!match.presence?.[match.whiteUid];
-      const pBlackOnline = !!match.presence?.[match.blackUid];
-      const bothJoined = pWhiteOnline && pBlackOnline;
+      const oppUid = user?.uid === match.whiteUid ? match.blackUid : match.whiteUid;
+      const oppLastActive = match.heartbeats?.[oppUid] || 0;
+      const isOpponentStale = oppLastActive === 0 || (now - oppLastActive > 10000);
 
       let time = 60;
       if (match.disconnectedAt) {
         time = Math.max(0, Math.ceil((60000 - (now - match.disconnectedAt)) / 1000));
-      } else if (!bothJoined && match.moves.length === 0) {
+      } else if (isOpponentStale && match.moves.length === 0) {
         time = Math.max(0, Math.ceil((60000 - (now - match.createdAt)) / 1000));
       }
       setReconnectCountdown(time);
 
       // Execute timeout victory if 1 minute limit exceeded
-      if (!bothJoined && match.moves.length === 0) {
+      if (isOpponentStale && match.moves.length === 0) {
         const elapsed = now - match.createdAt;
         if (elapsed > 60000) {
-          const onlineUid = pWhiteOnline ? match.whiteUid : (pBlackOnline ? match.blackUid : null);
-          if (onlineUid && user?.uid === onlineUid) {
+          if (user?.uid) {
             updateDoc(doc(db, 'matches', matchId), {
               status: 'timeout',
-              winnerUid: onlineUid,
+              winnerUid: user.uid,
               finishedAt: now,
             }).catch(console.warn);
           }
@@ -479,6 +501,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return { w: capturedW, b: capturedB };
   };
 
+  // Fetch click-to-profile data
+  const handleAvatarClick = async (profileUid: string) => {
+    if (!profileUid) return;
+    const uSnap = await getDoc(doc(db, 'users', profileUid));
+    if (uSnap.exists()) {
+      const data = uSnap.data() as UserProfile;
+      setSelectedProfile(data);
+      setSelectedProfileGameplay(data.gameplayCounts || {});
+    }
+  };
+
   // ── Null Guard for match ──
   if (!match) {
     return (
@@ -498,10 +531,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const hasOpponentDrawOffer = match.drawOffers?.includes(isWhite ? match.blackUid : match.whiteUid);
 
   // Connection states
-  const pWhiteOnline = !!match.presence?.[match.whiteUid];
-  const pBlackOnline = !!match.presence?.[match.blackUid];
-  const bothJoined = pWhiteOnline && pBlackOnline;
-  const isOpponentDisconnected = match.disconnectedUid && match.disconnectedUid !== user?.uid;
+  const oppUidForPresence = isWhite ? match.blackUid : match.whiteUid;
+  const oppLastActiveTime = match.heartbeats?.[oppUidForPresence] || 0;
+  const isOpponentDisconnected = oppLastActiveTime === 0 || (Date.now() - oppLastActiveTime > 10000);
 
   // Custom square highlights styling
   const customSquareStyles: Record<string, React.CSSProperties> = {};
@@ -525,7 +557,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   }
 
   // Highlight legal moves with radial dots if enabled in settings
-  const settings = getSoundSettings();
   if (selectedSquare && settings.showLegalMoves) {
     const moves = chessRef.current.moves({
       square: selectedSquare as any,
@@ -548,86 +579,95 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
-      {/* Header and Match Prize details */}
-      <div className="flex items-center justify-between glass px-6 py-3 rounded-xl border border-white/5 bg-slate-950/40">
-        <button
-          onClick={onExit}
-          className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-medium cursor-pointer"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          <span>Exit Game</span>
-        </button>
-
-        <div className="text-center">
-          <p className="text-[10px] text-slate-500 uppercase tracking-widest">Total Prize Pool</p>
-          <p className="text-lg font-bold text-amber-400 flex items-center justify-center space-x-2 mt-0.5">
-            <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-4.5 h-4.5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
-            <span>
-              {formatCoins(
-                match.mode === 'all_in' && match.allInStakes
-                  ? Object.values(match.allInStakes).reduce((sum, val) => sum + val, 0)
-                  : match.stake * 2
-              )}
-            </span>
-          </p>
-        </div>
-
-        <div className="text-right text-xs text-slate-500 capitalize">
-          Mode: <span className="font-semibold text-slate-300">{match.mode.replace('_', ' ')}</span>
-        </div>
-      </div>
-
-      {/* Connection / Status Banner */}
-      {match.status === 'active' && (!bothJoined || match.disconnectedUid) && (
-        <div className="bg-amber-500/10 border border-amber-500/30 p-3.5 rounded-xl flex items-center justify-between text-amber-300 animate-pulse">
-          <div className="flex items-center space-x-3">
-            <div className="w-2.5 h-2.5 bg-amber-500 rounded-full animate-ping" />
-            <span className="text-xs font-semibold">
-              {!bothJoined && match.moves.length === 0
-                ? "Waiting for opponent to connect..."
-                : isOpponentDisconnected
-                ? "Opponent disconnected! Re-connecting..."
-                : "Re-connecting..."}
-            </span>
+      {/* Main Game Screen (Left side Chessboard, Right side player info & logs) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch lg:h-[calc(100vh-120px)]">
+        {/* Left half: Chessboard (fits top-to-bottom of the left half) */}
+        <div className="lg:col-span-7 flex flex-col justify-center items-center p-4 bg-slate-900/10 rounded-2xl border border-white/5 h-full min-h-[360px]">
+          <div className="chessboard-container aspect-square w-full max-w-[min(100%,480px,65vh)] bg-[#1a1c23] shadow-2xl rounded-2xl overflow-hidden border border-white/10">
+            <Chessboard
+              options={{
+                position: localFen,
+                onPieceDrop: ({ sourceSquare, targetSquare }) => {
+                  if (targetSquare) {
+                    return onPieceDrop(sourceSquare, targetSquare);
+                  }
+                  return false;
+                },
+                boardOrientation: isWhite ? 'white' : 'black',
+                allowDragging: match.status === 'active' && isMyTurn,
+                darkSquareStyle: { backgroundColor: '#779556' },
+                lightSquareStyle: { backgroundColor: '#ebecd0' },
+                squareStyles: customSquareStyles,
+                onSquareClick: ({ square }) => onSquareClick(square),
+              }}
+            />
           </div>
-          <span className="text-xs font-mono bg-amber-950/40 px-2 py-1 rounded border border-amber-500/20">
-            {reconnectCountdown}s limit
-          </span>
         </div>
-      )}
 
-      {/* Main Game Screen */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left: Chessboard */}
-        <div className="lg:col-span-7 flex flex-col space-y-3">
-          
+        {/* Right half: Actions, Players, Clocks, Info, Moves */}
+        <div className="lg:col-span-5 flex flex-col justify-between p-5 bg-slate-950/20 rounded-2xl border border-white/5 space-y-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+          {/* Header Action Menu */}
+          <div className="flex items-center justify-between border-b border-white/5 pb-3">
+            <button
+              onClick={onExit}
+              className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-xs font-semibold cursor-pointer"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Exit Match</span>
+            </button>
+
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center space-x-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all border border-white/5 text-xs font-semibold cursor-pointer"
+            >
+              <Settings className="w-4 h-4" />
+              <span>Settings</span>
+            </button>
+          </div>
+
+          {/* Prize and Mode Info */}
+          <div className="grid grid-cols-2 gap-4 bg-slate-900/60 p-3 rounded-xl border border-white/5 text-left">
+            <div>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Total Prize Pool</p>
+              <p className="text-base font-bold text-amber-400 flex items-center space-x-1.5 mt-0.5">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-4.5 h-4.5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
+                <span>
+                  {formatCoins(
+                    match.mode === 'all_in' && match.allInStakes
+                      ? Object.values(match.allInStakes).reduce((sum, val) => sum + val, 0)
+                      : match.stake * 2
+                  )}
+                </span>
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Game Mode</p>
+              <p className="text-xs font-bold text-slate-300 capitalize mt-1.5">
+                {match.mode.replace('_', ' ')}
+              </p>
+            </div>
+          </div>
+
           {/* Opponent Profile and Clock */}
-          <div className="flex items-center justify-between glass px-4 py-2 rounded-lg border border-white/5 bg-slate-900/10">
-            <div className="flex items-center space-x-3">
-              <img
-                src={oppProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
-                alt={oppProfile?.displayName || 'Opponent'}
-                className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
-              />
-              <div className="text-left">
+          <div className="flex items-center justify-between glass px-4 py-2.5 rounded-lg border border-white/5 bg-slate-900/10">
+            <div className="flex items-center space-x-3 text-left">
+              <div 
+                className="relative cursor-pointer hover:opacity-85 transition-all"
+                onClick={() => handleAvatarClick(oppProfile?.uid || '')}
+                title="View Profile Stats"
+              >
+                <img
+                  src={oppProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
+                  alt={oppProfile?.displayName || 'Opponent'}
+                  className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
+                />
+                <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#121318] ${
+                  isOpponentDisconnected ? 'bg-red-500' : 'bg-emerald-500'
+                }`} />
+              </div>
+              <div>
                 <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 flex-wrap">
                   <span>{oppProfile?.displayName || 'Opponent'} {isWhite ? '(Black)' : '(White)'}</span>
-                  {oppProfile && oppProfile.rating >= 2500 && (
-                    <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950/40 px-1 py-0.2 rounded text-[8px] uppercase select-none font-bold" title="Grandmaster (Rating 2500+)">
-                      GM
-                    </span>
-                  )}
-                  {(() => {
-                    const bestAch = getBestAchievement(oppProfile?.gameplayCounts);
-                    if (bestAch) {
-                      return (
-                        <span className="text-[10px] filter saturate-150" title={bestAch.name}>
-                          {bestAch.badge.split(' ')[0]}
-                        </span>
-                      );
-                    }
-                    return null;
-                  })()}
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
@@ -651,7 +691,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
             {/* Opponent Clock */}
             <div className={`flex items-center space-x-2 px-2.5 py-1 rounded-lg border font-mono text-sm font-semibold ${
-              !isMyTurn && match.status === 'active' && bothJoined && !match.disconnectedUid
+              !isMyTurn && match.status === 'active' && !isOpponentDisconnected
                 ? 'bg-violet-950/20 border-violet-500/30 text-violet-300'
                 : 'bg-slate-900/60 border-white/5 text-slate-400'
             }`}>
@@ -660,54 +700,24 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           </div>
 
-          {/* Chessboard container with constrained height */}
-          <div className="chessboard-container aspect-square max-w-[min(100%,460px,50vh)] mx-auto bg-[#1a1c23] shadow-2xl rounded-xl overflow-hidden border border-white/5">
-            <Chessboard
-              options={{
-                position: localFen,
-                onPieceDrop: ({ sourceSquare, targetSquare }) => {
-                  if (targetSquare) {
-                    return onPieceDrop(sourceSquare, targetSquare);
-                  }
-                  return false;
-                },
-                boardOrientation: isWhite ? 'white' : 'black',
-                allowDragging: match.status === 'active' && isMyTurn,
-                darkSquareStyle: { backgroundColor: '#779556' },
-                lightSquareStyle: { backgroundColor: '#ebecd0' },
-                squareStyles: customSquareStyles,
-                onSquareClick: ({ square }) => onSquareClick(square),
-              }}
-            />
-          </div>
-
           {/* Player Profile and Clock */}
-          <div className="flex items-center justify-between glass px-4 py-2 rounded-lg border border-white/5 bg-slate-900/10">
-            <div className="flex items-center space-x-3">
-              <img
-                src={myProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
-                alt={myProfile?.displayName || 'Player'}
-                className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
-              />
-              <div className="text-left">
+          <div className="flex items-center justify-between glass px-4 py-2.5 rounded-lg border border-white/5 bg-slate-900/10">
+            <div className="flex items-center space-x-3 text-left">
+              <div 
+                className="relative cursor-pointer hover:opacity-85 transition-all"
+                onClick={() => handleAvatarClick(user?.uid || '')}
+                title="View Profile Stats"
+              >
+                <img
+                  src={myProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
+                  alt={myProfile?.displayName || 'Player'}
+                  className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
+                />
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#121318] bg-emerald-500" />
+              </div>
+              <div>
                 <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 flex-wrap">
                   <span>{myProfile?.displayName || 'You'} {isWhite ? '(White)' : '(Black)'}</span>
-                  {myProfile && myProfile.rating >= 2500 && (
-                    <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950/40 px-1 py-0.2 rounded text-[8px] uppercase select-none font-bold" title="Grandmaster (Rating 2500+)">
-                      GM
-                    </span>
-                  )}
-                  {(() => {
-                    const bestAch = getBestAchievement(myProfile?.gameplayCounts);
-                    if (bestAch) {
-                      return (
-                        <span className="text-[10px] filter saturate-150" title={bestAch.name}>
-                          {bestAch.badge.split(' ')[0]}
-                        </span>
-                      );
-                    }
-                    return null;
-                  })()}
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
@@ -731,7 +741,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
             {/* Player Clock */}
             <div className={`flex items-center space-x-2 px-2.5 py-1 rounded-lg border font-mono text-sm font-semibold ${
-              isMyTurn && match.status === 'active' && bothJoined && !match.disconnectedUid
+              isMyTurn && match.status === 'active' && !isOpponentDisconnected
                 ? 'bg-violet-950/20 border-violet-500/30 text-violet-300'
                 : 'bg-slate-900/60 border-white/5 text-slate-400'
             }`}>
@@ -740,30 +750,37 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           </div>
 
-        </div>
+          {/* Disconnection Warning Message */}
+          {match.status === 'active' && isOpponentDisconnected && (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl flex items-center justify-between text-amber-300 animate-pulse text-xs text-left">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+                <span>Reconnecting your opponent...</span>
+              </div>
+              <span className="font-mono bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20">
+                {reconnectCountdown}s
+              </span>
+            </div>
+          )}
 
-        {/* Right: Actions, Move List */}
-        <div className="lg:col-span-5 flex flex-col space-y-4">
           {/* Action Panel */}
           {match.status === 'active' ? (
-            <div className="glass p-5 rounded-xl border border-white/5 space-y-3">
-              <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wide text-left">Game Actions</h4>
-              
+            <div className="glass p-4 rounded-xl border border-white/5 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={handleDrawAction}
-                  className={`flex flex-col items-center justify-center p-2.5 rounded-xl border transition-all ${
+                  className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${
                     hasOpponentDrawOffer
                       ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 font-bold'
                       : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400 hover:text-white'
                   } text-xs font-semibold cursor-pointer`}
                 >
-                  <span>{hasOpponentDrawOffer ? 'Accept Draw Offer' : 'Offer Draw'}</span>
+                  <span>{hasOpponentDrawOffer ? 'Accept Draw' : 'Offer Draw'}</span>
                 </button>
 
                 <button
                   onClick={handleResign}
-                  className="flex flex-col items-center justify-center p-2.5 rounded-xl border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer"
+                  className="flex flex-col items-center justify-center p-2 rounded-xl border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer"
                 >
                   <span>Resign Game</span>
                 </button>
@@ -772,25 +789,24 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               {hasOpponentDrawOffer && (
                 <div className="flex items-center space-x-2 text-emerald-400 text-[10px] bg-emerald-950/20 border border-emerald-900/30 p-2 rounded-lg text-left">
                   <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0 animate-bounce" />
-                  <span>Opponent offered a draw. Accept draw to settle or make a move to decline.</span>
+                  <span>Opponent offered a draw. Accept draw or make a move to decline.</span>
                 </div>
               )}
             </div>
           ) : (
             /* Game Over screen overlay in side panel */
-            <div className="glass p-6 rounded-xl border border-white/5 text-center space-y-4 bg-slate-950/20 relative overflow-hidden">
+            <div className="glass p-5 rounded-xl border border-white/5 text-center space-y-3 bg-slate-950/20 relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-b from-violet-500/5 to-transparent pointer-events-none" />
-              
               <div>
                 <p className="text-[10px] text-slate-500 uppercase tracking-widest">Match Result</p>
-                <h3 className="text-xl font-bold tracking-wide mt-1 capitalize text-slate-200">
+                <h3 className="text-lg font-bold tracking-wide mt-0.5 capitalize text-slate-200">
                   {match.status === 'draw' || match.status === 'stalemate'
                     ? 'Game Drawn'
                     : match.winnerUid === user?.uid
                     ? '🏆 Payout Victory!'
                     : 'Defeat'}
                 </h3>
-                <p className="text-xs text-slate-400 mt-1 font-light">
+                <p className="text-[10px] text-slate-400 mt-0.5 font-light">
                   {match.status === 'checkmate' && 'By Checkmate'}
                   {match.status === 'resigned' && 'By Resignation'}
                   {match.status === 'timeout' && 'By Timeout'}
@@ -801,11 +817,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
               {/* Coins Change Showcase */}
               <div className="flex justify-center">
-                <div className="bg-slate-900/80 border border-white/5 px-4 py-2.5 rounded-xl flex items-center space-x-3">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-6 h-6 filter invert drop-shadow-[0_0_4px_rgba(245,158,11,0.5)] brightness-125" />
+                <div className="bg-slate-900/80 border border-white/5 px-3 py-2 rounded-xl flex items-center space-x-2.5">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_4px_rgba(245,158,11,0.5)] brightness-125" />
                   <div className="text-left">
                     <p className="text-[8px] text-slate-500">Wallet Impact</p>
-                    <p className={`text-sm font-bold ${
+                    <p className={`text-xs font-bold ${
                       match.winnerUid === user?.uid 
                         ? 'text-emerald-400' 
                         : match.winnerUid 
@@ -823,12 +839,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                           
                           if (isWinner) return `+${formatCoins(oppStakeVal)}`;
                           if (isLoser) return `-${formatCoins(myStakeVal)}`;
-                          return '0 (Stake Refunded)';
+                          return '0 (Refunded)';
                         }
                         
                         if (isWinner) return `+${formatCoins(match.stake)}`;
                         if (isLoser) return `-${formatCoins(match.stake)}`;
-                        return '0 (Stake Refunded)';
+                        return '0 (Refunded)';
                       })()}
                     </p>
                   </div>
@@ -837,7 +853,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
               <button
                 onClick={onExit}
-                className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold py-2.5 rounded-xl shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 transition-all border border-violet-500/20 cursor-pointer"
+                className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-semibold py-2 rounded-xl shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 transition-all border border-violet-500/20 cursor-pointer"
               >
                 Back to Dashboard
               </button>
@@ -845,19 +861,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           )}
 
           {/* Moves List Log */}
-          <div className="glass p-5 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[180px]">
-            <h4 className="text-xs font-semibold text-slate-300 uppercase tracking-wide mb-3 text-left">Moves Log</h4>
-            <div className="overflow-y-auto max-h-[160px] flex-grow pr-2 text-left space-y-1 font-mono text-xs">
+          <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[140px] max-h-[180px]">
+            <h4 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide mb-2 text-left">Moves Log</h4>
+            <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
               {match.moves.length === 0 ? (
                 <p className="text-slate-600 text-xs italic">No moves played yet.</p>
               ) : (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
                   {match.moves.reduce((acc: React.ReactNode[], move, idx) => {
                     if (idx % 2 === 0) {
                       const moveNumber = Math.floor(idx / 2) + 1;
                       acc.push(
                         <div key={idx} className="flex justify-between border-b border-white/5 py-0.5">
-                          <span className="text-slate-500 w-6">{moveNumber}.</span>
+                          <span className="text-slate-500 w-5">{moveNumber}.</span>
                           <span className="text-slate-300 font-medium text-right flex-grow">{move}</span>
                         </div>
                       );
@@ -876,6 +892,155 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           </div>
         </div>
       </div>
+
+      {/* ── Settings Modal Popup ── */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+          <div className="glass-card w-full max-w-sm rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-5 max-h-[calc(100vh-120px)] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
+              <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+                <Settings className="w-4 h-4 text-violet-400" />
+                <span>Game Settings</span>
+              </h3>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Music volume */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-200">Theme Music Volume</span>
+                  <span className="text-[10px] font-mono text-slate-400">{Math.round(settings.musicVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={settings.musicVolume}
+                  onChange={(e) => {
+                    const musicVolume = parseFloat(e.target.value);
+                    const nextMuted = musicVolume === 0 ? true : settings.muted;
+                    updateSoundSettings({ musicVolume, muted: nextMuted });
+                  }}
+                  className="w-full accent-violet-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              {/* SFX checkbox */}
+              <div className="flex items-center justify-between bg-slate-900/60 p-3.5 rounded-xl border border-white/5">
+                <span className="text-xs font-semibold text-slate-200">Enable Sound Effects</span>
+                <input
+                  type="checkbox"
+                  checked={settings.effectsEnabled}
+                  onChange={() => updateSoundSettings({ effectsEnabled: !settings.effectsEnabled })}
+                  className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                />
+              </div>
+
+              {/* Legal moves checkbox */}
+              <div className="flex items-center justify-between bg-slate-900/60 p-3.5 rounded-xl border border-white/5">
+                <span className="text-xs font-semibold text-slate-200">Show Legal Moves Hint</span>
+                <input
+                  type="checkbox"
+                  checked={!!settings.showLegalMoves}
+                  onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
+                  className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Profile Details Modal Popup ── */}
+      {selectedProfile && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
+          <div className="glass-card w-full max-w-sm rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
+              <h3 className="text-sm font-bold text-slate-200">User Profile Details</h3>
+              <button
+                onClick={() => setSelectedProfile(null)}
+                className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex items-center space-x-3">
+              <img
+                src={selectedProfile.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
+                alt={selectedProfile.displayName}
+                className="w-14 h-14 rounded-full object-cover ring-2 ring-violet-500/50"
+              />
+              <div className="space-y-0.5">
+                <h4 className="text-base font-bold text-white flex items-center gap-1">
+                  <span>{selectedProfile.displayName}</span>
+                  {selectedProfile.rating >= 2500 && (
+                    <span className="font-serif font-extrabold bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent border border-amber-400/60 bg-amber-950/40 px-1 rounded text-[7px] uppercase" title="Grandmaster">
+                      GM
+                    </span>
+                  )}
+                </h4>
+                <p className="text-[10px] text-slate-400 font-mono">Member since: {new Date(selectedProfile.createdAt).toLocaleDateString()}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center">
+                <p className="text-[8px] text-slate-500 uppercase tracking-wider">Elo Rating</p>
+                <p className="text-base font-bold text-violet-300 mt-0.5">{selectedProfile.rating}</p>
+              </div>
+              <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center">
+                <p className="text-[8px] text-slate-500 uppercase tracking-wider">Coins Balance</p>
+                <p className="text-base font-bold text-amber-400 mt-0.5">{formatCoins(selectedProfile.bankBalance)}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2">
+              <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">Record</h5>
+              <div className="grid grid-cols-3 gap-1 text-center text-xs">
+                <div className="text-emerald-400 font-bold">
+                  <p className="text-[8px] text-slate-500 uppercase">Wins</p>
+                  <p className="text-xs mt-0.5">{selectedProfile.wins || 0}</p>
+                </div>
+                <div className="text-red-400 font-bold">
+                  <p className="text-[8px] text-slate-500 uppercase">Losses</p>
+                  <p className="text-xs mt-0.5">{selectedProfile.losses || 0}</p>
+                </div>
+                <div className="text-slate-400 font-bold">
+                  <p className="text-[8px] text-slate-500 uppercase">Draws</p>
+                  <p className="text-xs mt-0.5">{selectedProfile.draws || 0}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2">
+              <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">Best Achievement</h5>
+              {(() => {
+                const bestAch = getBestAchievement(selectedProfileGameplay);
+                if (bestAch) {
+                  return (
+                    <div className="flex items-center space-x-2.5 bg-violet-950/20 border border-violet-500/20 p-2 rounded-lg">
+                      <span className="text-xl">{bestAch.badge.split(' ')[0]}</span>
+                      <div className="text-left">
+                        <p className="text-xs font-bold text-violet-300">{bestAch.name}</p>
+                        <p className="text-[9px] text-slate-400 leading-tight">{bestAch.description}</p>
+                      </div>
+                    </div>
+                  );
+                }
+                return <p className="text-[10px] text-slate-500 italic text-center">No achievements unlocked yet.</p>;
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
