@@ -15,12 +15,40 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function sanitizeProfile(data: any, uid: string): { sanitized: UserProfile; hasChanges: boolean } {
+export function sanitizeProfile(
+  data: any,
+  uid: string,
+  googleDisplayName?: string,
+  googlePhotoURL?: string
+): { sanitized: UserProfile; hasChanges: boolean } {
   let hasChanges = false;
   const now = Date.now();
 
   const targetUid = data?.uid || uid;
   if (data?.uid !== targetUid) hasChanges = true;
+
+  let displayName = data?.displayName;
+  if (!displayName || displayName === 'Chess Player') {
+    if (googleDisplayName && googleDisplayName !== 'Chess Player') {
+      displayName = googleDisplayName;
+      hasChanges = true;
+    } else if (!displayName) {
+      displayName = 'Chess Player';
+      hasChanges = true;
+    }
+  }
+
+  let photoURL = data?.photoURL;
+  const defaultPhoto = 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop';
+  if (!photoURL || photoURL === defaultPhoto) {
+    if (googlePhotoURL && googlePhotoURL !== defaultPhoto) {
+      photoURL = googlePhotoURL;
+      hasChanges = true;
+    } else if (!photoURL) {
+      photoURL = defaultPhoto;
+      hasChanges = true;
+    }
+  }
 
   let bankBalance = data?.bankBalance;
   if (typeof bankBalance !== 'number' || isNaN(bankBalance)) {
@@ -74,8 +102,8 @@ export function sanitizeProfile(data: any, uid: string): { sanitized: UserProfil
 
   const sanitized: UserProfile = {
     uid: targetUid,
-    displayName: data?.displayName || 'Chess Player',
-    photoURL: data?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+    displayName,
+    photoURL,
     rating,
     bankBalance,
     createdAt,
@@ -149,29 +177,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const now = Date.now();
 
       const profileData = docSnap.exists() ? docSnap.data() as UserProfile : null;
-      const { sanitized, hasChanges } = sanitizeProfile(profileData, firebaseUser.uid);
+      const { sanitized, hasChanges } = sanitizeProfile(
+        profileData,
+        firebaseUser.uid,
+        firebaseUser.displayName || undefined,
+        firebaseUser.photoURL || undefined
+      );
 
       if (!docSnap.exists() || hasChanges) {
-        const mergedProfile = docSnap.exists()
-          ? sanitized
-          : {
-              uid: firebaseUser.uid,
-              displayName: firebaseUser.displayName || 'Chess Player',
-              photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
-              rating: 0,
-              bankBalance: 1000,
-              createdAt: now,
-              lastActiveAt: now,
-              zeroBalanceAt: null,
-              lastInterestAppliedAt: now,
-              lastUsernameChangedAt: null,
-              totalCoinsEarned: 1000,
-              gameplayCounts: {},
-              wins: 0,
-              losses: 0,
-              draws: 0,
-            };
-
         await runTransaction(db, async (transaction) => {
           if (!docSnap.exists()) {
             const ledgerEntry: Omit<WalletLedgerEntry, 'id'> = {
@@ -186,7 +199,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const newLedgerDocRef = doc(collection(db, 'walletLedger'));
             transaction.set(newLedgerDocRef, ledgerEntry);
           }
-          transaction.set(userDocRef, mergedProfile, { merge: true });
+          transaction.set(userDocRef, sanitized, { merge: true });
         });
       }
 
@@ -229,7 +242,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const unsubscribeProfile = onSnapshot(userDocRef, async (docSnap) => {
           if (docSnap.exists()) {
             const rawData = docSnap.data();
-            const { sanitized, hasChanges } = sanitizeProfile(rawData, firebaseUser.uid);
+            const { sanitized, hasChanges } = sanitizeProfile(
+              rawData,
+              firebaseUser.uid,
+              firebaseUser.displayName || undefined,
+              firebaseUser.photoURL || undefined
+            );
             setProfile(sanitized);
             if (hasChanges) {
               console.log('Self-healing: fixing invalid profile values in Firestore:', rawData);
