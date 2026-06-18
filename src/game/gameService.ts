@@ -193,7 +193,7 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     }
 
     const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
-    const hasWinner = matchData.winnerUid !== null;
+    const hasWinner = !!matchData.winnerUid;
 
     if (!isDraw && !hasWinner) {
       // Game is still active; don't settle yet

@@ -29,6 +29,18 @@ const PIECE_IMAGES: Record<string, string> = {
   q: 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
 };
 
+// Piece point values for material advantage calculation
+const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+
+// Board colour themes
+const BOARD_THEMES: Record<string, { dark: string; light: string; label: string }> = {
+  green:  { dark: '#779556', light: '#ebecd0', label: 'Green' },
+  wood:   { dark: '#b58863', light: '#f0d9b5', label: 'Wood' },
+  blue:   { dark: '#4b7db8', light: '#dee3e6', label: 'Blue' },
+  walnut: { dark: '#7a4a2e', light: '#d8b98a', label: 'Walnut' },
+  ice:    { dark: '#6f8fa9', light: '#dce9f0', label: 'Ice' },
+};
+
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const { user } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
@@ -510,20 +522,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       }
     }
 
-    const capturedW: string[] = [];
-    const capturedB: string[] = [];
+    // White pieces captured by black (lowercase = black piece types)
+    const capturedByBlack: string[] = [];
+    // Black pieces captured by white (uppercase = white piece types)
+    const capturedByWhite: string[] = [];
 
-    ['P', 'R', 'N', 'B', 'Q'].forEach(t => {
+    // capturedByBlack = white pieces no longer on board (sorted by value desc)
+    ['Q', 'R', 'B', 'N', 'P'].forEach(t => {
       const diff = starting[t] - (current[t] || 0);
-      for (let i = 0; i < diff; i++) capturedW.push(t);
+      for (let i = 0; i < diff; i++) capturedByBlack.push(t);
     });
 
-    ['p', 'r', 'n', 'b', 'q'].forEach(t => {
+    // capturedByWhite = black pieces no longer on board
+    ['q', 'r', 'b', 'n', 'p'].forEach(t => {
       const diff = starting[t] - (current[t] || 0);
-      for (let i = 0; i < diff; i++) capturedB.push(t);
+      for (let i = 0; i < diff; i++) capturedByWhite.push(t);
     });
 
-    return { w: capturedW, b: capturedB };
+    // Calculate material advantage
+    const whiteMaterial = capturedByWhite.reduce((s, p) => s + (PIECE_VALUES[p] ?? 0), 0);
+    const blackMaterial = capturedByBlack.reduce((s, p) => s + (PIECE_VALUES[p.toLowerCase()] ?? 0), 0);
+    const advantage = whiteMaterial - blackMaterial; // positive = white is up
+
+    return { capturedByBlack, capturedByWhite, advantage };
   };
 
   // Fetch click-to-profile data
@@ -599,8 +620,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   }
 
   const captured = getCapturedPieces();
-  const myCaptured = isWhite ? captured.b : captured.w;
-  const oppCaptured = isWhite ? captured.w : captured.b;
+  // myCaptured = pieces I captured from opponent
+  const myCaptured = isWhite ? captured.capturedByWhite : captured.capturedByBlack;
+  // oppCaptured = pieces opponent captured from me
+  const oppCaptured = isWhite ? captured.capturedByBlack : captured.capturedByWhite;
+  // Material advantage from my perspective: positive means I'm up
+  const myMaterialAdv = isWhite ? captured.advantage : -captured.advantage;
+
+  const boardTheme = BOARD_THEMES[settings.boardTheme] ?? BOARD_THEMES['green'];
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
@@ -620,8 +647,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 },
                 boardOrientation: isWhite ? 'white' : 'black',
                 allowDragging: match.status === 'active' && isMyTurn,
-                darkSquareStyle: { backgroundColor: '#779556' },
-                lightSquareStyle: { backgroundColor: '#ebecd0' },
+                darkSquareStyle: { backgroundColor: boardTheme.dark },
+                lightSquareStyle: { backgroundColor: boardTheme.light },
                 squareStyles: customSquareStyles,
                 onSquareClick: ({ square }) => onSquareClick(square),
               }}
@@ -700,14 +727,18 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                     <span>Elo {oppProfile?.rating || '---'}</span>
                   </span>
                   
-                  {/* Captured pieces by opponent */}
-                  <div className="flex items-center space-x-0.5 bg-slate-950/40 px-1.5 py-0.5 rounded border border-white/5 min-h-[18px] flex-wrap">
+                  {/* Captured pieces by opponent (= my pieces they took) */}
+                  <div className="flex items-center gap-0.5 bg-slate-950/40 px-1.5 py-0.5 rounded border border-white/5 min-h-[18px] flex-wrap">
                     {oppCaptured.length === 0 ? (
                       <span className="text-[8px] text-slate-600">No captures</span>
                     ) : (
                       oppCaptured.map((p, i) => (
                         <img key={i} src={PIECE_IMAGES[p]} alt={p} className="w-3.5 h-3.5 object-contain" />
                       ))
+                    )}
+                    {/* Show opponent's material advantage if they are up */}
+                    {myMaterialAdv < 0 && (
+                      <span className="text-[8px] font-bold text-red-400 ml-0.5">+{Math.abs(myMaterialAdv)}</span>
                     )}
                   </div>
                 </div>
@@ -750,14 +781,18 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                     <span>Elo {myProfile?.rating || '---'}</span>
                   </span>
                   
-                  {/* Captured pieces by me */}
-                  <div className="flex items-center space-x-0.5 bg-slate-950/40 px-1.5 py-0.5 rounded border border-white/5 min-h-[18px] flex-wrap">
+                  {/* Captured pieces by me (= opponent pieces I took) */}
+                  <div className="flex items-center gap-0.5 bg-slate-950/40 px-1.5 py-0.5 rounded border border-white/5 min-h-[18px] flex-wrap">
                     {myCaptured.length === 0 ? (
                       <span className="text-[8px] text-slate-600">No captures</span>
                     ) : (
                       myCaptured.map((p, i) => (
                         <img key={i} src={PIECE_IMAGES[p]} alt={p} className="w-3.5 h-3.5 object-contain" />
                       ))
+                    )}
+                    {/* Show my material advantage if I'm up */}
+                    {myMaterialAdv > 0 && (
+                      <span className="text-[8px] font-bold text-emerald-400 ml-0.5">+{myMaterialAdv}</span>
                     )}
                   </div>
                 </div>
@@ -819,70 +854,92 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               )}
             </div>
           ) : (
-            /* Game Over screen overlay in side panel */
-            <div className="glass p-5 rounded-xl border border-white/5 text-center space-y-3 bg-slate-950/20 relative overflow-hidden">
-              <div className="absolute inset-0 bg-gradient-to-b from-violet-500/5 to-transparent pointer-events-none" />
-              <div>
-                <p className="text-[10px] text-slate-500 uppercase tracking-widest">Match Result</p>
-                <h3 className="text-lg font-bold tracking-wide mt-0.5 capitalize text-slate-200">
-                  {match.status === 'draw' || match.status === 'stalemate'
-                    ? 'Game Drawn'
-                    : match.winnerUid === user?.uid
-                    ? '🏆 Payout Victory!'
-                    : 'Defeat'}
-                </h3>
-                <p className="text-[10px] text-slate-400 mt-0.5 font-light">
-                  {match.status === 'checkmate' && 'By Checkmate'}
-                  {match.status === 'resigned' && 'By Resignation'}
-                  {match.status === 'timeout' && 'By Timeout'}
-                  {match.status === 'stalemate' && 'By Stalemate'}
-                  {match.status === 'draw' && 'By Mutual Agreement'}
-                </p>
-              </div>
+            /* ── Premium Game Over Result Panel ── */
+            (() => {
+              const isWinner = match.winnerUid === user?.uid;
+              const isDraw = match.status === 'draw' || match.status === 'stalemate';
+              const isLoser = !isDraw && !isWinner;
 
-              {/* Coins Change Showcase */}
-              <div className="flex justify-center">
-                <div className="bg-slate-900/80 border border-white/5 px-3 py-2 rounded-xl flex items-center space-x-2.5">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_4px_rgba(245,158,11,0.5)] brightness-125" />
-                  <div className="text-left">
-                    <p className="text-[8px] text-slate-500">Wallet Impact</p>
-                    <p className={`text-xs font-bold ${
-                      match.winnerUid === user?.uid 
-                        ? 'text-emerald-400' 
-                        : match.winnerUid 
-                        ? 'text-red-400' 
-                        : 'text-amber-400'
-                    }`}>
-                      {(() => {
-                        const isWinner = match.winnerUid === user?.uid;
-                        const isLoser = match.winnerUid && match.winnerUid !== user?.uid;
-                        
-                        if (match.mode === 'all_in' && match.allInStakes && user) {
-                          const oppUid = match.players.find(p => p !== user.uid) || '';
-                          const myStakeVal = match.allInStakes[user.uid] || 0;
-                          const oppStakeVal = match.allInStakes[oppUid] || 0;
-                          
-                          if (isWinner) return `+${formatCoins(oppStakeVal)}`;
-                          if (isLoser) return `-${formatCoins(myStakeVal)}`;
-                          return '0 (Refunded)';
-                        }
-                        
-                        if (isWinner) return `+${formatCoins(match.stake)}`;
-                        if (isLoser) return `-${formatCoins(match.stake)}`;
-                        return '0 (Refunded)';
-                      })()}
-                    </p>
+              const resultEmoji = isDraw ? '🤝' : isWinner ? '🏆' : '💀';
+              const resultTitle = isDraw ? 'Game Drawn' : isWinner ? 'Victory!' : 'Defeat';
+              const borderColor = isDraw ? 'border-amber-500/40' : isWinner ? 'border-emerald-500/40' : 'border-red-500/30';
+              const glowBg = isDraw
+                ? 'from-amber-500/10 via-transparent'
+                : isWinner
+                ? 'from-emerald-500/10 via-transparent'
+                : 'from-red-500/8 via-transparent';
+              const titleColor = isDraw ? 'text-amber-300' : isWinner ? 'text-emerald-300' : 'text-red-400';
+
+              const walletImpact = (() => {
+                if (match.mode === 'all_in' && match.allInStakes && user) {
+                  const oppUid = match.players.find(p => p !== user.uid) || '';
+                  const myStakeVal = match.allInStakes[user.uid] || 0;
+                  const oppStakeVal = match.allInStakes[oppUid] || 0;
+                  if (isWinner) return { label: `+${formatCoins(oppStakeVal)}`, color: 'text-emerald-400' };
+                  if (isLoser) return { label: `-${formatCoins(myStakeVal)}`, color: 'text-red-400' };
+                  return { label: '±0 Refunded', color: 'text-amber-400' };
+                }
+                if (isWinner) return { label: `+${formatCoins(match.stake)}`, color: 'text-emerald-400' };
+                if (isLoser) return { label: `-${formatCoins(match.stake)}`, color: 'text-red-400' };
+                return { label: '±0 Refunded', color: 'text-amber-400' };
+              })();
+
+              const statusLabel = {
+                checkmate: 'by Checkmate',
+                resigned: 'by Resignation',
+                timeout: 'by Timeout',
+                stalemate: 'by Stalemate',
+                draw: 'by Mutual Agreement',
+              }[match.status] || '';
+
+              return (
+                <div className={`glass p-5 rounded-2xl border ${borderColor} text-center relative overflow-hidden`}>
+                  {/* Animated gradient background */}
+                  <div className={`absolute inset-0 bg-gradient-to-b ${glowBg} to-transparent pointer-events-none`} />
+
+                  {/* Result emoji + title */}
+                  <div className="relative space-y-1">
+                    <div className="text-4xl mb-1">{resultEmoji}</div>
+                    <h3 className={`text-xl font-black tracking-tight ${titleColor}`}>{resultTitle}</h3>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-medium">{statusLabel}</p>
                   </div>
-                </div>
-              </div>
 
-              <button
-                onClick={onExit}
-                className="w-full bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-semibold py-2 rounded-xl shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 transition-all border border-violet-500/20 cursor-pointer"
-              >
-                Back to Dashboard
-              </button>
-            </div>
+                  {/* Divider */}
+                  <div className="relative my-3 border-t border-white/5" />
+
+                  {/* Coin impact */}
+                  <div className="relative flex justify-center">
+                    <div className={`flex items-center gap-2.5 px-4 py-2 rounded-xl border ${
+                      isWinner ? 'bg-emerald-950/30 border-emerald-500/20' : isDraw ? 'bg-amber-950/30 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
+                    }`}>
+                      <img
+                        src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg"
+                        alt="Coins"
+                        className="w-5 h-5 filter invert brightness-125"
+                      />
+                      <div className="text-left">
+                        <p className="text-[8px] text-slate-500 uppercase tracking-widest">Wallet Impact</p>
+                        <p className={`text-base font-black ${walletImpact.color}`}>{walletImpact.label}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Back button */}
+                  <button
+                    onClick={onExit}
+                    className={`relative mt-4 w-full text-white text-xs font-bold py-2.5 rounded-xl shadow-lg transition-all border cursor-pointer ${
+                      isWinner
+                        ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 shadow-emerald-600/20'
+                        : isDraw
+                        ? 'bg-amber-600 hover:bg-amber-500 border-amber-500/30 shadow-amber-600/20'
+                        : 'bg-slate-700 hover:bg-slate-600 border-white/10'
+                    }`}
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+              );
+            })()
           )}
 
           {/* Moves List Log */}
@@ -977,6 +1034,41 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
                   className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                 />
+              </div>
+
+              {/* Board Theme selector */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2.5">
+                <span className="text-xs font-semibold text-slate-200 block">Board Theme</span>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {Object.entries(BOARD_THEMES).map(([key, theme]) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        updateSoundSettings({ boardTheme: key });
+                        setSettings(s => ({ ...s, boardTheme: key }));
+                      }}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer ${
+                        settings.boardTheme === key
+                          ? 'border-violet-500/60 bg-violet-500/10 text-white'
+                          : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        {/* Mini board preview swatch */}
+                        <div className="grid grid-cols-2 gap-[1px] w-5 h-5 rounded overflow-hidden shrink-0">
+                          <div style={{ backgroundColor: theme.light }} className="w-2.5 h-2.5" />
+                          <div style={{ backgroundColor: theme.dark }} className="w-2.5 h-2.5" />
+                          <div style={{ backgroundColor: theme.dark }} className="w-2.5 h-2.5" />
+                          <div style={{ backgroundColor: theme.light }} className="w-2.5 h-2.5" />
+                        </div>
+                        <span className="text-xs font-medium">{theme.label}</span>
+                      </div>
+                      {settings.boardTheme === key && (
+                        <span className="text-violet-400 text-[10px] font-bold">✓ Active</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
