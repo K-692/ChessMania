@@ -2,6 +2,7 @@ const DEFAULT_SETTINGS = {
   musicVolume: 0.5,
   effectsEnabled: true,
   muted: false,
+  showLegalMoves: true,
 };
 
 let settings = { ...DEFAULT_SETTINGS };

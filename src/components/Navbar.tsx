@@ -4,6 +4,8 @@ import { LogIn, LogOut, Volume2, VolumeX } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface NavbarProps {
   onNavigate: (view: 'dashboard' | 'ledger' | 'leaderboard' | 'profile' | 'social' | 'settings') => void;
@@ -13,6 +15,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
   const { user, profile, login, logout, loading } = useAuth();
   const [muted, setMuted] = useState(() => getSoundSettings().muted);
+  const [pendingCount, setPendingCount] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -23,6 +26,24 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
     }, 500);
     return () => clearInterval(interval);
   }, [muted]);
+
+  useEffect(() => {
+    if (!user) {
+      setPendingCount(0);
+      return;
+    }
+    const q = query(
+      collection(db, 'friendships'),
+      where('receiverUid', '==', user.uid),
+      where('status', '==', 'pending')
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setPendingCount(snap.size);
+    }, (err) => {
+      console.warn("Error listening to pending requests in Navbar:", err);
+    });
+    return () => unsub();
+  }, [user]);
 
   const toggleMute = () => {
     const nextMuted = !muted;
@@ -89,11 +110,16 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView }) => {
             </button>
             <button
               onClick={() => onNavigate('social')}
-              className={`text-sm font-medium transition-colors cursor-pointer ${
+              className={`relative text-sm font-medium transition-colors cursor-pointer flex items-center ${
                 currentView === 'social' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Friends
+              <span>Friends</span>
+              {pendingCount > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white ring-2 ring-slate-950 animate-pulse">
+                  {pendingCount}
+                </span>
+              )}
             </button>
 
             {/* Wallet Info */}

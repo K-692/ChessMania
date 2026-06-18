@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Music, ArrowLeft } from 'lucide-react';
+import { Volume2, VolumeX, Music, ArrowLeft, Eye } from 'lucide-react';
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
 
 interface SettingsViewProps {
@@ -35,6 +35,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     const muted = !settings.muted;
     setSettings(prev => ({ ...prev, muted }));
     updateSoundSettings({ muted });
+  };
+
+  const handleToggleLegalMoves = () => {
+    const showLegalMoves = !settings.showLegalMoves;
+    setSettings(prev => ({ ...prev, showLegalMoves }));
+    updateSoundSettings({ showLegalMoves });
   };
 
   return (
@@ -120,6 +126,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                 type="checkbox"
                 checked={settings.effectsEnabled}
                 onChange={handleToggleEffects}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+            </label>
+          </div>
+        </div>
+
+        {/* Show Legal Moves Toggle Setting */}
+        <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4">
+          <div className="flex items-start justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
+                <Eye className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-slate-200">Legal Moves Hint</h4>
+                <p className="text-xs text-slate-500">Show available legal moves as dots on the board when selecting a piece</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-white/5">
+            <span className="text-xs text-slate-400">Show Legal Moves</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!settings.showLegalMoves}
+                onChange={handleToggleLegalMoves}
                 className="sr-only peer"
               />
               <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>

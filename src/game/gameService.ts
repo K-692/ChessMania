@@ -484,7 +484,13 @@ export async function acceptFriendlyChallenge(
     }
 
     // Setup match room
-    const isChallengerWhite = Math.random() < 0.5;
+    const colorChoice = challengeData?.colorChoice || 'random';
+    let isChallengerWhite = Math.random() < 0.5;
+    if (colorChoice === 'white') {
+      isChallengerWhite = true;
+    } else if (colorChoice === 'black') {
+      isChallengerWhite = false;
+    }
     const whiteUid = isChallengerWhite ? challengerUid : challengedUid;
     const blackUid = isChallengerWhite ? challengedUid : challengerUid;
 

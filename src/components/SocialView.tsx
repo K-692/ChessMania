@@ -48,6 +48,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
   // Active Challenge Modal State
   const [activeChallengeFriend, setActiveChallengeFriend] = useState<UserProfile | null>(null);
   const [challengeType, setChallengeType] = useState<'friendly' | 'arena'>('friendly');
+  const [selectedColor, setSelectedColor] = useState<'white' | 'black' | 'random'>('random');
   const [selectedModeIdx, setSelectedModeIdx] = useState(0);
   const [challengeError, setChallengeError] = useState('');
   const [isSendingChallenge, setIsSendingChallenge] = useState(false);
@@ -317,7 +318,8 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         stake,
         status: 'pending',
         matchId: null,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        ...(challengeType === 'friendly' ? { colorChoice: selectedColor } : {})
       } as FriendlyChallenge);
 
       setActiveChallengeFriend(null);
@@ -740,6 +742,49 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                   </button>
                 </div>
               </div>
+
+              {challengeType === 'friendly' && (
+                <div className="space-y-2 animate-fade-in">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block text-left">
+                    Choose Your Color
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 p-1 bg-slate-950/60 rounded-xl border border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedColor('white')}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedColor === 'white'
+                          ? 'bg-violet-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      White
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedColor('random')}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedColor === 'random'
+                          ? 'bg-violet-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Random
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedColor('black')}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedColor === 'black'
+                          ? 'bg-violet-600 text-white shadow-md'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Black
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block text-left">

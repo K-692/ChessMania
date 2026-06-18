@@ -67,6 +67,9 @@ export interface Match {
   drawOffers?: string[]; // uids of players offering draw
   timeControl?: string; // Time control string (e.g. '10 | 5', '15 min')
   allInStakes?: Record<string, number>; // Dynamic stakes for All In mode
+  presence?: Record<string, boolean>; // Presence map for each player (UID -> online/offline)
+  disconnectedAt?: number | null; // Timestamp when connection was lost
+  disconnectedUid?: string | null; // UID of player who disconnected
 }
 
 export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'game_escrow' | 'game_payout';
@@ -119,4 +122,6 @@ export interface FriendlyChallenge {
   matchId: string | null;
   createdAt: number;
   acceptedAt?: number | null;
+  colorChoice?: 'white' | 'black' | 'random';
 }
+
