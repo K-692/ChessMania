@@ -227,7 +227,7 @@ const AppContent: React.FC = () => {
       try {
         const friendSnap = await getDoc(doc(db, 'users', chData.challengedUid));
         if (friendSnap.exists()) {
-          setAcceptedChallengerProfile(friendSnap.data());
+          setAcceptedChallengerProfile({ uid: friendSnap.id, ...friendSnap.data() } as UserProfile);
         }
       } catch (err) {
         console.warn("Failed to fetch challenged friend profile:", err);
@@ -280,7 +280,7 @@ const AppContent: React.FC = () => {
         try {
           const uSnap = await getDoc(doc(db, 'users', oppUid));
           if (uSnap.exists()) {
-            profileCache[oppUid] = uSnap.data() as UserProfile;
+            profileCache[oppUid] = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
           }
         } catch (err) {
           console.warn("Failed to fetch opponent profile:", err);

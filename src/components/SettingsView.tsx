@@ -60,7 +60,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-10 space-y-8 text-left animate-fade-in">
+    <div className="max-w-3xl mx-auto px-6 py-10 space-y-8 text-left animate-fade-in">
       <div className="flex items-center space-x-4">
         <button
           onClick={onBack}
@@ -78,120 +78,107 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Theme Music Volume Setting */}
-        <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-violet-500/10 rounded-lg border border-violet-500/20 text-violet-400">
-                <Music className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Theme Music</h4>
-                <p className="text-xs text-slate-500">Looping cinematic background soundtrack</p>
-              </div>
+      <div className="glass rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden shadow-2xl">
+        {/* Row 1: Theme Music Volume Setting */}
+        <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+          <div className="flex items-center space-x-4">
+            <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0">
+              <Music className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200">Theme Music</h4>
+              <p className="text-xs text-slate-500">Looping cinematic background soundtrack</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-4 w-full md:w-auto md:justify-end">
+            <div className="flex items-center space-x-3 w-full md:w-48">
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                value={settings.musicVolume}
+                onChange={handleVolumeChange}
+                className="w-full accent-violet-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
+              />
+              <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">
+                {Math.round(settings.musicVolume * 100)}%
+              </span>
             </div>
             <button
               onClick={handleToggleMute}
-              className={`p-2 rounded-lg border transition-all cursor-pointer ${
+              className={`p-2.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
                 settings.muted
                   ? 'border-red-500/30 bg-red-500/10 text-red-400'
-                  : 'border-white/5 bg-slate-900/60 text-slate-400 hover:text-white'
+                  : 'border-white/5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5'
               }`}
               title={settings.muted ? "Unmute All" : "Mute All"}
             >
-              {settings.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {settings.muted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
             </button>
           </div>
+        </div>
 
-          <div className="space-y-3 pt-2">
-            <div className="flex justify-between text-xs text-slate-400 font-mono">
-              <span>Volume</span>
-              <span>{Math.round(settings.musicVolume * 100)}%</span>
+        {/* Row 2: Sound Effects Checkbox Setting */}
+        <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+          <div className="flex items-center space-x-4">
+            <div className="p-2.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400 shrink-0">
+              <Volume2 className="w-5 h-5" />
             </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200">Sound Effects</h4>
+              <p className="text-xs text-slate-500">Board moves, captures, check warnings, and click feedback</p>
+            </div>
+          </div>
+
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
             <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={settings.musicVolume}
-              onChange={handleVolumeChange}
-              className="w-full accent-violet-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
+              type="checkbox"
+              checked={settings.effectsEnabled}
+              onChange={handleToggleEffects}
+              className="sr-only peer"
             />
-          </div>
+            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+          </label>
         </div>
 
-        {/* Sound Effects Checkbox Setting */}
-        <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20 text-indigo-400">
-                <Volume2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Sound Effects</h4>
-                <p className="text-xs text-slate-500">Board moves, captures, check warnings, and click feedback</p>
-              </div>
+        {/* Row 3: Show Legal Moves Toggle Setting */}
+        <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+          <div className="flex items-center space-x-4">
+            <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400 shrink-0">
+              <Eye className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200">Legal Moves Hint</h4>
+              <p className="text-xs text-slate-500">Show available legal moves as dots on the board when selecting a piece</p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-white/5">
-            <span className="text-xs text-slate-400">Enable Interaction Sounds</span>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings.effectsEnabled}
-                onChange={handleToggleEffects}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
-            </label>
-          </div>
+          <label className="relative inline-flex items-center cursor-pointer shrink-0">
+            <input
+              type="checkbox"
+              checked={!!settings.showLegalMoves}
+              onChange={handleToggleLegalMoves}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+          </label>
         </div>
 
-        {/* Show Legal Moves Toggle Setting */}
-        <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-emerald-500/10 rounded-lg border border-emerald-500/20 text-emerald-400">
-                <Eye className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Legal Moves Hint</h4>
-                <p className="text-xs text-slate-500">Show available legal moves as dots on the board when selecting a piece</p>
-              </div>
+        {/* Row 4: Board Theme Selection */}
+        <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors">
+          <div className="flex items-center space-x-4">
+            <div className="p-2.5 bg-pink-500/10 rounded-xl border border-pink-500/20 text-pink-400 shrink-0">
+              <Palette className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200">Board Theme</h4>
+              <p className="text-xs text-slate-500">Customize the colors and styling of the chessboard</p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t border-white/5">
-            <span className="text-xs text-slate-400">Show Legal Moves</span>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!settings.showLegalMoves}
-                onChange={handleToggleLegalMoves}
-                className="sr-only peer"
-              />
-              <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
-            </label>
-          </div>
-        </div>
-
-        {/* Board Theme Card */}
-        <div className="glass p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="p-2 bg-violet-500/10 rounded-lg border border-violet-500/20 text-violet-400">
-                <Palette className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Board Theme</h4>
-                <p className="text-xs text-slate-500">Customize the colors and styling of the chessboard</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin pt-2 border-t border-white/5 text-left">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
             {Object.entries(BOARD_THEMES).map(([key, theme]) => {
               const isActive = settings.boardTheme === key;
               return (
@@ -201,46 +188,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     updateSoundSettings({ boardTheme: key });
                     setSettings(s => ({ ...s, boardTheme: key }));
                   }}
-                  className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
+                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left ${
                     isActive
-                      ? 'border-violet-500/40 bg-violet-500/10 text-white font-bold'
+                      ? 'border-violet-500 bg-violet-500/10 text-white font-bold'
                       : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
                   }`}
                 >
                   <span className="text-sm font-semibold text-slate-200 flex items-center gap-2">
                     <span>{theme.label}</span>
-                    {isActive && <Check className="w-4 h-4 text-white" />}
+                    {isActive && <Check className="w-4 h-4 text-violet-400" />}
                   </span>
 
                   {/* 2x2 Swatch Grid Preview */}
-                  <div className="grid grid-cols-2 w-14 h-14 rounded-lg overflow-hidden border border-white/10 shrink-0 select-none shadow-md">
+                  <div className="grid grid-cols-2 w-12 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 select-none shadow-md">
                     {theme.isAngle ? (
                       <>
-                        <div style={{ backgroundColor: theme.light }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['N']} alt="N" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['p']} alt="p" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['n']} alt="n" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['P']} alt="P" className="w-full h-full object-contain" />
                         </div>
                       </>
                     ) : (
                       <>
-                        <div style={{ backgroundColor: theme.dark }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['n']} alt="n" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['N']} alt="N" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['p']} alt="p" className="w-full h-full object-contain" />
                         </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-7 h-7 flex items-center justify-center p-0.5">
+                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
                           <img src={PIECE_IMAGES['P']} alt="P" className="w-full h-full object-contain" />
                         </div>
                       </>
@@ -251,7 +238,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             })}
           </div>
         </div>
-
       </div>
     </div>
   );

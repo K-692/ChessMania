@@ -127,11 +127,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       try {
         if (!whiteProfile) {
           const snap = await getDoc(doc(db, 'users', match.whiteUid));
-          if (snap.exists()) setWhiteProfile(snap.data() as UserProfile);
+          if (snap.exists()) setWhiteProfile({ uid: snap.id, ...snap.data() } as UserProfile);
         }
         if (!blackProfile) {
           const snap = await getDoc(doc(db, 'users', match.blackUid));
-          if (snap.exists()) setBlackProfile(snap.data() as UserProfile);
+          if (snap.exists()) setBlackProfile({ uid: snap.id, ...snap.data() } as UserProfile);
         }
       } catch (err) {
         console.warn("Failed to load player profiles:", err);
@@ -568,7 +568,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     if (!profileUid) return;
     const uSnap = await getDoc(doc(db, 'users', profileUid));
     if (uSnap.exists()) {
-      const data = uSnap.data() as UserProfile;
+      const data = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
       setSelectedProfile(data);
       setSelectedProfileGameplay(data.gameplayCounts || {});
     }

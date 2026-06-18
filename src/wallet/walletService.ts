@@ -20,22 +20,30 @@ export function calculateInterestAndTopUp(
   const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
   const lastInterestAppliedAt = typeof profile.lastInterestAppliedAt === 'number' && !isNaN(profile.lastInterestAppliedAt) 
     ? profile.lastInterestAppliedAt 
-    : (profile.createdAt || nowMs);
+    : (profile.createdAt && !isNaN(profile.createdAt) ? profile.createdAt : nowMs);
+
+  let zeroBalanceAt = profile.zeroBalanceAt;
+  if (zeroBalanceAt !== null && zeroBalanceAt !== undefined) {
+    if (typeof zeroBalanceAt !== 'number' || isNaN(zeroBalanceAt)) {
+      zeroBalanceAt = null;
+    }
+  }
 
   // Apply default fallbacks directly to the updatedProfile copy
   updatedProfile.bankBalance = baseBalance;
   updatedProfile.lastInterestAppliedAt = lastInterestAppliedAt;
+  updatedProfile.zeroBalanceAt = zeroBalanceAt;
 
   // 1. Daily Interest: 1% per day (compounded daily or simple interest per day elapsed)
   // We use fractional days for continuous lazy interest updates down to the millisecond
   const elapsedMs = nowMs - lastInterestAppliedAt;
   const dayMs = 24 * 60 * 60 * 1000;
-  const elapsedDays = elapsedMs / dayMs;
+  const elapsedDays = isNaN(elapsedMs) || elapsedMs <= 0 ? 0 : elapsedMs / dayMs;
 
   if (elapsedMs > 0 && baseBalance > 0) {
     const rawInterest = baseBalance * 0.01 * elapsedDays;
     // Keep 4 decimal places of precision for granular coins
-    const interestEarned = Math.round(rawInterest * 10000) / 10000;
+    const interestEarned = isNaN(rawInterest) ? 0 : Math.round(rawInterest * 10000) / 10000;
 
     if (interestEarned > 0.0001) {
       const balanceBefore = baseBalance;
@@ -64,7 +72,7 @@ export function calculateInterestAndTopUp(
     } else {
       const zeroElapsed = nowMs - updatedProfile.zeroBalanceAt;
       const hourMs = 60 * 60 * 1000;
-      if (zeroElapsed >= hourMs) {
+      if (!isNaN(zeroElapsed) && zeroElapsed >= hourMs) {
         const balanceBefore = updatedProfile.bankBalance;
         updatedProfile.bankBalance = 100;
         updatedProfile.zeroBalanceAt = null;

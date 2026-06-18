@@ -90,7 +90,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           try {
             const docSnap = await getDoc(doc(db, 'users', fId));
             if (docSnap.exists()) {
-              uProfiles.push(docSnap.data() as UserProfile);
+              uProfiles.push({ uid: docSnap.id, ...docSnap.data() } as UserProfile);
             }
           } catch (err) {
             console.warn("Failed to fetch friend profile:", err);
@@ -121,7 +121,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           try {
             const uDoc = await getDoc(doc(db, 'users', data.requesterUid));
             if (uDoc.exists()) {
-              reqProfiles[data.requesterUid] = uDoc.data() as UserProfile;
+              reqProfiles[data.requesterUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
             }
           } catch (err) {
             console.warn("Failed to fetch requester profile:", err);
@@ -151,7 +151,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           try {
             const uDoc = await getDoc(doc(db, 'users', data.receiverUid));
             if (uDoc.exists()) {
-              reqProfiles[data.receiverUid] = uDoc.data() as UserProfile;
+              reqProfiles[data.receiverUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
             }
           } catch (err) {
             console.warn("Failed to fetch receiver profile:", err);
@@ -181,7 +181,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           try {
             const uDoc = await getDoc(doc(db, 'users', data.challengerUid));
             if (uDoc.exists()) {
-              reqProfiles[data.challengerUid] = uDoc.data() as UserProfile;
+              reqProfiles[data.challengerUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
             }
           } catch (err) {
             console.warn("Failed to fetch challenger profile:", err);
@@ -211,7 +211,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           try {
             const uDoc = await getDoc(doc(db, 'users', data.challengedUid));
             if (uDoc.exists()) {
-              reqProfiles[data.challengedUid] = uDoc.data() as UserProfile;
+              reqProfiles[data.challengedUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
             }
           } catch (err) {
             console.warn("Failed to fetch challenged profile:", err);
