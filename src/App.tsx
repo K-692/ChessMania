@@ -103,7 +103,7 @@ const AppContent: React.FC = () => {
 
   // 1a. Periodically update lastActiveAt for online logged-in users to keep them active in DB
   useEffect(() => {
-    if (!user) return;
+    if (!user || !profile) return;
     const userDocRef = doc(db, 'users', user.uid);
     const updateActiveStatus = async () => {
       try {
@@ -116,7 +116,7 @@ const AppContent: React.FC = () => {
     updateActiveStatus();
     const interval = setInterval(updateActiveStatus, 2 * 60 * 1000); // every 2 minutes
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, profile]);
 
   // 1b. Real-time sliding active players query listener (active in last 5 minutes)
   useEffect(() => {

@@ -58,7 +58,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const docSnap = await getDoc(userDocRef);
       const now = Date.now();
 
-      if (!docSnap.exists()) {
+      const profileData = docSnap.exists() ? docSnap.data() as UserProfile : null;
+      const isMissingFields = !profileData || 
+        profileData.bankBalance === undefined || 
+        isNaN(profileData.bankBalance) ||
+        profileData.createdAt === undefined ||
+        isNaN(profileData.createdAt);
+
+      if (isMissingFields) {
         // Run atomic transaction to create profile and initial ledger record
         await runTransaction(db, async (transaction) => {
           const newProfile: UserProfile = {
