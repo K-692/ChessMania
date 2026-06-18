@@ -29,3 +29,7 @@ venv/
 
 # Local environment variables containing credentials
 .env
+
+# Design planner
+planner.docx
+
