@@ -1,73 +1,71 @@
-# React + TypeScript + Vite
+# Check & Mate: High-Stakes Chess Lounge ⚔️
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Welcome to **Check & Mate**, a premium, real-time online chess lounge where your brain meets the bank! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your wallet grow continuously, get backup recovery top-ups, and dominate the global rankings!
 
-Currently, two official plugins are available:
+👉 **[Play Live Now on Firebase Hosting 🚀](https://check-mate-6e0a7.web.app/)**
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+---
 
-## React Compiler
+## ⚡ Key Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+*   **Google Identity Authentication**: Secure, one-click login and session management powered by Firebase Auth.
+*   **Real-time Chess Engine**: High-fidelity board rendering and strict legal-move enforcement powered by `chess.js` and `react-chessboard`.
+*   **Dynamic Elo Matchmaking**: Queue and find matches automatically based on rating bands (±100 Elo) and stake levels. The search band automatically expands every 10 seconds to keep queues fast!
+*   **Staking & Wallet Integrity**: All games require staking entry coins. The winner takes the entire pool! Every transaction is written through atomic Firestore transactions with immutable ledger auditing.
+*   **Lazy Bank Interest**: Earn **1% daily compound interest** on your coin balance. The app applies interest continuously via lazy-accrual when you perform actions.
+*   **Zero-Balance Cooldown Recovery**: Went completely broke? The system tracks your zero-balance timestamp and awards a 100-coin top-up after 1 hour.
+*   **Friendships & Friendly Challenges**: Add recent opponents, track head-to-head match stats, and send/accept friendly match challenges in real-time.
+*   **Premium Glassmorphic Design**: A stunning visual interface featuring dark mode, neon glowing accents, smooth slide-out views, and sound effects.
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🛠️ Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+*   **Frontend**: React 19, TypeScript, Vite, Tailwind CSS v4, Lucide React (Icons)
+*   **Backend & DB**: Cloud Firestore (Real-time listeners & atomic transactions), Firebase Auth (Google Identity provider)
+*   **CI/CD**: GitHub Actions (Automatic build and deploy to Firebase Hosting on main branch merges or pull requests)
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## 🚀 Local Development Setup
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+To run this project locally, follow these steps:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Prerequisites
+- Node.js (v18 or higher)
+- npm or yarn
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Steps
+
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/K-692/Check-Mate.git
+    cd Check-Mate
+    ```
+
+2.  **Install dependencies**:
+    ```bash
+    npm install
+    ```
+
+3.  **Setup environment variables**:
+    Create a `.env` file in the root directory and copy the contents from `.env.example`, substituting your own Firebase configuration credentials:
+    ```bash
+    cp .env.example .env
+    ```
+
+4.  **Start the development server**:
+    ```bash
+    npm run dev
+    ```
+    Open your browser and navigate to the address shown in the terminal (usually `http://localhost:5173`).
+
+---
+
+## ☁️ Deployment
+
+This project is configured to run fully on **Firebase Serverless Architecture (Free Tier)**. 
+
+Continuous integration and deployment are fully configured in the `.github/workflows` folder:
+- **PR Previews**: Pull requests automatically build the React app and deploy a temporary preview site.
+- **Production merges**: Commits to the `main` branch trigger a production build and immediately upload updates to **[check-mate-6e0a7.web.app](https://check-mate-6e0a7.web.app/)**.
