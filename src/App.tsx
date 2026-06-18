@@ -83,7 +83,7 @@ const AppContent: React.FC = () => {
         }
       });
       if (isDuplicate) {
-        setNameError('Username is already taken by another player');
+        setNameError('The username is already taken, set something else.');
         setIsSavingName(false);
         return;
       }
@@ -180,8 +180,10 @@ const AppContent: React.FC = () => {
   useEffect(() => {
     if (!profile || view !== 'dashboard') return;
 
-    const baseBalance = profile.bankBalance;
-    const lastApplied = profile.lastInterestAppliedAt;
+    const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
+    const lastApplied = typeof profile.lastInterestAppliedAt === 'number' && !isNaN(profile.lastInterestAppliedAt)
+      ? profile.lastInterestAppliedAt
+      : (profile.createdAt || Date.now());
 
     const updateTicking = () => {
       const now = Date.now();
@@ -191,7 +193,8 @@ const AppContent: React.FC = () => {
       // Calculate fractional daily interest: balance * 0.01 * (elapsedMs / dayMs)
       const elapsedDays = elapsedMs / dayMs;
       const accrued = baseBalance * 0.01 * elapsedDays;
-      setTickingBalance(baseBalance + accrued);
+      const safeAccrued = isNaN(accrued) || accrued < 0 ? 0 : accrued;
+      setTickingBalance(baseBalance + safeAccrued);
     };
 
     updateTicking();

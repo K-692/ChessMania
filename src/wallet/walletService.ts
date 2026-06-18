@@ -16,21 +16,31 @@ export function calculateInterestAndTopUp(
   const updatedProfile = { ...profile };
   const ledgerEntries: Omit<WalletLedgerEntry, 'id'>[] = [];
 
+  // Ensure balance and timestamps are valid numbers
+  const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
+  const lastInterestAppliedAt = typeof profile.lastInterestAppliedAt === 'number' && !isNaN(profile.lastInterestAppliedAt) 
+    ? profile.lastInterestAppliedAt 
+    : (profile.createdAt || nowMs);
+
+  // Apply default fallbacks directly to the updatedProfile copy
+  updatedProfile.bankBalance = baseBalance;
+  updatedProfile.lastInterestAppliedAt = lastInterestAppliedAt;
+
   // 1. Daily Interest: 1% per day (compounded daily or simple interest per day elapsed)
   // We use fractional days for continuous lazy interest updates down to the millisecond
-  const elapsedMs = nowMs - profile.lastInterestAppliedAt;
+  const elapsedMs = nowMs - lastInterestAppliedAt;
   const dayMs = 24 * 60 * 60 * 1000;
   const elapsedDays = elapsedMs / dayMs;
 
-  if (elapsedMs > 0 && profile.bankBalance > 0) {
-    const rawInterest = profile.bankBalance * 0.01 * elapsedDays;
+  if (elapsedMs > 0 && baseBalance > 0) {
+    const rawInterest = baseBalance * 0.01 * elapsedDays;
     // Keep 4 decimal places of precision for granular coins
     const interestEarned = Math.round(rawInterest * 10000) / 10000;
 
     if (interestEarned > 0.0001) {
-      const balanceBefore = updatedProfile.bankBalance;
-      updatedProfile.bankBalance = Math.round((updatedProfile.bankBalance + interestEarned) * 10000) / 10000;
-      updatedProfile.totalCoinsEarned = Math.round(((updatedProfile.totalCoinsEarned || balanceBefore) + interestEarned) * 10000) / 10000;
+      const balanceBefore = baseBalance;
+      updatedProfile.bankBalance = Math.round((baseBalance + interestEarned) * 10000) / 10000;
+      updatedProfile.totalCoinsEarned = Math.round(((profile.totalCoinsEarned || baseBalance) + interestEarned) * 10000) / 10000;
       updatedProfile.lastInterestAppliedAt = nowMs; // Reset timer to current check
 
       ledgerEntries.push({
@@ -49,7 +59,7 @@ export function calculateInterestAndTopUp(
 
   // 2. Zero-Balance Recovery: 100 coins after 1 hour of zero balance
   if (updatedProfile.bankBalance <= 0) {
-    if (updatedProfile.zeroBalanceAt === null) {
+    if (updatedProfile.zeroBalanceAt === null || updatedProfile.zeroBalanceAt === undefined) {
       updatedProfile.zeroBalanceAt = nowMs;
     } else {
       const zeroElapsed = nowMs - updatedProfile.zeroBalanceAt;
