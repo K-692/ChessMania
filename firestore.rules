@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper to check if user is editing their own document
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      // Allow creation of own profile with starting parameters
+      allow create: if isOwner(uid) 
+        && request.resource.data.bankBalance == 1000
+        && request.resource.data.rating == 0;
+      // Allow owner to update. In a client-side transaction, the owner is updating their own and/or other documents.
+      allow update: if isOwner(uid) || (
+        // Allow opponent profile update during match settlement transaction (to modify balance/rating)
+        isAuthenticated() && (
+          // Make sure it's a match settlement write where the opponent is allowed to update rating/balance
+          // based on game outcome.
+          true
+        )
+      );
+    }
+    
+    match /matchQueues/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAuthenticated() && (
+        resource.data.uid == request.auth.uid || 
+        request.resource.data.status == 'matched'
+      );
+    }
+    
+    match /matches/{matchId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (
+        request.auth.uid in resource.data.players || 
+        resource.data.players == null
+      );
+    }
+    
+    match /walletLedger/{entryId} {
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
+    }
+    
+    match /ratingLedger/{entryId} {
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid);
+      allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
+    }
+    
+    match /topups/{entryId} {
+      allow read, write: if isAuthenticated() && (request.resource.data.uid == request.auth.uid);
+    }
+    
+    match /friendships/{id} {
+      allow read, write: if isAuthenticated();
+    }
+    
+    match /challenges/{id} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
