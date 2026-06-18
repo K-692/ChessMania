@@ -22,3 +22,19 @@ export function formatCoins(amount: number): string {
   const result = isNegative ? `-${formatted}` : formatted;
   return `${result} 🪙`;
 }
+
+/**
+ * Formats user count into a compact string representation with K, M, B suffixes.
+ */
+export function formatActiveCount(count: number): string {
+  const absCount = Math.abs(count);
+  if (absCount >= 1e9) {
+    return (absCount / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  } else if (absCount >= 1e6) {
+    return (absCount / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  } else if (absCount >= 1e3) {
+    return (absCount / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  }
+  return absCount.toString();
+}
+

@@ -12,7 +12,7 @@ import { SettingsView } from './components/SettingsView';
 import type { GameMode, Match, UserProfile } from './types';
 import { collection, query, where, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
-import { formatCoins } from './utils/format';
+import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, UserPlus, Check } from 'lucide-react';
 import './utils/sound';
@@ -563,6 +563,17 @@ const AppContent: React.FC = () => {
                 <p className="text-sm text-slate-500 mt-1">
                   Your profiles, wallets, and games are fully synced and secure.
                 </p>
+              </div>
+
+              {/* Live Active Players Counter */}
+              <div className="flex items-center space-x-2.5 bg-emerald-500/10 border border-emerald-500/20 px-4 py-2.5 rounded-xl self-start sm:self-auto shadow-md">
+                <span className="flex h-2.5 w-2.5 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-semibold text-slate-200">
+                  Active Players: <span className="text-emerald-400 font-mono font-bold">{formatActiveCount(onlineCount)}</span>
+                </span>
               </div>
             </div>
 
