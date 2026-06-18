@@ -151,7 +151,7 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
   const ledgerCol = collection(db, 'walletLedger');
   const ratingLedgerCol = collection(db, 'ratingLedger');
 
-  // Query friendship document before transaction
+  // Query friendship document before transaction (use single-field queries to avoid composite index requirement)
   const matchSnapOuter = await getDoc(matchDocRef);
   let friendshipDocRef: any = null;
   if (matchSnapOuter.exists()) {
@@ -160,13 +160,21 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     const p2Uid = matchData.players[1];
     if (p1Uid && p2Uid) {
       const friendshipsRef = collection(db, 'friendships');
-      const q1 = query(friendshipsRef, where('requesterUid', '==', p1Uid), where('receiverUid', '==', p2Uid), where('status', '==', 'accepted'));
-      const q2 = query(friendshipsRef, where('requesterUid', '==', p2Uid), where('receiverUid', '==', p1Uid), where('status', '==', 'accepted'));
+      // Query by requesterUid only, then filter client-side for receiverUid and status
+      const q1 = query(friendshipsRef, where('requesterUid', '==', p1Uid));
+      const q2 = query(friendshipsRef, where('requesterUid', '==', p2Uid));
       const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-      if (!snap1.empty) {
-        friendshipDocRef = doc(db, 'friendships', snap1.docs[0].id);
-      } else if (!snap2.empty) {
-        friendshipDocRef = doc(db, 'friendships', snap2.docs[0].id);
+
+      // Find the doc where p1 requested p2 and it's accepted
+      const doc1 = snap1.docs.find(d => d.data().receiverUid === p2Uid && d.data().status === 'accepted');
+      if (doc1) {
+        friendshipDocRef = doc(db, 'friendships', doc1.id);
+      } else {
+        // Find the doc where p2 requested p1 and it's accepted
+        const doc2 = snap2.docs.find(d => d.data().receiverUid === p1Uid && d.data().status === 'accepted');
+        if (doc2) {
+          friendshipDocRef = doc(db, 'friendships', doc2.id);
+        }
       }
     }
   }

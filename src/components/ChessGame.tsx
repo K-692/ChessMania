@@ -59,6 +59,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     matchStateRef.current = match;
   }, [match]);
 
+  // Stable refs for clock baseline — avoids re-creating the interval on every snapshot
+  const clockBaselineRef = useRef<{ lastMoveAt: number; white: number; black: number } | null>(null);
+
   // Clocks states (rendered with millisecond tickers)
   const [whiteClock, setWhiteClock] = useState<number>(0);
   const [blackClock, setBlackClock] = useState<number>(0);
@@ -153,13 +156,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       }
 
       setMatch(matchData);
-      setLocalFen(matchData.boardFEN);
 
-      // Re-synchronize local chess engine
-      try {
-        chessRef.current.load(matchData.boardFEN);
-      } catch (e) {
-        console.warn('FEN sync mismatch:', e);
+      // Only sync FEN from DB when a new move arrives or it is the opponent's turn.
+      // This prevents the optimistic local FEN from being overwritten by a stale
+      // DB snapshot while our write is still in-flight (piece rollback bug).
+      const prevMovesCount = matchStateRef.current?.moves?.length ?? 0;
+      const newMovesCount = matchData.moves?.length ?? 0;
+      const isOpponentTurn = matchData.turn === 'w'
+        ? user?.uid !== matchData.whiteUid
+        : user?.uid !== matchData.blackUid;
+      if (newMovesCount > prevMovesCount || isOpponentTurn || matchData.status !== 'active') {
+        setLocalFen(matchData.boardFEN);
+        try {
+          chessRef.current.load(matchData.boardFEN);
+        } catch (e) {
+          console.warn('FEN sync mismatch:', e);
+        }
       }
 
       // Fetch profiles if they are not loaded yet
@@ -225,40 +237,53 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   }, [matchId, whiteProfile, blackProfile, user]);
 
   // 2. Realtime clock countdowns
+  // Sync baseline ref ONLY when lastMoveAt changes (i.e., real move or reconnect reset)
+  // This prevents heartbeat snapshots from blinking the clock back to the stored time.
+  useEffect(() => {
+    if (!match || match.status !== 'active') return;
+    const prevBaseline = clockBaselineRef.current;
+    if (!prevBaseline || prevBaseline.lastMoveAt !== match.lastMoveAt) {
+      clockBaselineRef.current = {
+        lastMoveAt: match.lastMoveAt,
+        white: match.clocks[match.whiteUid],
+        black: match.clocks[match.blackUid],
+      };
+      setWhiteClock(match.clocks[match.whiteUid]);
+      setBlackClock(match.clocks[match.blackUid]);
+    }
+  }, [match?.lastMoveAt, match?.clocks, match?.whiteUid, match?.blackUid, match?.status]);
+
+  // Ticker — runs independently; reads from stable refs so it never needs to restart on snapshots
   useEffect(() => {
     if (!match || match.status !== 'active') return;
 
-    setWhiteClock(match.clocks[match.whiteUid]);
-    setBlackClock(match.clocks[match.blackUid]);
-
     const interval = setInterval(() => {
-      // Pause clocks if opponent is disconnected
-      if (match.disconnectedUid) {
-        return;
-      }
+      const baseline = clockBaselineRef.current;
+      if (!baseline) return;
+      if (matchStateRef.current?.disconnectedUid) return;
 
       const now = Date.now();
-      const elapsed = now - match.lastMoveAt;
+      const elapsed = now - baseline.lastMoveAt;
+      const currentMatch = matchStateRef.current;
+      if (!currentMatch) return;
 
-      if (match.turn === 'w') {
-        const whiteRem = Math.max(0, match.clocks[match.whiteUid] - elapsed);
+      if (currentMatch.turn === 'w') {
+        const whiteRem = Math.max(0, baseline.white - elapsed);
         setWhiteClock(whiteRem);
-        
-        if (whiteRem <= 0 && user?.uid === match.blackUid) {
-          submitGameAction(matchId, match.blackUid, 'resign').catch(console.warn);
+        if (whiteRem <= 0 && user?.uid === currentMatch.blackUid) {
+          submitGameAction(matchId, currentMatch.blackUid, 'resign').catch(console.warn);
         }
       } else {
-        const blackRem = Math.max(0, match.clocks[match.blackUid] - elapsed);
+        const blackRem = Math.max(0, baseline.black - elapsed);
         setBlackClock(blackRem);
-
-        if (blackRem <= 0 && user?.uid === match.whiteUid) {
-          submitGameAction(matchId, match.whiteUid, 'resign').catch(console.warn);
+        if (blackRem <= 0 && user?.uid === currentMatch.whiteUid) {
+          submitGameAction(matchId, currentMatch.whiteUid, 'resign').catch(console.warn);
         }
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [match, user, matchId]);
+  }, [match?.status, matchId, user]);
 
   // 3. Handle disconnection timeouts (1 minute limit)
   useEffect(() => {
@@ -583,7 +608,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch lg:h-[calc(100vh-120px)]">
         {/* Left half: Chessboard (fits top-to-bottom of the left half) */}
         <div className="lg:col-span-7 flex flex-col justify-center items-center p-4 bg-slate-900/10 rounded-2xl border border-white/5 h-full min-h-[360px]">
-          <div className="chessboard-container aspect-square w-full max-w-[min(100%,480px,65vh)] bg-[#1a1c23] shadow-2xl rounded-2xl overflow-hidden border border-white/10">
+          <div className="chessboard-container aspect-square w-full max-w-[min(100%,560px,78vh)] bg-[#1a1c23] shadow-2xl rounded-2xl overflow-hidden border border-white/10">
             <Chessboard
               options={{
                 position: localFen,

@@ -717,98 +717,95 @@ const AppContent: React.FC = () => {
                   No match history found. Click "Play Now" to start your first game!
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {recentMatches.map((m) => {
-                    const isMWhite = m.whiteUid === user.uid;
-                    const oppUid = isMWhite ? m.blackUid : m.whiteUid;
-                    const isActive = m.status === 'active';
-                    const oppProfile = opponentProfiles[oppUid];
-                    const friendStatus = opponentFriendStatus[oppUid];
+              <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden">
+                {recentMatches.map((m) => {
+                  const isMWhite = m.whiteUid === user.uid;
+                  const oppUid = isMWhite ? m.blackUid : m.whiteUid;
+                  const isActive = m.status === 'active';
+                  const oppProfile = opponentProfiles[oppUid];
+                  const friendStatus = opponentFriendStatus[oppUid];
 
-                    return (
-                      <div
-                        key={m.id}
-                        className={`glass p-5 rounded-xl border ${
-                          isActive ? 'border-violet-500/30 bg-violet-950/5' : 'border-white/5'
-                        } flex flex-col gap-3`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="space-y-1.5">
-                            <div className="flex items-center space-x-2 text-xs">
-                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                isActive ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-800 text-slate-400'
-                              } uppercase`}>
-                                {m.status}
-                              </span>
-                              <span className="text-slate-500 capitalize">
-                                {m.mode.replace(/_/g, ' ')} • {
-                                  m.mode === 'all_in' && m.allInStakes && user
-                                    ? formatCoins(m.allInStakes[user.uid] || 0)
-                                    : formatCoins(m.stake)
-                                }
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {oppProfile?.photoURL && (
-                                <img src={oppProfile.photoURL} alt={oppProfile.displayName} className="w-6 h-6 rounded-full object-cover border border-white/10 flex-shrink-0" />
-                              )}
-                              <p className="text-sm font-semibold text-slate-300">
-                                vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}
-                              </p>
-                            </div>
-                          </div>
+                  const resultLabel = isActive ? null
+                    : m.winnerUid === user.uid ? 'WON'
+                    : m.winnerUid ? 'LOST'
+                    : 'DRAW';
 
-                          {isActive ? (
-                            <button
-                              onClick={() => handleMatchFound(m.id)}
-                              className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-4 py-2.5 rounded-lg shadow transition-all cursor-pointer shrink-0"
-                            >
-                              Resume
-                            </button>
-                          ) : (
-                            <span className={`text-xs font-bold shrink-0 ${
-                              m.winnerUid === user.uid
-                                ? 'text-emerald-400'
-                                : m.winnerUid
-                                ? 'text-red-400'
-                                : 'text-slate-500'
-                            }`}>
-                              {m.winnerUid === user.uid && 'WON'}
-                              {m.winnerUid && m.winnerUid !== user.uid && 'LOST'}
-                              {(!m.winnerUid) && 'DRAW'}
-                            </span>
-                          )}
+                  const resultColor = isActive ? ''
+                    : m.winnerUid === user.uid ? 'text-emerald-400'
+                    : m.winnerUid ? 'text-red-400'
+                    : 'text-slate-500';
+
+                  return (
+                    <div
+                      key={m.id}
+                      className={`flex items-center justify-between px-4 py-3 gap-3 ${
+                        isActive ? 'bg-violet-950/10' : 'hover:bg-white/[0.02]'
+                      } transition-colors`}
+                    >
+                      {/* Left: Status badge + opponent */}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          isActive ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-800 text-slate-500'
+                        }`}>
+                          {isActive ? 'LIVE' : m.status}
+                        </span>
+
+                        {oppProfile?.photoURL && (
+                          <img src={oppProfile.photoURL} alt={oppProfile.displayName} className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0" />
+                        )}
+
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-200 truncate">
+                            vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}
+                          </p>
+                          <p className="text-[10px] text-slate-500 capitalize truncate">
+                            {m.mode.replace(/_/g, ' ')} &bull; {
+                              m.mode === 'all_in' && m.allInStakes && user
+                                ? formatCoins(m.allInStakes[user.uid] || 0)
+                                : formatCoins(m.stake)
+                            }
+                            {oppProfile && <span className="ml-1">· {oppProfile.rating} Elo</span>}
+                          </p>
                         </div>
+                      </div>
 
-                        {/* Add Friend row */}
-                        {oppProfile && (
-                          <div className="flex items-center justify-between border-t border-white/5 pt-2">
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              {oppProfile.rating} Elo
-                            </span>
-                            {friendStatus === 'friend' ? (
-                              <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
-                                <Check className="w-3 h-3" /> Friends
-                              </span>
-                            ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
-                              <span className="text-[10px] text-slate-400 font-medium animate-pulse">
-                                {friendStatus === 'sending' ? 'Sending…' : 'Request Sent'}
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleSendOpponentFriendRequest(oppUid)}
-                                className="flex items-center gap-1.5 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2.5 py-1 rounded transition-all cursor-pointer"
-                              >
-                                <UserPlus className="w-3 h-3" />
-                                Add Friend
-                              </button>
-                            )}
-                          </div>
+                      {/* Right: friend action + result or resume */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {friendStatus === 'friend' ? (
+                          <span className="hidden sm:flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
+                            <Check className="w-3 h-3" /> Friends
+                          </span>
+                        ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
+                          <span className="hidden sm:block text-[10px] text-slate-400 font-medium animate-pulse">
+                            {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
+                          </span>
+                        ) : oppProfile ? (
+                          <button
+                            onClick={() => handleSendOpponentFriendRequest(oppUid)}
+                            className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2 py-0.5 rounded transition-all cursor-pointer"
+                          >
+                            <UserPlus className="w-3 h-3" />
+                            Add
+                          </button>
+                        ) : null}
+
+                        {isActive ? (
+                          <button
+                            onClick={() => handleMatchFound(m.id)}
+                            className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
+                          >
+                            Resume
+                          </button>
+                        ) : (
+                          <span className={`text-xs font-bold ${resultColor}`}>
+                            {resultLabel}
+                          </span>
                         )}
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  );
+                })}
+              </div>
               )}
             </div>
 
