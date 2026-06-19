@@ -79,7 +79,7 @@ service cloud.firestore {
     }
 
     match /config/{id} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAuthenticated();
     }
   }

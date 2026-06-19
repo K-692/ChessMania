@@ -225,6 +225,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Bootstrap user profile document
   const bootstrapProfile = async (firebaseUser: FirebaseUser) => {
+    // Wait 500ms to ensure Firestore client is fully authenticated and synchronized
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
     // Ensure key Firestore configurations exist
     try {
       const supportConfigRef = doc(db, 'config', 'support');
