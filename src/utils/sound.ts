@@ -136,104 +136,41 @@ if (typeof window !== 'undefined') {
 }
 
 /**
- * Play a realistic wooden thud when a chess piece is placed on the board.
+ * Play a realistic wooden thud when a chess piece is placed on the board using /sound/move-self.mp3.
  */
 export function playMoveSound() {
   if (settings.muted || !settings.effectsEnabled) return;
   try {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') ctx.resume();
-    const now = ctx.currentTime;
-
-    // White noise burst (wooden thud body)
-    const bufferSize = ctx.sampleRate * 0.07;
-    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) noiseData[i] = Math.random() * 2 - 1;
-    const noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-
-    // Lowpass filter: gives the wood resonance warmth
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(320, now);
-    filter.Q.setValueAtTime(3.5, now);
-
-    // Short attack + fast decay envelope
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.6, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-
-    noiseSource.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    noiseSource.start(now);
-    noiseSource.stop(now + 0.08);
-
-    // Second layer: deep wooden resonant tone
-    const osc = ctx.createOscillator();
-    const oscGain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(160, now);
-    osc.frequency.exponentialRampToValueAtTime(80, now + 0.05);
-    oscGain.gain.setValueAtTime(0.25, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
-    osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.07);
+    const audio = new Audio('/sound/move-self.mp3');
+    audio.play().catch(e => console.warn('Failed to play move sound:', e));
   } catch (e) {
     console.warn('Failed to play move sound:', e);
   }
 }
 
 /**
- * Play a harder wooden knock when a chess piece captures another.
+ * Play a harder wooden knock when a chess piece captures another using /sound/capture.mp3.
  */
 export function playCaptureSound() {
   if (settings.muted || !settings.effectsEnabled) return;
   try {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') ctx.resume();
-    const now = ctx.currentTime;
-
-    // Louder, longer noise burst for the impact
-    const bufferSize = ctx.sampleRate * 0.12;
-    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) noiseData[i] = Math.random() * 2 - 1;
-    const noiseSource = ctx.createBufferSource();
-    noiseSource.buffer = noiseBuffer;
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(500, now);
-    filter.Q.setValueAtTime(4.0, now);
-
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.85, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
-
-    noiseSource.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    noiseSource.start(now);
-    noiseSource.stop(now + 0.13);
-
-    // Deep knock resonance
-    const osc = ctx.createOscillator();
-    const oscGain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(200, now);
-    osc.frequency.exponentialRampToValueAtTime(70, now + 0.09);
-    oscGain.gain.setValueAtTime(0.4, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-    osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.11);
+    const audio = new Audio('/sound/capture.mp3');
+    audio.play().catch(e => console.warn('Failed to play capture sound:', e));
   } catch (e) {
     console.warn('Failed to play capture sound:', e);
+  }
+}
+
+/**
+ * Play a notification chime when a new message or challenge is received using /sound/notify.mp3.
+ */
+export function playNotifySound() {
+  if (settings.muted || !settings.effectsEnabled) return;
+  try {
+    const audio = new Audio('/sound/notify.mp3');
+    audio.play().catch(e => console.warn('Failed to play notify sound:', e));
+  } catch (e) {
+    console.warn('Failed to play notify sound:', e);
   }
 }
 

@@ -8,7 +8,7 @@ import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc,
 import { db } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check } from 'lucide-react';
 import { formatCoins } from '../utils/format';
-import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings } from '../utils/sound';
+import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
 
 interface ChessGameProps {
@@ -167,6 +167,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     const isBotTurn = botUid.startsWith('bot_');
 
     if (!isBotTurn) return;
+
+    // Guard against race conditions: only play bot move when local FEN matches the synchronized Firestore FEN
+    if (localFen !== match.boardFEN) return;
 
     const timer = setTimeout(async () => {
       try {
@@ -455,6 +458,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   // Subscribe to game messages
   useEffect(() => {
+    let isInitial = true;
     const q = query(
       collection(db, 'matches', matchId, 'messages'),
       orderBy('createdAt', 'asc')
@@ -469,10 +473,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       if (activeRightTab !== 'chat') {
         setUnreadGameMsgs((prev) => prev + 1);
       }
+
+      if (!isInitial) {
+        let hasNewFromOther = false;
+        snap.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.senderUid !== user?.uid) {
+              hasNewFromOther = true;
+            }
+          }
+        });
+        if (hasNewFromOther) {
+          playNotifySound();
+        }
+      }
+      isInitial = false;
     });
 
     return () => unsubscribe();
-  }, [matchId, activeRightTab]);
+  }, [matchId, activeRightTab, user?.uid]);
 
   // Scroll to bottom when chat becomes active or messages arrive
   useEffect(() => {

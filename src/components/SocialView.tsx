@@ -5,6 +5,7 @@ import { collection, query, where, getDoc, getDocs, doc, setDoc, addDoc, deleteD
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
+import { playNotifySound } from '../utils/sound';
 import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
 import type { UserProfile, Friendship, FriendlyChallenge, GameMode } from '../types';
 import { ProfilePopup } from './ProfilePopup';
@@ -973,6 +974,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
   // Subscribe to messages
   useEffect(() => {
     if (!friendship.id) return;
+    let isInitial = true;
     const q = query(
       collection(db, 'friendships', friendship.id!, 'messages'),
       orderBy('createdAt', 'asc')
@@ -987,9 +989,25 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
         }
       });
       setMessages(msgs);
+
+      if (!isInitial) {
+        let hasNewFromOther = false;
+        snap.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const data = change.doc.data();
+            if (data.senderUid !== user?.uid) {
+              hasNewFromOther = true;
+            }
+          }
+        });
+        if (hasNewFromOther) {
+          playNotifySound();
+        }
+      }
+      isInitial = false;
     });
     return () => unsubscribe();
-  }, [friendship.id]);
+  }, [friendship.id, user?.uid]);
 
   // Auto-scroll
   useEffect(() => {

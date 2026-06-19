@@ -346,7 +346,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     });
 
                     // 2. Fetch admin email from /config/support
-                    let adminEmail = 'developer@checkmate.com'; // fallback placeholder
+                    let adminEmail = 'krishnendu.pal.work@gmail.com'; // fallback placeholder
                     try {
                       const configDoc = await getDoc(doc(db, 'config', 'support'));
                       if (configDoc.exists() && configDoc.data().adminEmail) {

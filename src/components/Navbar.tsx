@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { LogIn, LogOut, Volume2, VolumeX, Plus, Menu, X } from 'lucide-react';
 
 import { getBestAchievement } from '../utils/achievements';
-import { getSoundSettings, updateSoundSettings } from '../utils/sound';
+import { getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -56,6 +56,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
       console.warn("Error listening to pending friendships in Navbar:", err);
     });
 
+    let isChallengesInitial = true;
     const qChallenges = query(
       collection(db, 'challenges'),
       where('challengedUid', '==', user.uid),
@@ -64,6 +65,18 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
     const unsubChallenges = onSnapshot(qChallenges, (snap) => {
       cCount = snap.size;
       setPendingCount(fCount + cCount);
+      if (!isChallengesInitial) {
+        let hasNew = false;
+        snap.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            hasNew = true;
+          }
+        });
+        if (hasNew) {
+          playNotifySound();
+        }
+      }
+      isChallengesInitial = false;
     }, (err) => {
       console.warn("Error listening to pending challenges in Navbar:", err);
     });

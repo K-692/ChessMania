@@ -238,7 +238,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const supportSnap = await getDoc(supportConfigRef);
       if (!supportSnap.exists()) {
         await setDoc(supportConfigRef, {
-          adminEmail: 'developer@checkmate.com',
+          adminEmail: 'krishnendu.pal.work@gmail.com',
           createdAt: Date.now()
         });
         console.log('Bootstrapped config/support document.');
