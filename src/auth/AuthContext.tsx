@@ -15,6 +15,41 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function detectCountryFromTimezone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (!tz) return '';
+    const lowerTz = tz.toLowerCase();
+    if (lowerTz.includes('calcutta') || lowerTz.includes('kolkata')) return 'India';
+    if (lowerTz.includes('america')) return 'United States';
+    if (lowerTz.includes('london')) return 'United Kingdom';
+    if (lowerTz.includes('berlin')) return 'Germany';
+    if (lowerTz.includes('paris')) return 'France';
+    if (lowerTz.includes('tokyo')) return 'Japan';
+    if (lowerTz.includes('shanghai') || lowerTz.includes('beijing')) return 'China';
+    if (lowerTz.includes('toronto') || lowerTz.includes('vancouver') || lowerTz.includes('montreal')) return 'Canada';
+    if (lowerTz.includes('sydney') || lowerTz.includes('melbourne') || lowerTz.includes('brisbane')) return 'Australia';
+    if (lowerTz.includes('rome')) return 'Italy';
+    if (lowerTz.includes('madrid')) return 'Spain';
+    if (lowerTz.includes('amsterdam')) return 'Netherlands';
+    if (lowerTz.includes('zurich')) return 'Switzerland';
+    if (lowerTz.includes('stockholm')) return 'Sweden';
+    if (lowerTz.includes('oslo')) return 'Norway';
+    if (lowerTz.includes('helsinki')) return 'Finland';
+    if (lowerTz.includes('copenhagen')) return 'Denmark';
+    if (lowerTz.includes('singapore')) return 'Singapore';
+    if (lowerTz.includes('auckland')) return 'New Zealand';
+    if (lowerTz.includes('johannesburg')) return 'South Africa';
+    if (lowerTz.includes('seoul')) return 'South Korea';
+    if (lowerTz.includes('sao_paulo')) return 'Brazil';
+    if (lowerTz.includes('moscow')) return 'Russia';
+    if (lowerTz.includes('mexico_city')) return 'Mexico';
+  } catch (e) {
+    console.error('Error detecting country:', e);
+  }
+  return '';
+}
+
 export function sanitizeProfile(
   data: any,
   uid: string,
@@ -106,6 +141,14 @@ export function sanitizeProfile(
     hasChanges = true;
   }
 
+  let country = data?.country;
+  if (!country) {
+    country = detectCountryFromTimezone() || '';
+    if (country) {
+      hasChanges = true;
+    }
+  }
+
   const sanitized: UserProfile = {
     uid: targetUid,
     displayName,
@@ -123,7 +166,7 @@ export function sanitizeProfile(
     wins: typeof data?.wins === 'number' && !isNaN(data.wins) ? data.wins : 0,
     losses: typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : 0,
     draws: typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : 0,
-    country: data?.country || '',
+    country: country || '',
     lastCountryChangedAt: data?.lastCountryChangedAt || null,
   };
 
@@ -182,6 +225,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Bootstrap user profile document
   const bootstrapProfile = async (firebaseUser: FirebaseUser) => {
+    // Ensure key Firestore configurations exist
+    try {
+      const supportConfigRef = doc(db, 'config', 'support');
+      const supportSnap = await getDoc(supportConfigRef);
+      if (!supportSnap.exists()) {
+        await setDoc(supportConfigRef, {
+          adminEmail: 'developer@checkmate.com',
+          createdAt: Date.now()
+        });
+        console.log('Bootstrapped config/support document.');
+      }
+
+      const gameConfigRef = doc(db, 'config', 'game');
+      const gameSnap = await getDoc(gameConfigRef);
+      if (!gameSnap.exists()) {
+        await setDoc(gameConfigRef, {
+          hourlyRewardAmount: 100,
+          maxHourlyRewardLimit: 1000,
+          createdAt: Date.now()
+        });
+        console.log('Bootstrapped config/game document.');
+      }
+    } catch (e) {
+      console.warn('Error checking/creating start configuration collections:', e);
+    }
+
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     
     try {

@@ -703,7 +703,7 @@ const AppContent: React.FC = () => {
 
               <button
                 onClick={() => setIsPlayModalOpen(true)}
-                className="w-full sm:w-auto flex items-center justify-center space-x-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-6 py-3.5 rounded-xl font-semibold shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 border border-violet-500/25 transition-all cursor-pointer"
+                className="w-full sm:w-auto flex items-center justify-center space-x-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-6 py-3.5 rounded-xl font-semibold transition-all cursor-pointer play-btn-glow border border-violet-500/25"
               >
                 {/* Wikimedia Chess Knight SVG */}
                 <img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" alt="Knight" className="w-5 h-5 filter invert brightness-125" />
