@@ -214,6 +214,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       setLoading(true);
+      if (auth.currentUser) {
+        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        await setDoc(userDocRef, { lastActiveAt: 0 }, { merge: true });
+      }
       await signOut(auth);
       setProfile(null);
     } catch (error) {

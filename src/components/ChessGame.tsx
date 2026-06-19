@@ -564,21 +564,43 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return false;
   };
 
-  // Click square logic for legal moves highlight (drag-and-drop is required to make a move)
+  // Click square logic for legal moves highlight and click-to-move
   const onSquareClick = (square: string) => {
     if (!match || !isMyTurn || match.status !== 'active') return;
 
     const piece = chessRef.current.get(square as any);
     const myColor = isWhite ? 'w' : 'b';
 
-    if (piece && piece.color === myColor) {
+    if (selectedSquare) {
       if (selectedSquare === square) {
         setSelectedSquare(null);
-      } else {
+        return;
+      }
+
+      const moves = chessRef.current.moves({
+        square: selectedSquare as any,
+        verbose: true
+      });
+      const legalMove = moves.find((m: any) => m.to === square);
+
+      if (legalMove) {
+        const success = onPieceDrop(selectedSquare, square);
+        if (success) {
+          setSelectedSquare(null);
+          return;
+        }
+      }
+
+      // If clicked on another own piece, select that instead
+      if (piece && piece.color === myColor) {
         setSelectedSquare(square);
+      } else {
+        setSelectedSquare(null);
       }
     } else {
-      setSelectedSquare(null);
+      if (piece && piece.color === myColor) {
+        setSelectedSquare(square);
+      }
     }
   };
 
@@ -770,21 +792,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const pieceKeys = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK'];
   pieceKeys.forEach((key) => {
     const file = key[0] + key[1].toLowerCase();
-    customPieces[key] = (props) => (
-      <img
-        src={`/pieces/${pieceTheme}/${file}.png`}
-        alt={key}
-        draggable={false}
-        style={{
-          width: '100%',
-          height: '100%',
-          objectFit: 'contain',
-          pointerEvents: 'none',
-          ...props?.style,
-          ...props?.svgStyle
-        }}
-      />
-    );
+    customPieces[key] = (props) => {
+      const isPieceSelected = selectedSquare && selectedSquare.toLowerCase() === props?.square?.toLowerCase();
+      const defaultOpacity = isPieceSelected ? 0.5 : 1;
+      return (
+        <img
+          src={`/pieces/${pieceTheme}/${file}.png`}
+          alt={key}
+          draggable={false}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            pointerEvents: 'none',
+            opacity: props?.style?.opacity ?? defaultOpacity,
+            ...props?.style,
+            ...props?.svgStyle
+          }}
+        />
+      );
+    };
   });
 
   const getPieceImage = (p: string) => {

@@ -133,10 +133,11 @@ const AppContent: React.FC = () => {
     }
   };
 
-  // 1a. Periodically update lastActiveAt for online logged-in users to keep them active in DB
+  // 1a. Real-time client presence tracking (updates lastActiveAt in Firestore)
   useEffect(() => {
-    if (!user) return;
+    if (!user?.uid) return;
     const userDocRef = doc(db, 'users', user.uid);
+
     const updateActiveStatus = async () => {
       try {
         await setDoc(userDocRef, { lastActiveAt: Date.now() }, { merge: true });
@@ -146,17 +147,17 @@ const AppContent: React.FC = () => {
     };
 
     updateActiveStatus();
-    const interval = setInterval(updateActiveStatus, 2 * 60 * 1000); // every 2 minutes
+    const interval = setInterval(updateActiveStatus, 30 * 1000); // every 30 seconds
     return () => clearInterval(interval);
   }, [user?.uid]);
 
-  // 1b. Real-time sliding active players query listener (active in last 5 minutes)
+  // 1b. Real-time sliding active players query listener (active in last 65 seconds)
   useEffect(() => {
     const updateListener = () => {
-      const fiveMinsAgo = Date.now() - 5 * 60 * 1000;
+      const activeThreshold = Date.now() - 65 * 1000;
       const q = query(
         collection(db, 'users'),
-        where('lastActiveAt', '>=', fiveMinsAgo)
+        where('lastActiveAt', '>=', activeThreshold)
       );
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -170,11 +171,11 @@ const AppContent: React.FC = () => {
 
     let unsubscribe = updateListener();
 
-    // Re-bind listener every 1 minute to move 5-min threshold forward
+    // Re-bind listener every 30 seconds to move sliding threshold forward
     const interval = setInterval(() => {
       unsubscribe();
       unsubscribe = updateListener();
-    }, 60000);
+    }, 30000);
 
     return () => {
       unsubscribe();
