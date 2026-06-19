@@ -74,6 +74,22 @@ const AppContent: React.FC = () => {
       setNameError('Username must be between 3 and 20 characters');
       return;
     }
+    
+    // Alphanumeric validation (only English letters and numbers, strictly no symbols)
+    const alphanumericRegex = /^[a-zA-Z0-9]+$/;
+    if (!alphanumericRegex.test(trimmed)) {
+      setNameError('Username must contain only letters and numbers (no symbols, spaces, or punctuation allowed)');
+      return;
+    }
+
+    // Cooldown validation
+    const lastChanged = profile?.lastUsernameChangedAt;
+    const cooldownMs = 30 * 24 * 60 * 60 * 1000;
+    if (lastChanged && (Date.now() - lastChanged < cooldownMs)) {
+      setNameError('You can only change your username once a month.');
+      return;
+    }
+
     setIsSavingName(true);
     setNameError('');
     try {
@@ -396,7 +412,7 @@ const AppContent: React.FC = () => {
                 </span>
               </h1>
               <p className="text-base text-slate-400 font-light leading-relaxed">
-                Step into the arena where your brain meets the bank! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your wallet grow continuously with hourly coin credits, represent your country globally, and dominate the global rankings!
+                Step into the ultimate chess arena! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your balance grow continuously with hourly coin credits, represent your country globally, and dominate the global rankings!
               </p>
 
               {/* Bullet points explaining the Chess Coin Stakes */}

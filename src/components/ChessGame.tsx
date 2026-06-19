@@ -671,7 +671,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         </div>
 
         {/* Right half: Actions, Players, Clocks, Info, Moves */}
-        <div className="lg:col-span-5 flex flex-col justify-between p-5 bg-slate-950/20 rounded-2xl border border-white/5 space-y-4 max-h-[calc(100vh-120px)] overflow-y-auto">
+        <div className="lg:col-span-5 flex flex-col justify-between p-5 bg-slate-950/20 rounded-2xl border border-white/5 space-y-4 lg:max-h-[calc(100vh-120px)] overflow-y-auto">
           {/* Header Action Menu */}
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <button

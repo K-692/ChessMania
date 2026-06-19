@@ -260,7 +260,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const docSnap = await getDoc(userDocRef);
       const now = Date.now();
 
-      const profileData = docSnap.exists() ? docSnap.data() as UserProfile : null;
+      let profileData = docSnap.exists() ? docSnap.data() as UserProfile : null;
+      let forceHasChanges = false;
+
+      if (!docSnap.exists()) {
+        // First time sign-in: generate a unique, alphanumeric username based on Google name
+        const actualName = firebaseUser.displayName || 'Player';
+        let alphanumericName = actualName.replace(/[^a-zA-Z0-9]/g, '');
+        if (alphanumericName.length < 3) {
+          alphanumericName = 'Player';
+        }
+
+        let candidate = alphanumericName;
+        const checkUnique = async (name: string) => {
+          const q = query(collection(db, 'users'), where('displayName', '==', name));
+          const snap = await getDocs(q);
+          return snap.empty;
+        };
+
+        let isUnique = await checkUnique(candidate);
+        let attempts = 0;
+        while (!isUnique && attempts < 50) {
+          const randomSuffix = Math.floor(100 + Math.random() * 900);
+          candidate = `${alphanumericName}${randomSuffix}`;
+          isUnique = await checkUnique(candidate);
+          attempts++;
+        }
+        if (!isUnique) {
+          candidate = `${alphanumericName}${Date.now().toString().slice(-4)}`;
+        }
+
+        profileData = {
+          displayName: candidate,
+        } as any;
+        forceHasChanges = true;
+      }
+
       const { sanitized, hasChanges } = sanitizeProfile(
         profileData,
         firebaseUser.uid,
@@ -268,7 +303,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         firebaseUser.photoURL || undefined
       );
 
-      if (!docSnap.exists() || hasChanges) {
+      if (!docSnap.exists() || hasChanges || forceHasChanges) {
         await runTransaction(db, async (transaction) => {
           if (!docSnap.exists()) {
             const ledgerEntry: Omit<WalletLedgerEntry, 'id'> = {

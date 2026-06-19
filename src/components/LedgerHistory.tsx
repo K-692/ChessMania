@@ -61,7 +61,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
   const getTypeText = (type: string) => {
     switch (type) {
       case 'seed': return 'Account Seed Credits';
-      case 'interest': return 'Lazy Daily Bank Interest (1%)';
+      case 'interest': return 'Daily Yield Interest (1%)';
       case 'topup': return 'Zero-Balance Recovery Credit';
       case 'hourly_reward': return 'Hourly Reward Credit';
       case 'game_escrow': return 'Match Entry Stakes (Escrow)';
