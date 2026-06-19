@@ -325,7 +325,7 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     });
 
     // Write wallet ledger records
-    if (p1Payout > 0) {
+    if (p1Payout > 0 || matchData.stake === 0) {
       const p1LedgerRef = doc(ledgerCol);
       transaction.set(p1LedgerRef, {
         uid: p1Uid,
@@ -335,10 +335,11 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
         balanceBefore: p1Profile.bankBalance,
         balanceAfter: newP1Balance,
         createdAt: now,
+        opponentUid: p2Uid,
       } as WalletLedgerEntry);
     }
 
-    if (p2Payout > 0) {
+    if (p2Payout > 0 || matchData.stake === 0) {
       const p2LedgerRef = doc(ledgerCol);
       transaction.set(p2LedgerRef, {
         uid: p2Uid,
@@ -348,31 +349,34 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
         balanceBefore: p2Profile.bankBalance,
         balanceAfter: newP2Balance,
         createdAt: now,
+        opponentUid: p1Uid,
       } as WalletLedgerEntry);
     }
 
     // Write rating ledger records
-    if (matchData.stake > 0) {
+    if (matchData.stake > 0 || matchData.stake === 0) {
       const p1RatingLedgerRef = doc(ratingLedgerCol);
       transaction.set(p1RatingLedgerRef, {
         uid: p1Uid,
         matchId: matchData.id,
-        delta: p1Elo.delta,
+        delta: matchData.stake === 0 ? 0 : p1Elo.delta,
         expectedScore: p1Elo.expectedScore,
         actualScore: p1Score,
         kFactor: 20,
         createdAt: now,
+        opponentUid: p2Uid,
       } as RatingLedgerEntry);
 
       const p2RatingLedgerRef = doc(ratingLedgerCol);
       transaction.set(p2RatingLedgerRef, {
         uid: p2Uid,
         matchId: matchData.id,
-        delta: p2Elo.delta,
+        delta: matchData.stake === 0 ? 0 : p2Elo.delta,
         expectedScore: p2Elo.expectedScore,
         actualScore: p2Score,
         kFactor: 20,
         createdAt: now,
+        opponentUid: p1Uid,
       } as RatingLedgerEntry);
     }
 

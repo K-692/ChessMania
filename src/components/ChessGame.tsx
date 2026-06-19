@@ -178,7 +178,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         const botColor = match.turn;
         
         const { getBotMove } = await import('../utils/chessBot');
-        const move = await getBotMove(localFen, elo, botColor);
+        const move = await getBotMove(localFen, elo, botColor, match.moves);
         
         if (move) {
           const tempChess = new Chess(localFen);
@@ -1491,6 +1491,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               const walletImpact = (() => {
                 if (match.mode === 'practice') {
                   return { label: '±0 (Practice Match)', color: 'text-slate-400', net: 0 };
+                }
+                if (match.stake === 0) {
+                  return { label: '±0 (Friendly Match)', color: 'text-slate-400', net: 0 };
                 }
                 if (match.mode === 'all_in' && match.allInStakes && user) {
                   const oppUid = match.players.find(p => p !== user.uid) || '';

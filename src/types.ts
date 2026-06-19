@@ -91,6 +91,7 @@ export interface WalletLedgerEntry {
   pricePaid?: number; // Fiat price paid for purchase
   pricePaidINR?: number; // Fiat price paid in base INR
   currency?: string; // Currency used for purchase (INR, USD, etc.)
+  opponentUid?: string;
 }
 
 export interface RatingLedgerEntry {
@@ -102,6 +103,7 @@ export interface RatingLedgerEntry {
   actualScore: number; // 1 (win), 0.5 (draw), 0 (loss)
   kFactor: number;
   createdAt: number;
+  opponentUid?: string;
 }
 
 export interface Friendship {

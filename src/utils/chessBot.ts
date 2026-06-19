@@ -106,9 +106,25 @@ function getDepthForElo(elo: number): number {
 export async function getBotMove(
   fen: string,
   elo: number,
-  botColor: 'w' | 'b'
+  botColor: 'w' | 'b',
+  movesHistory?: string[]
 ): Promise<{ san: string; from: string; to: string; promotion?: string } | null> {
   const depth = getDepthForElo(elo);
+
+  let uciMoves: string[] = [];
+  if (movesHistory && movesHistory.length > 0) {
+    const tempChess = new Chess();
+    for (const m of movesHistory) {
+      try {
+        const result = tempChess.move(m);
+        if (result) {
+          uciMoves.push(result.from + result.to + (result.promotion ? result.promotion.toLowerCase() : ''));
+        }
+      } catch (e) {
+        console.warn("Failed to replay move in bot move calculation:", m, e);
+      }
+    }
+  }
 
   try {
     const response = await fetch("https://chess-api.com/v1", {
@@ -116,7 +132,10 @@ export async function getBotMove(
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ fen, depth })
+      body: JSON.stringify({
+        ...(uciMoves.length > 0 ? { moves: uciMoves } : { fen }),
+        depth
+      })
     });
 
     if (response.ok) {
