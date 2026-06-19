@@ -3,8 +3,8 @@ const DEFAULT_SETTINGS = {
   effectsEnabled: true,
   muted: false,
   showLegalMoves: true,
-  boardTheme: 'green' as string,
-  pieceTheme: 'classic' as string,
+  boardTheme: '8_bit' as string,
+  pieceTheme: 'neo' as string,
 };
 
 let settings = { ...DEFAULT_SETTINGS };

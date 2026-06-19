@@ -3,7 +3,7 @@ import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { useAuth } from '../auth/AuthContext';
 import type { Match, UserProfile, MatchStatus } from '../types';
-import { makeMove, submitGameAction, settleMatchPayoutAndElo } from '../game/gameService';
+import { makeMove, submitGameAction, settleMatchPayoutAndElo, calculateElo } from '../game/gameService';
 import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check } from 'lucide-react';
@@ -23,11 +23,11 @@ const BOARD_THEMES = [
 ];
 
 const PIECE_THEMES = [
-  '3D_CHESSKID', '3D_PLASTIC', '3D_STAUNTON', '3D_WOOD', '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
+  '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
 ];
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [whiteProfile, setWhiteProfile] = useState<UserProfile | null>(null);
   const [blackProfile, setBlackProfile] = useState<UserProfile | null>(null);
@@ -39,6 +39,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   // Settings and Profile dialog visibility states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
+  const [hasClosedResultPopup, setHasClosedResultPopup] = useState(false);
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
@@ -744,8 +745,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       const isCapture = move.captured !== undefined;
       customSquareStyles[move.to] = {
         background: isCapture
-          ? 'radial-gradient(circle, rgba(239, 68, 68, 0.4) 30%, transparent 35%)' // red dot for capture
-          : 'radial-gradient(circle, rgba(139, 92, 246, 0.5) 20%, transparent 25%)', // violet dot for empty square
+          ? 'radial-gradient(circle, rgba(0, 0, 0, 0.4) 30%, transparent 35%)' // black dot for capture
+          : 'radial-gradient(circle, rgba(0, 0, 0, 0.4) 20%, transparent 25%)', // black dot for empty square
         cursor: 'pointer',
       };
     });
@@ -773,10 +774,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       <img
         src={`/pieces/${pieceTheme}/${file}.png`}
         alt={key}
+        draggable={false}
         style={{
           width: '100%',
           height: '100%',
           objectFit: 'contain',
+          pointerEvents: 'none',
+          ...props?.style,
           ...props?.svgStyle
         }}
       />
@@ -987,20 +991,24 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           {match.status === 'active' ? (
             <div className="glass p-4 rounded-xl border border-white/5 space-y-3">
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={handleDrawAction}
-                  className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${
-                    hasOpponentDrawOffer
-                      ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 font-bold'
-                      : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400 hover:text-white'
-                  } text-xs font-semibold cursor-pointer`}
-                >
-                  <span>{hasOpponentDrawOffer ? 'Accept Draw' : 'Offer Draw'}</span>
-                </button>
+                {match.mode !== 'practice' && (
+                  <button
+                    onClick={handleDrawAction}
+                    className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${
+                      hasOpponentDrawOffer
+                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 font-bold'
+                        : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400 hover:text-white'
+                    } text-xs font-semibold cursor-pointer`}
+                  >
+                    <span>{hasOpponentDrawOffer ? 'Accept Draw' : 'Offer Draw'}</span>
+                  </button>
+                )}
 
                 <button
                   onClick={handleResign}
-                  className="flex flex-col items-center justify-center p-2 rounded-xl border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer"
+                  className={`flex flex-col items-center justify-center p-2 rounded-xl border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer ${
+                    match.mode === 'practice' ? 'col-span-2' : ''
+                  }`}
                 >
                   <span>Resign Game</span>
                 </button>
@@ -1013,123 +1021,38 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 </div>
               )}
             </div>
-          ) : (
-            /* ── Premium Game Over Result Panel ── */
-            (() => {
-              const isWinner = match.winnerUid === user?.uid;
-              const isDraw = match.status === 'draw' || match.status === 'stalemate';
-              const isLoser = !isDraw && !isWinner;
-
-              const resultEmoji = isDraw ? '🤝' : isWinner ? '🏆' : '💀';
-              const resultTitle = isDraw ? 'Game Drawn' : isWinner ? 'Victory!' : 'Defeat';
-              const borderColor = isDraw ? 'border-amber-500/40' : isWinner ? 'border-emerald-500/40' : 'border-red-500/30';
-              const glowBg = isDraw
-                ? 'from-amber-500/10 via-transparent'
-                : isWinner
-                ? 'from-emerald-500/10 via-transparent'
-                : 'from-red-500/8 via-transparent';
-              const titleColor = isDraw ? 'text-amber-300' : isWinner ? 'text-emerald-300' : 'text-red-400';
-
-              const walletImpact = (() => {
-                if (match.mode === 'all_in' && match.allInStakes && user) {
-                  const oppUid = match.players.find(p => p !== user.uid) || '';
-                  const myStakeVal = match.allInStakes[user.uid] || 0;
-                  const oppStakeVal = match.allInStakes[oppUid] || 0;
-                  if (isWinner) return { label: `+${formatCoins(oppStakeVal)}`, color: 'text-emerald-400' };
-                  if (isLoser) return { label: `-${formatCoins(myStakeVal)}`, color: 'text-red-400' };
-                  return { label: '±0 Refunded', color: 'text-amber-400' };
-                }
-                if (isWinner) return { label: `+${formatCoins(match.stake)}`, color: 'text-emerald-400' };
-                if (isLoser) return { label: `-${formatCoins(match.stake)}`, color: 'text-red-400' };
-                return { label: '±0 Refunded', color: 'text-amber-400' };
-              })();
-
-              const statusLabel = {
-                checkmate: 'by Checkmate',
-                resigned: 'by Resignation',
-                timeout: 'by Timeout',
-                stalemate: 'by Stalemate',
-                draw: 'by Mutual Agreement',
-              }[match.status] || '';
-
-              return (
-                <div className={`glass p-5 rounded-2xl border ${borderColor} text-center relative overflow-hidden`}>
-                  {/* Animated gradient background */}
-                  <div className={`absolute inset-0 bg-gradient-to-b ${glowBg} to-transparent pointer-events-none`} />
-
-                  {/* Result emoji + title */}
-                  <div className="relative space-y-1">
-                    <div className="text-4xl mb-1">{resultEmoji}</div>
-                    <h3 className={`text-xl font-black tracking-tight ${titleColor}`}>{resultTitle}</h3>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest font-medium">{statusLabel}</p>
-                  </div>
-
-                  {/* Divider */}
-                  <div className="relative my-3 border-t border-white/5" />
-
-                  {/* Coin impact */}
-                  <div className="relative flex justify-center">
-                    <div className={`flex items-center gap-2.5 px-4 py-2 rounded-xl border ${
-                      isWinner ? 'bg-emerald-950/30 border-emerald-500/20' : isDraw ? 'bg-amber-950/30 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
-                    }`}>
-                      <img
-                        src="/coin_pack/100 coins.png"
-                        alt="Coins"
-                        className="w-5 h-5 object-contain"
-                      />
-                      <div className="text-left">
-                        <p className="text-[8px] text-slate-500 uppercase tracking-widest">Wallet Impact</p>
-                        <p className={`text-base font-black ${walletImpact.color}`}>{walletImpact.label}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Back button */}
-                  <button
-                    onClick={handleExit}
-                    className={`relative mt-4 w-full text-white text-xs font-bold py-2.5 rounded-xl shadow-lg transition-all border cursor-pointer ${
-                      isWinner
-                        ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 shadow-emerald-600/20'
-                        : isDraw
-                        ? 'bg-amber-600 hover:bg-amber-500 border-amber-500/30 shadow-amber-600/20'
-                        : 'bg-slate-700 hover:bg-slate-600 border-white/10'
-                    }`}
-                  >
-                    Back to Dashboard
-                  </button>
-                </div>
-              );
-            })()
-          )}
+          ) : null}
 
           {/* Tabs for Moves and Chat */}
-          <div className="flex border-b border-white/5 shrink-0">
-            <button
-              onClick={() => setActiveRightTab('moves')}
-              className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer ${
-                activeRightTab === 'moves'
-                  ? 'border-violet-500 text-white'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              Moves Log
-            </button>
-            <button
-              onClick={() => setActiveRightTab('chat')}
-              className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer relative ${
-                activeRightTab === 'chat'
-                  ? 'border-violet-500 text-white'
-                  : 'border-transparent text-slate-500 hover:text-slate-300'
-              }`}
-            >
-              <span>Live Chat</span>
-              {unreadGameMsgs > 0 && (
-                <span className="absolute top-1 right-4 w-2 h-2 bg-red-500 rounded-full animate-ping" />
-              )}
-            </button>
-          </div>
+          {match.mode !== 'practice' && (
+            <div className="flex border-b border-white/5 shrink-0">
+              <button
+                onClick={() => setActiveRightTab('moves')}
+                className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                  activeRightTab === 'moves'
+                    ? 'border-violet-500 text-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                Moves Log
+              </button>
+              <button
+                onClick={() => setActiveRightTab('chat')}
+                className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer relative ${
+                  activeRightTab === 'chat'
+                    ? 'border-violet-500 text-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <span>Live Chat</span>
+                {unreadGameMsgs > 0 && (
+                  <span className="absolute top-1 right-4 w-2 h-2 bg-red-500 rounded-full animate-ping" />
+                )}
+              </button>
+            </div>
+          )}
 
-          {activeRightTab === 'moves' ? (
+          {(match.mode === 'practice' ? 'moves' : activeRightTab) === 'moves' ? (
             /* Moves List Log */
             <div className="glass p-3 rounded-xl border border-white/5 flex-grow flex flex-col h-0 min-h-[120px] lg:min-h-0 animate-fade-in">
               <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
@@ -1222,8 +1145,15 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
       {/* ── Settings Modal Popup ── */}
       {showSettingsModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" style={{ zIndex: 10000 }}>
-          <div className="glass-card w-full max-w-lg rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-4 max-h-[calc(100vh-80px)] overflow-y-auto">
+        <div 
+          onClick={() => setShowSettingsModal(false)}
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" 
+          style={{ zIndex: 10000 }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="glass-card w-full max-w-lg rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-4 max-h-[calc(100vh-80px)] overflow-y-auto animate-fade-in"
+          >
             <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
                 <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-4.5 h-4.5 object-contain" />
@@ -1287,7 +1217,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               {/* Board Theme selector */}
               <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2.5">
                 <span className="text-xs font-semibold text-slate-200 block">Board Theme</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
+                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
                   {BOARD_THEMES.map((theme) => {
                     const key = theme.toLowerCase();
                     const isActive = settings.boardTheme === key;
@@ -1298,20 +1228,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                           updateSoundSettings({ boardTheme: key });
                           setSettings(s => ({ ...s, boardTheme: key }));
                         }}
-                        className={`flex flex-col items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-center relative overflow-hidden ${
+                        className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-left relative overflow-hidden ${
                           isActive
                             ? 'border-violet-500 bg-violet-500/10 text-white font-bold ring-2 ring-violet-500/40'
                             : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
                         }`}
                       >
-                        <div 
-                          className="w-full aspect-square rounded border border-white/10 shrink-0 select-none shadow-sm mb-1.5 bg-cover bg-center"
-                          style={{ backgroundImage: `url('/boards/${key}.png')` }}
-                        />
-                        <span className="text-[9px] font-bold text-slate-200 flex items-center justify-center gap-1 w-full truncate">
-                          <span>{theme.replace(/_/g, ' ')}</span>
-                          {isActive && <Check className="w-3 h-3 text-violet-400 shrink-0" />}
-                        </span>
+                        <div className="flex items-center space-x-3">
+                          <div 
+                            className="w-8 h-8 rounded border border-white/10 shrink-0 select-none shadow-sm bg-cover bg-center"
+                            style={{ backgroundImage: `url('/boards/${key}.png')` }}
+                          />
+                          <span className="text-xs font-semibold text-slate-200 uppercase">
+                            {theme.replace(/_/g, ' ').toUpperCase()}
+                          </span>
+                        </div>
+                        {isActive && <Check className="w-4 h-4 text-violet-400 shrink-0 mr-1" />}
                       </button>
                     );
                   })}
@@ -1321,7 +1253,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               {/* Chess Piece Style selector */}
               <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2.5">
                 <span className="text-xs font-semibold text-slate-200 block">Chess Piece Style</span>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
+                <div className="flex flex-col gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
                   {PIECE_THEMES.map((theme) => {
                     const key = theme.toLowerCase();
                     const isActive = (settings.pieceTheme || 'classic') === key;
@@ -1332,32 +1264,178 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                           updateSoundSettings({ pieceTheme: key });
                           setSettings(s => ({ ...s, pieceTheme: key }));
                         }}
-                        className={`flex flex-col items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-center relative overflow-hidden ${
+                        className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-left relative overflow-hidden ${
                           isActive
                             ? 'border-violet-500 bg-violet-500/10 text-white font-bold ring-2 ring-violet-500/40'
                             : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
                         }`}
                       >
-                        <div className="w-full aspect-square rounded bg-slate-950/40 border border-white/5 flex items-center justify-center p-1.5 mb-1.5">
-                          <img 
-                            src={`/pieces/${key}/wn.png`} 
-                            alt="White Knight" 
-                            className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
-                            }}
-                          />
+                        <div className="flex items-center space-x-3">
+                          <div className="w-8 h-8 rounded bg-slate-950/40 border border-white/5 flex items-center justify-center p-1">
+                            <img 
+                              src={`/pieces/${key}/wn.png`} 
+                              alt="White Knight" 
+                              className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
+                              }}
+                            />
+                          </div>
+                          <span className="text-xs font-semibold text-slate-200 uppercase">
+                            {theme.replace(/_/g, ' ').toUpperCase()}
+                          </span>
                         </div>
-                        <span className="text-[9px] font-bold text-slate-200 flex items-center justify-center gap-1 w-full truncate">
-                          <span>{theme.replace(/_/g, ' ')}</span>
-                          {isActive && <Check className="w-3 h-3 text-violet-400 shrink-0" />}
-                        </span>
+                        {isActive && <Check className="w-4 h-4 text-violet-400 shrink-0 mr-1" />}
                       </button>
                     );
                   })}
                 </div>
               </div>
             </div>
+
+            {/* OK Button */}
+            <div className="pt-2 border-t border-white/5">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold py-2.5 rounded-xl transition-all cursor-pointer text-center"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Game Over Result Modal Popup ── */}
+      {match.status !== 'active' && !hasClosedResultPopup && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 style-fade-in" style={{ zIndex: 9999 }}>
+          <div className="glass max-w-md w-full rounded-2xl border border-white/10 p-6 shadow-2xl relative space-y-5 text-center">
+            {/* Cross Button to close the popup only */}
+            <button
+              onClick={() => setHasClosedResultPopup(true)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Content of the Popup */}
+            {(() => {
+              const isWinner = match.winnerUid === user?.uid;
+              const isDraw = match.status === 'draw' || match.status === 'stalemate';
+              const isLoser = !isDraw && !isWinner;
+
+              const resultEmoji = isDraw ? '🤝' : isWinner ? '🏆' : '💀';
+              const resultTitle = isDraw ? 'Game Drawn' : isWinner ? 'Victory!' : 'Defeat';
+              const titleColor = isDraw ? 'text-amber-300' : isWinner ? 'text-emerald-300' : 'text-red-400';
+
+              const walletImpact = (() => {
+                if (match.mode === 'practice') {
+                  return { label: '±0 (Practice Match)', color: 'text-slate-400', net: 0 };
+                }
+                if (match.mode === 'all_in' && match.allInStakes && user) {
+                  const oppUid = match.players.find(p => p !== user.uid) || '';
+                  const myStakeVal = match.allInStakes[user.uid] || 0;
+                  const oppStakeVal = match.allInStakes[oppUid] || 0;
+                  if (isWinner) return { label: `+${formatCoins(oppStakeVal)}`, color: 'text-emerald-400', net: oppStakeVal };
+                  if (isLoser) return { label: `-${formatCoins(myStakeVal)}`, color: 'text-red-400', net: -myStakeVal };
+                  return { label: '±0 Refunded', color: 'text-amber-400', net: 0 };
+                }
+                if (isWinner) return { label: `+${formatCoins(match.stake)}`, color: 'text-emerald-400', net: match.stake };
+                if (isLoser) return { label: `-${formatCoins(match.stake)}`, color: 'text-red-400', net: -match.stake };
+                return { label: '±0 Refunded', color: 'text-amber-400', net: 0 };
+              })();
+
+              const statusLabel = {
+                checkmate: 'by Checkmate',
+                resigned: 'by Resignation',
+                timeout: 'by Timeout',
+                stalemate: 'by Stalemate',
+                draw: 'by Mutual Agreement',
+              }[match.status] || '';
+
+              // Calculate Elo changes
+              const myProfile = isWhite ? whiteProfile : blackProfile;
+              const oppProfile = isWhite ? blackProfile : whiteProfile;
+              let eloDelta = 0;
+              let newElo = myProfile?.rating || 0;
+
+              if (myProfile && oppProfile && match.mode !== 'practice' && match.stake > 0) {
+                const myScore = isDraw ? 0.5 : isWinner ? 1 : 0;
+                const eloResult = calculateElo(myProfile.rating, oppProfile.rating, myScore);
+                eloDelta = eloResult.delta;
+                newElo = Math.max(100, myProfile.rating + eloDelta);
+              }
+
+              return (
+                <div className="space-y-4 text-center">
+                  <div className="text-5xl mb-2">{resultEmoji}</div>
+                  <h3 className={`text-2xl font-black tracking-tight ${titleColor}`}>{resultTitle}</h3>
+                  <p className="text-xs text-slate-500 uppercase tracking-widest font-medium">{statusLabel}</p>
+
+                  <div className="border-t border-white/5 my-4" />
+
+                  {/* Coin Impact */}
+                  <div className="flex flex-col items-center gap-3">
+                    <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border w-full max-w-[280px] justify-center ${
+                      isWinner ? 'bg-emerald-950/20 border-emerald-500/20' : isDraw ? 'bg-amber-950/20 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
+                    }`}>
+                      <img
+                        src="/coin_pack/100 coins.png"
+                        alt="Coins"
+                        className="w-6 h-6 object-contain"
+                      />
+                      <div className="text-left">
+                        <p className="text-[9px] text-slate-500 uppercase tracking-widest">Net Coins</p>
+                        <p className={`text-base font-black ${walletImpact.color}`}>{walletImpact.label}</p>
+                      </div>
+                    </div>
+
+                    {/* Final Coin Balance */}
+                    <div className="text-xs text-slate-400 font-medium">
+                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins(profile?.bankBalance || 0)}</span>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/5 my-4" />
+
+                  {/* Elo Rating Impact */}
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="text-sm font-semibold text-slate-300">
+                      Elo Rating
+                    </div>
+                    {match.mode === 'practice' || match.stake === 0 ? (
+                      <div className="text-xs text-slate-500 italic">Unrated Match</div>
+                    ) : (
+                      <div className="space-y-1">
+                        <div className={`text-lg font-bold ${eloDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {eloDelta >= 0 ? `+${eloDelta}` : eloDelta} Elo
+                        </div>
+                        <div className="text-xs text-slate-400">
+                          New Rating: <span className="text-slate-200 font-bold">{newElo}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-4 flex flex-col gap-2">
+                    {/* Exit Match Button */}
+                    <button
+                      onClick={handleExit}
+                      className="w-full bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold py-3 rounded-xl transition-all cursor-pointer shadow-lg shadow-violet-600/20"
+                    >
+                      Exit Match
+                    </button>
+                    {/* Close window only button */}
+                    <button
+                      onClick={() => setHasClosedResultPopup(true)}
+                      className="w-full bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-bold py-2 rounded-xl transition-all cursor-pointer"
+                    >
+                      Review Board
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

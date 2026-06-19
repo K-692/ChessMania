@@ -14,7 +14,7 @@ const BOARD_THEMES = [
 ];
 
 const PIECE_THEMES = [
-  '3D_CHESSKID', '3D_PLASTIC', '3D_STAUNTON', '3D_WOOD', '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
+  '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
 ];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
@@ -179,7 +179,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+          <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
             {BOARD_THEMES.map((theme) => {
               const key = theme.toLowerCase();
               const isActive = settings.boardTheme === key;
@@ -190,21 +190,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     updateSoundSettings({ boardTheme: key });
                     setSettings(s => ({ ...s, boardTheme: key }));
                   }}
-                  className={`flex flex-col items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-center relative overflow-hidden ${
+                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
                     isActive
                       ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
                       : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
                   }`}
                 >
-                  {/* Board background preview */}
-                  <div 
-                    className="w-full aspect-square rounded-lg border border-white/10 shrink-0 select-none shadow-md mb-2 bg-cover bg-center"
-                    style={{ backgroundImage: `url('/boards/${key}.png')` }}
-                  />
-                  <span className="text-[10px] font-bold text-slate-200 flex items-center justify-center gap-1.5 w-full truncate">
-                    <span>{theme.replace('_', ' ')}</span>
-                    {isActive && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
-                  </span>
+                  <div className="flex items-center space-x-4">
+                    <div 
+                      className="w-12 h-12 rounded-lg border border-white/10 shrink-0 select-none shadow-md bg-cover bg-center"
+                      style={{ backgroundImage: `url('/boards/${key}.png')` }}
+                    />
+                    <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
+                      {theme.replace(/_/g, ' ').toUpperCase()}
+                    </span>
+                  </div>
+                  {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
                 </button>
               );
             })}
@@ -223,7 +224,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+          <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
             {PIECE_THEMES.map((theme) => {
               const key = theme.toLowerCase();
               const isActive = (settings.pieceTheme || 'classic') === key;
@@ -234,27 +235,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     updateSoundSettings({ pieceTheme: key });
                     setSettings(s => ({ ...s, pieceTheme: key }));
                   }}
-                  className={`flex flex-col items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-center relative overflow-hidden ${
+                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
                     isActive
                       ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
                       : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
                   }`}
                 >
-                  {/* Knight Piece design preview */}
-                  <div className="w-full aspect-square rounded-lg bg-slate-950/40 border border-white/5 flex items-center justify-center p-2 mb-2">
-                    <img 
-                      src={`/pieces/${key}/wn.png`} 
-                      alt="White Knight" 
-                      className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
-                      }}
-                    />
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 rounded-lg bg-slate-950/40 border border-white/5 flex items-center justify-center p-2">
+                      <img 
+                        src={`/pieces/${key}/wn.png`} 
+                        alt="White Knight" 
+                        className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
+                        }}
+                      />
+                    </div>
+                    <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
+                      {theme.replace(/_/g, ' ').toUpperCase()}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-bold text-slate-200 flex items-center justify-center gap-1.5 w-full truncate">
-                    <span>{theme.replace(/_/g, ' ')}</span>
-                    {isActive && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
-                  </span>
+                  {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
                 </button>
               );
             })}
