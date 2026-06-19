@@ -69,14 +69,12 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
 
   // 2. Incremental clock & rating band expansion timer
   useEffect(() => {
-    if (!queueId) return;
-
     const timer = setInterval(() => {
       setElapsedTime((prev) => prev + 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [queueId]);
+  }, []);
 
   // Auto-exit after 1 minute (60 seconds)
   useEffect(() => {
