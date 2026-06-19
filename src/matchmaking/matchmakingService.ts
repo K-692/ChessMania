@@ -23,7 +23,8 @@ export const STANDARD_TIME_CONTROLS: Record<GameMode, string> = {
   bullet: '1 | 1',
   arena_bullet: '1 min',
   championship: '30 | 20',
-  all_in: '30 | 10'
+  all_in: '30 | 10',
+  practice: '10 | 5'
 };
 
 export function getInitialTimeForMode(mode: GameMode): number {
@@ -260,7 +261,8 @@ export async function findMatch(
           bullet: '1 | 1',
           arena_bullet: '1 min',
           championship: '30 | 20',
-          all_in: '30 | 10'
+          all_in: '30 | 10',
+          practice: '10 | 5'
         };
         matchTimeControl = standardTCs[mode];
       }

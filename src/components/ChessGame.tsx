@@ -4,9 +4,9 @@ import { Chessboard } from 'react-chessboard';
 import { useAuth } from '../auth/AuthContext';
 import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo } from '../game/gameService';
-import { doc, onSnapshot, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X } from 'lucide-react';
+import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
@@ -60,6 +60,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
+
+  // Game live messaging states
+  const [activeRightTab, setActiveRightTab] = useState<'moves' | 'chat'>('moves');
+  const [gameMessages, setGameMessages] = useState<{ id: string; senderUid: string; text: string; createdAt: number }[]>([]);
+  const [gameMsgInput, setGameMsgInput] = useState('');
+  const [unreadGameMsgs, setUnreadGameMsgs] = useState(0);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Countdown for reconnection / starting wait limit
   const [reconnectCountdown, setReconnectCountdown] = useState<number>(60);
@@ -125,12 +132,42 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     const fetchProfiles = async () => {
       try {
         if (!whiteProfile) {
-          const snap = await getDoc(doc(db, 'users', match.whiteUid));
-          if (snap.exists()) setWhiteProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+          if (match.whiteUid.startsWith('bot_')) {
+            const elo = parseInt(match.whiteUid.split('_')[1]) || 800;
+            setWhiteProfile({
+              uid: match.whiteUid,
+              displayName: `Chess Bot (${elo})`,
+              photoURL: '/game_modes/practice.png',
+              rating: elo,
+              bankBalance: 0,
+              createdAt: Date.now(),
+              lastActiveAt: Date.now(),
+              zeroBalanceAt: null,
+              lastInterestAppliedAt: Date.now()
+            });
+          } else {
+            const snap = await getDoc(doc(db, 'users', match.whiteUid));
+            if (snap.exists()) setWhiteProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+          }
         }
         if (!blackProfile) {
-          const snap = await getDoc(doc(db, 'users', match.blackUid));
-          if (snap.exists()) setBlackProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+          if (match.blackUid.startsWith('bot_')) {
+            const elo = parseInt(match.blackUid.split('_')[1]) || 800;
+            setBlackProfile({
+              uid: match.blackUid,
+              displayName: `Chess Bot (${elo})`,
+              photoURL: '/game_modes/practice.png',
+              rating: elo,
+              bankBalance: 0,
+              createdAt: Date.now(),
+              lastActiveAt: Date.now(),
+              zeroBalanceAt: null,
+              lastInterestAppliedAt: Date.now()
+            });
+          } else {
+            const snap = await getDoc(doc(db, 'users', match.blackUid));
+            if (snap.exists()) setBlackProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+          }
         }
       } catch (err) {
         console.warn("Failed to load player profiles:", err);
@@ -138,6 +175,77 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     };
     fetchProfiles();
   }, [match?.whiteUid, match?.blackUid, whiteProfile, blackProfile]);
+
+  // Bot movement logic for practice mode
+  useEffect(() => {
+    if (!match || match.status !== 'active') return;
+
+    const botUid = match.turn === 'w' ? match.whiteUid : match.blackUid;
+    const isBotTurn = botUid.startsWith('bot_');
+
+    if (!isBotTurn) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const elo = parseInt(botUid.split('_')[1]) || 800;
+        const botColor = match.turn;
+        
+        const { getBotMove } = await import('../utils/chessBot');
+        const move = getBotMove(localFen, elo, botColor);
+        
+        if (move) {
+          const tempChess = new Chess(localFen);
+          const moveRes = tempChess.move({
+            from: move.from,
+            to: move.to,
+            promotion: move.promotion || 'q'
+          });
+          
+          if (moveRes) {
+            const nextFen = tempChess.fen();
+            setLocalFen(nextFen);
+            
+            await makeMove(matchId, botUid, nextFen, moveRes.san);
+            
+            if (tempChess.isGameOver()) {
+              let status: MatchStatus = 'active';
+              let winnerUid: string | null = null;
+
+              if (tempChess.isCheckmate()) {
+                status = 'checkmate';
+                winnerUid = match.turn === 'w' ? match.whiteUid : match.blackUid;
+              } else if (tempChess.isDraw()) {
+                status = 'draw';
+              } else if (tempChess.isStalemate()) {
+                status = 'stalemate';
+              }
+
+              if (status !== 'active') {
+                const now = Date.now();
+                const elapsed = now - match.lastMoveAt;
+                const updatedClocks = {
+                  ...match.clocks,
+                  [botUid]: Math.max(0, match.clocks[botUid] - elapsed),
+                };
+
+                await updateDoc(doc(db, 'matches', matchId), {
+                  boardFEN: nextFen,
+                  clocks: updatedClocks,
+                  status,
+                  winnerUid,
+                  finishedAt: now,
+                });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error making bot move:", err);
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [match?.turn, match?.status, matchId, localFen]);
 
   // 2. Fetch match updates in real-time
   useEffect(() => {
@@ -361,6 +469,55 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     return () => clearInterval(interval);
   }, [match, user, matchId]);
+
+  // Subscribe to game messages
+  useEffect(() => {
+    const q = query(
+      collection(db, 'matches', matchId, 'messages'),
+      orderBy('createdAt', 'asc')
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const msgs: any[] = [];
+      snap.forEach((docSnap) => {
+        msgs.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setGameMessages(msgs);
+
+      if (activeRightTab !== 'chat') {
+        setUnreadGameMsgs((prev) => prev + 1);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [matchId, activeRightTab]);
+
+  // Scroll to bottom when chat becomes active or messages arrive
+  useEffect(() => {
+    if (activeRightTab === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      setUnreadGameMsgs(0);
+    }
+  }, [gameMessages, activeRightTab]);
+
+  const deleteGameMessages = async (id: string) => {
+    try {
+      const q = collection(db, 'matches', id, 'messages');
+      const snap = await getDocs(q);
+      const deletePromises = snap.docs.map((docSnap) =>
+        deleteDoc(doc(db, 'matches', id, 'messages', docSnap.id))
+      );
+      await Promise.all(deletePromises);
+    } catch (err) {
+      console.warn("Failed to delete game messages:", err);
+    }
+  };
+
+  const handleExit = async () => {
+    if (match && match.status !== 'active') {
+      await deleteGameMessages(matchId);
+    }
+    onExit();
+  };
 
   // 4. Handle Piece Drops on chessboard
   const onPieceDrop = (sourceSquare: string, targetSquare: string): boolean => {
@@ -675,7 +832,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           {/* Header Action Menu */}
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <button
-              onClick={onExit}
+              onClick={handleExit}
               className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-xs font-semibold cursor-pointer"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -940,7 +1097,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
                   {/* Back button */}
                   <button
-                    onClick={onExit}
+                    onClick={handleExit}
                     className={`relative mt-4 w-full text-white text-xs font-bold py-2.5 rounded-xl shadow-lg transition-all border cursor-pointer ${
                       isWinner
                         ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 shadow-emerald-600/20'
@@ -956,36 +1113,122 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             })()
           )}
 
-          {/* Moves List Log */}
-          <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[140px] max-h-[180px]">
-            <h4 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide mb-2 text-left">Moves Log</h4>
-            <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
-              {match.moves.length === 0 ? (
-                <p className="text-slate-600 text-xs italic">No moves played yet.</p>
-              ) : (
-                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                  {match.moves.reduce((acc: React.ReactNode[], move, idx) => {
-                    if (idx % 2 === 0) {
-                      const moveNumber = Math.floor(idx / 2) + 1;
-                      acc.push(
-                        <div key={idx} className="flex justify-between border-b border-white/5 py-0.5">
-                          <span className="text-slate-500 w-5">{moveNumber}.</span>
-                          <span className="text-slate-300 font-medium text-right flex-grow">{move}</span>
-                        </div>
-                      );
-                    } else {
-                      acc.push(
-                        <div key={idx} className="flex justify-end border-b border-white/5 py-0.5">
-                          <span className="text-slate-400 font-medium">{move}</span>
-                        </div>
-                      );
-                    }
-                    return acc;
-                  }, [])}
-                </div>
+          {/* Tabs for Moves and Chat */}
+          <div className="flex border-b border-white/5 shrink-0">
+            <button
+              onClick={() => setActiveRightTab('moves')}
+              className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                activeRightTab === 'moves'
+                  ? 'border-violet-500 text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              Moves Log
+            </button>
+            <button
+              onClick={() => setActiveRightTab('chat')}
+              className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer relative ${
+                activeRightTab === 'chat'
+                  ? 'border-violet-500 text-white'
+                  : 'border-transparent text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <span>Live Chat</span>
+              {unreadGameMsgs > 0 && (
+                <span className="absolute top-1 right-4 w-2 h-2 bg-red-500 rounded-full animate-ping" />
               )}
-            </div>
+            </button>
           </div>
+
+          {activeRightTab === 'moves' ? (
+            /* Moves List Log */
+            <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[160px] max-h-[200px]">
+              <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
+                {match.moves.length === 0 ? (
+                  <p className="text-slate-600 text-xs italic">No moves played yet.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                    {match.moves.reduce((acc: React.ReactNode[], move, idx) => {
+                      if (idx % 2 === 0) {
+                        const moveNumber = Math.floor(idx / 2) + 1;
+                        acc.push(
+                          <div key={idx} className="flex justify-between border-b border-white/5 py-0.5">
+                            <span className="text-slate-500 w-5">{moveNumber}.</span>
+                            <span className="text-slate-300 font-medium text-right flex-grow">{move}</span>
+                          </div>
+                        );
+                      } else {
+                        acc.push(
+                          <div key={idx} className="flex justify-end border-b border-white/5 py-0.5">
+                            <span className="text-slate-400 font-medium">{move}</span>
+                          </div>
+                        );
+                      }
+                      return acc;
+                    }, [])}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* Live Chat Panel */
+            <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[160px] max-h-[200px] justify-between">
+              <div className="overflow-y-auto pr-2 text-left space-y-2 flex-grow scrollbar-thin text-xs">
+                {gameMessages.length === 0 ? (
+                  <p className="text-slate-600 text-xs italic">No messages yet. Send a friendly greeting!</p>
+                ) : (
+                  gameMessages.map((msg) => {
+                    const isMe = msg.senderUid === user?.uid;
+                    const senderName = isMe ? 'You' : (oppProfile?.displayName || 'Opponent');
+                    return (
+                      <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                        <span className="text-[9px] text-slate-500">{senderName}</span>
+                        <div className={`mt-0.5 px-2.5 py-1.5 rounded-lg max-w-[85%] break-words ${
+                          isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
+                        }`}>
+                          {msg.text}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!gameMsgInput.trim() || !user) return;
+                  const text = gameMsgInput.trim();
+                  setGameMsgInput('');
+                  try {
+                    await addDoc(collection(db, 'matches', matchId, 'messages'), {
+                      senderUid: user.uid,
+                      text,
+                      createdAt: Date.now()
+                    });
+                  } catch (err) {
+                    console.warn("Failed to send game message:", err);
+                  }
+                }}
+                className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5 shrink-0"
+              >
+                <input
+                  type="text"
+                  placeholder="Send a message..."
+                  value={gameMsgInput}
+                  onChange={(e) => setGameMsgInput(e.target.value)}
+                  className="flex-grow bg-slate-950/60 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+                />
+                <button
+                  type="submit"
+                  className="bg-violet-600 hover:bg-violet-500 text-white p-1.5 rounded-lg transition-all cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                </button>
+              </form>
+            </div>
+          )}
         </div>
       </div>
 

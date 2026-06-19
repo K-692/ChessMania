@@ -19,6 +19,7 @@ import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
 import './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
+import { createPracticeMatch } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
@@ -283,6 +284,22 @@ const AppContent: React.FC = () => {
       const statusCache: Record<string, 'sent' | 'friend'> = {};
 
       for (const oppUid of uniqueOpponentUids) {
+        if (oppUid.startsWith('bot_')) {
+          const elo = parseInt(oppUid.split('_')[1]) || 800;
+          profileCache[oppUid] = {
+            uid: oppUid,
+            displayName: `Chess Bot (${elo})`,
+            photoURL: '/game_modes/practice.png',
+            rating: elo,
+            bankBalance: 0,
+            createdAt: Date.now(),
+            lastActiveAt: Date.now(),
+            zeroBalanceAt: null,
+            lastInterestAppliedAt: Date.now()
+          };
+          continue;
+        }
+
         // Fetch profile
         try {
           const uSnap = await getDoc(doc(db, 'users', oppUid));
@@ -847,11 +864,22 @@ const AppContent: React.FC = () => {
       </main>
 
       {/* Modals & Queue Components */}
-      <PlayModal
-        isOpen={isPlayModalOpen}
-        onClose={() => setIsPlayModalOpen(false)}
-        onStartSearch={(mode, stake) => setMatchmakingConfig({ mode, stake })}
-      />
+        <PlayModal
+          isOpen={isPlayModalOpen}
+          onClose={() => setIsPlayModalOpen(false)}
+          onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
+            if (mode === 'practice' && practiceConfig && user) {
+              try {
+                const mId = await createPracticeMatch(user.uid, practiceConfig.elo, practiceConfig.color);
+                handleMatchFound(mId);
+              } catch (err) {
+                console.error("Failed to start practice match:", err);
+              }
+            } else {
+              setMatchmakingConfig({ mode, stake });
+            }
+          }}
+        />
 
       <AddFundsModal
         isOpen={isAddFundsOpen}

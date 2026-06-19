@@ -30,7 +30,8 @@ export type GameMode =
   | 'bullet'
   | 'arena_bullet'
   | 'championship'
-  | 'all_in';
+  | 'all_in'
+  | 'practice';
 
 export interface MatchQueueEntry {
   id?: string;

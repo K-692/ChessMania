@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
-import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X } from 'lucide-react';
+import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart } from 'lucide-react';
+import type { RatingLedgerEntry } from '../types';
 
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
 
@@ -100,6 +101,59 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
   const [countryInput, setCountryInput] = useState('');
   const [savingCountry, setSavingCountry] = useState(false);
   const [countryError, setCountryError] = useState('');
+
+  // Elo rating history states
+  const [ratingHistory, setRatingHistory] = useState<{ date: string; elo: number }[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; elo: number } | null>(null);
+
+  useEffect(() => {
+    if (!user || !profile) return;
+    const fetchRatingHistory = async () => {
+      try {
+        const ratingLedgerRef = collection(db, 'ratingLedger');
+        const q = query(ratingLedgerRef, where('uid', '==', user.uid));
+        const snap = await getDocs(q);
+
+        const entries = snap.docs.map(docSnap => docSnap.data() as RatingLedgerEntry);
+        entries.sort((a, b) => a.createdAt - b.createdAt);
+
+        let current = profile.rating;
+        const history: { date: string; elo: number }[] = [];
+
+        history.push({
+          date: 'Now',
+          elo: current
+        });
+
+        for (let i = entries.length - 1; i >= 0; i--) {
+          current = Math.max(0, current - entries[i].delta);
+          const dateStr = new Date(entries[i].createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+          history.push({
+            date: dateStr,
+            elo: current
+          });
+        }
+
+        history.reverse();
+
+        if (history.length === 0) {
+          history.push({
+            date: new Date(profile.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+            elo: profile.rating
+          });
+        }
+
+        setRatingHistory(history);
+      } catch (err) {
+        console.warn("Failed to fetch rating history:", err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+
+    fetchRatingHistory();
+  }, [user, profile?.rating, profile?.createdAt]);
 
   const handleOpenEditCountry = () => {
     setCountryInput(profile?.country || '');
@@ -306,6 +360,153 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
             <span className="text-2xl font-black font-mono text-emerald-300">{winRate}%</span>
           </div>
         </div>
+      </div>
+
+      {/* Elo Rating History Chart */}
+      <div className="glass p-6 rounded-xl border border-white/5 space-y-5 relative">
+        <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
+          <LineChart className="w-5 h-5 text-violet-400" />
+          <span>Elo Evolution History</span>
+        </h3>
+
+        {loadingHistory ? (
+          <div className="h-[200px] flex items-center justify-center text-xs text-slate-500">
+            Reconstructing rating timeline...
+          </div>
+        ) : ratingHistory.length <= 1 ? (
+          <div className="h-[200px] flex flex-col items-center justify-center text-xs text-slate-500 italic space-y-2 text-center">
+            <span>Not enough matches played yet to chart Elo history.</span>
+            <span>Play rated matches to see your progress!</span>
+          </div>
+        ) : (
+          <div className="relative w-full h-[220px] bg-slate-950/20 rounded-xl border border-white/5 p-4 flex items-center justify-center">
+            {/* SVG Plot */}
+            {(() => {
+              const width = 500;
+              const height = 180;
+              const paddingLeft = 40;
+              const paddingRight = 20;
+              const paddingTop = 20;
+              const paddingBottom = 30;
+              const chartWidth = width - paddingLeft - paddingRight;
+              const chartHeight = height - paddingTop - paddingBottom;
+
+              const elos = ratingHistory.map((h) => h.elo);
+              const maxElo = Math.max(...elos);
+              const minElo = Math.min(...elos);
+              const yMax = maxElo + 25;
+              const yMin = Math.max(0, minElo - 25);
+              const eloRange = yMax - yMin || 100;
+
+              const points = ratingHistory.map((h, idx) => {
+                const x = paddingLeft + (idx * chartWidth) / (ratingHistory.length - 1 || 1);
+                const y = paddingTop + chartHeight - ((h.elo - yMin) * chartHeight) / eloRange;
+                return { x, y, ...h };
+              });
+
+              const pathD = points.reduce((acc, p, idx) => {
+                return idx === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`;
+              }, '');
+
+              const areaD = points.length > 0 
+                ? `${pathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z` 
+                : '';
+
+              const gridValues = [yMin, Math.round(yMin + eloRange / 2), yMax];
+
+              return (
+                <div className="w-full h-full relative">
+                  <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+                    <defs>
+                      <linearGradient id="chartLineGrad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#8b5cf6" />
+                        <stop offset="100%" stopColor="#6366f1" />
+                      </linearGradient>
+                      <linearGradient id="chartAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.2" />
+                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Horizontal Gridlines */}
+                    {gridValues.map((val, idx) => {
+                      const y = paddingTop + chartHeight - ((val - yMin) * chartHeight) / eloRange;
+                      return (
+                        <g key={idx} className="opacity-30">
+                          <line
+                            x1={paddingLeft}
+                            y1={y}
+                            x2={width - paddingRight}
+                            y2={y}
+                            stroke="#475569"
+                            strokeWidth="1"
+                            strokeDasharray="4 4"
+                          />
+                          <text
+                            x={paddingLeft - 8}
+                            y={y + 3}
+                            fill="#94a3b8"
+                            fontSize="8"
+                            textAnchor="end"
+                            className="font-mono"
+                          >
+                            {val}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Timeline Line Path */}
+                    <path
+                      d={pathD}
+                      fill="none"
+                      stroke="url(#chartLineGrad)"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                    />
+
+                    {/* Area under the line */}
+                    <path d={areaD} fill="url(#chartAreaGrad)" />
+
+                    {/* Timeline Data Circles */}
+                    {points.map((p, idx) => {
+                      const isHovered = hoveredPoint?.date === p.date && hoveredPoint?.elo === p.elo;
+                      return (
+                        <circle
+                          key={idx}
+                          cx={p.x}
+                          cy={p.y}
+                          r={isHovered ? 5.5 : 3.5}
+                          fill={isHovered ? '#8b5cf6' : '#a78bfa'}
+                          stroke="#ffffff"
+                          strokeWidth={isHovered ? 2 : 1}
+                          className="transition-all cursor-pointer"
+                          onMouseEnter={() => setHoveredPoint(p)}
+                          onMouseLeave={() => setHoveredPoint(null)}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  {/* Tooltip Overlay */}
+                  {hoveredPoint && (
+                    <div
+                      className="absolute bg-slate-900/95 backdrop-blur border border-violet-500/30 text-white rounded-lg px-2.5 py-1.5 shadow-2xl pointer-events-none text-left z-20 animate-scale-up"
+                      style={{
+                        left: `${((hoveredPoint.x - paddingLeft) / chartWidth) * 100}%`,
+                        top: `${((hoveredPoint.y - paddingTop) / chartHeight) * 100 - 30}%`,
+                        transform: 'translate(-50%, -100%)',
+                      }}
+                    >
+                      <p className="text-[8px] text-slate-400 uppercase tracking-widest font-semibold">{hoveredPoint.date}</p>
+                      <p className="text-xs font-black text-violet-300 font-mono">{hoveredPoint.elo} Elo</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* Matchmaking Statistics details & Record */}

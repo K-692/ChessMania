@@ -7,7 +7,12 @@ import { formatCoins } from '../utils/format';
 interface PlayModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onStartSearch: (mode: GameMode, stake: number, timeControl?: string) => void;
+  onStartSearch: (
+    mode: GameMode,
+    stake: number,
+    timeControl?: string,
+    practiceConfig?: { elo: number; color: 'white' | 'black' | 'random' }
+  ) => void;
 }
 
 const GAME_MODES_INFO = [
@@ -131,6 +136,17 @@ const GAME_MODES_INFO = [
     image: '/game_modes/all_in.png',
     themeColor: 'border-purple-500/40 text-purple-400 shadow-purple-500/10 hover:border-purple-500/80',
     selectedGlow: 'ring-2 ring-purple-500 border-purple-500 shadow-purple-500/30 bg-purple-500/10',
+  },
+  {
+    id: 'practice' as GameMode,
+    name: 'Practice Bot 🤖',
+    timeControl: '10 min',
+    purpose: 'Practice your skills against an AI Chess Engine bot with selectable ELO rating and piece color.',
+    entryPrice: 0,
+    difficulty: '🤖 Bot Engine',
+    image: '/game_modes/practice.png',
+    themeColor: 'border-violet-500/30 text-violet-400 shadow-violet-500/5 hover:border-violet-500/80',
+    selectedGlow: 'ring-2 ring-violet-500 border-violet-500 shadow-violet-500/20 bg-violet-500/5',
   }
 ];
 
@@ -138,6 +154,8 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
   const { profile } = useAuth();
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [allInChoice, setAllInChoice] = useState<string>('10 | 5');
+  const [practiceColor, setPracticeColor] = useState<'white' | 'black' | 'random'>('white');
+  const [practiceElo, setPracticeElo] = useState<number>(1200);
   const carouselRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll selected card into center view
@@ -165,6 +183,15 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
   const isInsufficient = selectedMode.entryPrice === 'all_in' ? userBalance <= 0 : userBalance < (selectedMode.entryPrice as number);
 
   const getModeRules = (mode: GameMode, price: number | 'all_in') => {
+    if (mode === 'practice') {
+      return [
+        "Bot Opponent: Play against an AI engine parameterized to your selected rating level.",
+        "Free Play: No coins will be deducted from your wallet, and no payouts will be rewarded.",
+        "Unrated: This match does not affect your chess Elo rating.",
+        "Activity Feed: Your practice match outcomes will still be logged in your activity history."
+      ];
+    }
+
     if (mode === 'all_in') {
       return [
         "Bypasses Rating: Bypasses Elo rating limits; you can get matched against any player in the queue.",
@@ -192,9 +219,19 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isInsufficient || selectedStake <= 0) return;
-    const finalTC = selectedMode.id === 'all_in' ? allInChoice : undefined;
-    onStartSearch(selectedMode.id, selectedStake, finalTC);
+    if (selectedMode.id !== 'practice' && (isInsufficient || selectedStake <= 0)) return;
+    
+    if (selectedMode.id === 'practice') {
+      onStartSearch(
+        'practice',
+        0,
+        undefined,
+        { elo: practiceElo, color: practiceColor }
+      );
+    } else {
+      const finalTC = selectedMode.id === 'all_in' ? allInChoice : undefined;
+      onStartSearch(selectedMode.id, selectedStake, finalTC);
+    }
     onClose();
   };
 
@@ -321,22 +358,24 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
                       </div>
 
                       {/* Milestone progress bar */}
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between text-[9px] text-slate-500">
-                          <span>Milestone</span>
-                          <span className="font-mono font-bold text-slate-300">{count}/5</span>
+                      {modeInfo.id !== 'practice' && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[9px] text-slate-500">
+                            <span>Milestone</span>
+                            <span className="font-mono font-bold text-slate-300">{count}/5</span>
+                          </div>
+                          <div className="w-full bg-white/5 rounded-full h-1 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${
+                                isUnlocked
+                                  ? 'bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.6)]'
+                                  : 'bg-violet-500'
+                              }`}
+                              style={{ width: `${Math.min(100, (count / 5) * 100)}%` }}
+                            />
+                          </div>
                         </div>
-                        <div className="w-full bg-white/5 rounded-full h-1 overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-500 ${
-                              isUnlocked
-                                ? 'bg-emerald-400 shadow-[0_0_4px_rgba(52,211,153,0.6)]'
-                                : 'bg-violet-500'
-                            }`}
-                            style={{ width: `${Math.min(100, (count / 5) * 100)}%` }}
-                          />
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -388,6 +427,64 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
                 </div>
               )}
 
+              {/* Bot settings (Inside Panel for Practice Mode) */}
+              {selectedMode.id === 'practice' && (
+                <div className="space-y-4 border-t border-white/5 pt-3 animate-fade-in">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                      Choose Bot Difficulty / Elo
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { elo: 800, label: '800 (Beginner)' },
+                        { elo: 1200, label: '1200 (Casual)' },
+                        { elo: 1600, label: '1600 (Advanced)' },
+                        { elo: 2000, label: '2000 (Master)' },
+                      ].map((item) => (
+                        <button
+                          key={item.elo}
+                          type="button"
+                          onClick={() => setPracticeElo(item.elo)}
+                          className={`py-2 px-2.5 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                            practiceElo === item.elo
+                              ? 'border-violet-500 bg-violet-500/20 text-violet-300'
+                              : 'border-white/5 bg-slate-900/40 hover:bg-slate-900 text-slate-400'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                      Choose Your Color
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'white', label: 'White' },
+                        { id: 'random', label: 'Random' },
+                        { id: 'black', label: 'Black' },
+                      ].map((col) => (
+                        <button
+                          key={col.id}
+                          type="button"
+                          onClick={() => setPracticeColor(col.id as any)}
+                          className={`py-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                            practiceColor === col.id
+                              ? 'border-violet-500 bg-violet-500/20 text-violet-300'
+                              : 'border-white/5 bg-slate-900/40 hover:bg-slate-900 text-slate-400'
+                          }`}
+                        >
+                          {col.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Detailed Rules List */}
               <div className="space-y-2 border-t border-white/5 pt-3">
                 <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -409,13 +506,15 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">Total Play Stake:</span>
                 <span className="font-mono font-bold text-amber-400 text-sm">
-                  {selectedMode.entryPrice === 'all_in'
+                  {selectedMode.id === 'practice'
+                    ? 'FREE'
+                    : selectedMode.entryPrice === 'all_in'
                     ? `ALL IN (${formatCoins(userBalance)})`
                     : formatCoins(selectedMode.entryPrice as number)}
                 </span>
               </div>
 
-              {isInsufficient ? (
+              {isInsufficient && selectedMode.id !== 'practice' ? (
                 <div className="flex items-center space-x-1.5 text-red-400 text-xs bg-red-950/30 border border-red-900/30 p-2.5 rounded-lg justify-center font-medium">
                   <ShieldAlert className="w-4 h-4 flex-shrink-0" />
                   <span>
@@ -429,7 +528,7 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
                   onClick={handleSubmit}
                   className="w-full flex items-center justify-center space-x-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-xl font-bold shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 border border-violet-500/20 transition-all cursor-pointer text-xs uppercase tracking-wider"
                 >
-                  <span>Find Match</span>
+                  <span>{selectedMode.id === 'practice' ? 'Start Practice Match' : 'Find Match'}</span>
                 </button>
               )}
             </div>

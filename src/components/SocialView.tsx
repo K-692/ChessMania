@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDoc, getDocs, doc, setDoc, addDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, doc, setDoc, addDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
-import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell } from 'lucide-react';
+import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
 import type { UserProfile, Friendship, FriendlyChallenge, GameMode } from '../types';
 import { ProfilePopup } from './ProfilePopup';
 
@@ -49,6 +49,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
 
   // Active Challenge Modal State
   const [activeChallengeFriend, setActiveChallengeFriend] = useState<UserProfile | null>(null);
+  const [openChatFriend, setOpenChatFriend] = useState<UserProfile | null>(null);
   const [challengeType, setChallengeType] = useState<'friendly' | 'arena'>('friendly');
   const [selectedColor, setSelectedColor] = useState<'white' | 'black' | 'random'>('random');
   const [selectedModeIdx, setSelectedModeIdx] = useState(0);
@@ -594,25 +595,37 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                         </div>
                       </div>
 
-                      {/* Inline Challenge Button */}
-                      {hasPendingChallenge ? (
-                        <span className="text-[10px] bg-slate-900 border border-white/5 px-2.5 py-1 rounded text-slate-400 font-medium animate-pulse">
-                          Pending…
-                        </span>
-                      ) : (
+                      {/* Inline Action Group */}
+                      <div className="flex items-center gap-2">
+                        {/* Chat Button */}
                         <button
-                          onClick={() => {
-                            setChallengeError('');
-                            setSelectedModeIdx(0);
-                            setChallengeType('friendly');
-                            setActiveChallengeFriend(fProfile);
-                          }}
-                          className="flex items-center gap-1.5 bg-violet-600/10 hover:bg-violet-600 hover:text-white text-violet-400 border border-violet-500/20 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                          onClick={() => setOpenChatFriend(fProfile)}
+                          className="flex items-center justify-center bg-slate-900/60 hover:bg-violet-600 hover:text-white text-slate-400 hover:scale-105 border border-white/5 w-8 h-8 rounded-lg transition-all cursor-pointer"
+                          title="Chat with Friend"
                         >
-                          <Swords className="w-3.5 h-3.5" />
-                          Challenge
+                          <MessageSquare className="w-4 h-4" />
                         </button>
-                      )}
+
+                        {/* Inline Challenge Button */}
+                        {hasPendingChallenge ? (
+                          <span className="text-[10px] bg-slate-900 border border-white/5 px-2.5 py-1 rounded text-slate-400 font-medium animate-pulse">
+                            Pending…
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setChallengeError('');
+                              setSelectedModeIdx(0);
+                              setChallengeType('friendly');
+                              setActiveChallengeFriend(fProfile);
+                            }}
+                            className="flex items-center gap-1.5 bg-violet-600/10 hover:bg-violet-600 hover:text-white text-violet-400 border border-violet-500/20 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                          >
+                            <Swords className="w-3.5 h-3.5" />
+                            Challenge
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
@@ -895,6 +908,161 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           onClose={() => setSelectedProfile(null)} 
         />
       )}
+
+      {/* Friend Chat Modal Overlay */}
+      {(() => {
+        const openChatFriendship = openChatFriend && friendships.find(
+          (f) =>
+            (f.requesterUid === user?.uid && f.receiverUid === openChatFriend.uid) ||
+            (f.requesterUid === openChatFriend.uid && f.receiverUid === user?.uid)
+        );
+        if (openChatFriend && openChatFriendship) {
+          return (
+            <FriendChatModal
+              friend={openChatFriend}
+              friendship={openChatFriendship}
+              onClose={() => setOpenChatFriend(null)}
+            />
+          );
+        }
+        return null;
+      })()}
+    </div>
+  );
+};
+
+interface FriendChatModalProps {
+  friend: UserProfile;
+  friendship: Friendship;
+  onClose: () => void;
+}
+
+const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, onClose }) => {
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<{ id: string; senderUid: string; text: string; createdAt: number }[]>([]);
+  const [input, setInput] = useState('');
+  const chatEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Clean up messages older than 24 hours on load
+  useEffect(() => {
+    if (!friendship.id) return;
+    const cleanup = async () => {
+      try {
+        const q = collection(db, 'friendships', friendship.id!, 'messages');
+        const snap = await getDocs(q);
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        snap.docs.forEach((docSnap) => {
+          const data = docSnap.data();
+          if (data.createdAt < cutoff) {
+            deleteDoc(doc(db, 'friendships', friendship.id!, 'messages', docSnap.id)).catch(console.warn);
+          }
+        });
+      } catch (err) {
+        console.warn("Failed to cleanup old messages:", err);
+      }
+    };
+    cleanup();
+  }, [friendship.id]);
+
+  // Subscribe to messages
+  useEffect(() => {
+    if (!friendship.id) return;
+    const q = query(
+      collection(db, 'friendships', friendship.id!, 'messages'),
+      orderBy('createdAt', 'asc')
+    );
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const msgs: any[] = [];
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.createdAt >= cutoff) {
+          msgs.push({ id: docSnap.id, ...data });
+        }
+      });
+      setMessages(msgs);
+    });
+    return () => unsubscribe();
+  }, [friendship.id]);
+
+  // Auto-scroll
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || !user || !friendship.id) return;
+    const text = input.trim();
+    setInput('');
+    try {
+      await addDoc(collection(db, 'friendships', friendship.id!, 'messages'), {
+        senderUid: user.uid,
+        text,
+        createdAt: Date.now(),
+      });
+    } catch (err) {
+      console.error("Failed to send message:", err);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
+      <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl h-[500px]">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-slate-900/40">
+          <div className="flex items-center space-x-3 text-left">
+            <img src={friend.photoURL} alt={friend.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-200">{friend.displayName}</h3>
+              <p className="text-[10px] text-slate-500">Messages auto-delete daily</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Message area */}
+        <div className="flex-grow overflow-y-auto p-6 space-y-4 scrollbar-thin text-xs">
+          {messages.length === 0 ? (
+            <div className="h-full flex items-center justify-center text-slate-500 italic">
+              No recent messages. Start the conversation!
+            </div>
+          ) : (
+            messages.map((msg) => {
+              const isMe = msg.senderUid === user?.uid;
+              return (
+                <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`px-3 py-2 rounded-xl max-w-[85%] break-words shadow ${
+                    isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
+                  }`}>
+                    {msg.text}
+                  </div>
+                  <span className="text-[8px] text-slate-600 mt-1">
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              );
+            })
+          )}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input */}
+        <form onSubmit={handleSendMessage} className="p-4 bg-slate-950/40 border-t border-white/5 flex gap-2">
+          <input
+            type="text"
+            placeholder="Type a message..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            className="flex-grow bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+          />
+          <button type="submit" className="bg-violet-600 hover:bg-violet-500 text-white p-2.5 rounded-xl transition-all cursor-pointer shrink-0">
+            <Send className="w-4 h-4" />
+          </button>
+        </form>
+      </div>
     </div>
   );
 };

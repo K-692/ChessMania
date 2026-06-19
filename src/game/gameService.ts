@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, runTransaction, collection, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { doc, runTransaction, collection, getDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
 import type { Match, UserProfile, WalletLedgerEntry, RatingLedgerEntry, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -201,6 +201,14 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     }
 
     const now = Date.now();
+
+    if (matchData.mode === 'practice') {
+      transaction.update(matchDocRef, {
+        settled: true,
+        finishedAt: now,
+      });
+      return;
+    }
     const p1Uid = matchData.players[0];
     const p2Uid = matchData.players[1];
 
@@ -553,4 +561,58 @@ export async function acceptFriendlyChallenge(
     }
     return res.matchId!;
   });
+}
+
+/**
+ * Seeding a practice match against a bot engine.
+ */
+export async function createPracticeMatch(
+  userUid: string,
+  botElo: number,
+  userColor: 'white' | 'black' | 'random'
+): Promise<string> {
+  const matchesCol = collection(db, 'matches');
+  const newMatchDocRef = doc(matchesCol);
+  const mId = newMatchDocRef.id;
+  const now = Date.now();
+
+  const botUid = `bot_${botElo}`;
+
+  let isUserWhite = Math.random() < 0.5;
+  if (userColor === 'white') {
+    isUserWhite = true;
+  } else if (userColor === 'black') {
+    isUserWhite = false;
+  }
+
+  const whiteUid = isUserWhite ? userUid : botUid;
+  const blackUid = isUserWhite ? botUid : userUid;
+
+  const initialClockTime = 10 * 60 * 1000; // 10 minutes default
+  const matchTimeControl = '10 | 5';
+
+  const newMatch: Match = {
+    id: mId,
+    players: [userUid, botUid],
+    whiteUid,
+    blackUid,
+    stake: 0,
+    mode: 'practice',
+    boardFEN: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    turn: 'w',
+    clocks: {
+      [whiteUid]: initialClockTime,
+      [blackUid]: initialClockTime,
+    },
+    status: 'active',
+    winnerUid: null,
+    createdAt: now,
+    finishedAt: null,
+    moves: [],
+    lastMoveAt: now,
+    timeControl: matchTimeControl,
+  };
+
+  await setDoc(newMatchDocRef, newMatch);
+  return mId;
 }
