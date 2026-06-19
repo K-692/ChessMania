@@ -950,14 +950,14 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
   const [input, setInput] = useState('');
   const chatEndRef = React.useRef<HTMLDivElement>(null);
 
-  // Clean up messages older than 24 hours on load
+  // Clean up messages older than 7 days on load
   useEffect(() => {
     if (!friendship.id) return;
     const cleanup = async () => {
       try {
         const q = collection(db, 'friendships', friendship.id!, 'messages');
         const snap = await getDocs(q);
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
         snap.docs.forEach((docSnap) => {
           const data = docSnap.data();
           if (data.createdAt < cutoff) {
@@ -981,7 +981,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
     );
     const unsubscribe = onSnapshot(q, (snap) => {
       const msgs: any[] = [];
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
       snap.forEach((docSnap) => {
         const data = docSnap.data();
         if (data.createdAt >= cutoff) {
@@ -1039,7 +1039,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
             <img src={friend.photoURL} alt={friend.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10" />
             <div>
               <h3 className="text-sm font-bold text-slate-200">{friend.displayName}</h3>
-              <p className="text-[10px] text-slate-500">Messages auto-delete daily</p>
+              <p className="text-[10px] text-slate-500">Messages saved for 1 week</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer">

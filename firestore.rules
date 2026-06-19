@@ -45,6 +45,10 @@ service cloud.firestore {
         request.auth.uid in resource.data.players || 
         resource.data.players == null
       );
+
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
     }
     
     match /walletLedger/{entryId} {
@@ -63,6 +67,10 @@ service cloud.firestore {
     
     match /friendships/{id} {
       allow read, write: if isAuthenticated();
+
+      match /messages/{messageId} {
+        allow read, write: if isAuthenticated();
+      }
     }
     
     match /challenges/{id} {

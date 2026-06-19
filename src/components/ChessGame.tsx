@@ -35,6 +35,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   
   // Selected square for click-to-move and legal move dots
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [pendingPromotion, setPendingPromotion] = useState<{ from: string; to: string } | null>(null);
   
   // Settings and Profile dialog visibility states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -248,24 +249,27 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         const newMovesCount = matchData.moves?.length || 0;
 
         if (newMovesCount > oldMovesCount) {
-          const tempChess = new Chess();
-          for (let i = 0; i < newMovesCount - 1; i++) {
+          const isMyLastMove = (isWhite && newMovesCount % 2 === 1) || (isBlack && newMovesCount % 2 === 0);
+          if (!isMyLastMove) {
+            const tempChess = new Chess();
+            for (let i = 0; i < newMovesCount - 1; i++) {
+              try {
+                tempChess.move(prevMatch.moves[i] || matchData.moves[i]);
+              } catch (e) {}
+            }
+            const lastMoveStr = matchData.moves[newMovesCount - 1];
             try {
-              tempChess.move(prevMatch.moves[i] || matchData.moves[i]);
-            } catch (e) {}
-          }
-          const lastMoveStr = matchData.moves[newMovesCount - 1];
-          try {
-            const moveInfo = tempChess.move(lastMoveStr);
-            if (tempChess.inCheck()) {
-              playCheckSound();
-            } else if (moveInfo && moveInfo.captured) {
-              playCaptureSound();
-            } else {
+              const moveInfo = tempChess.move(lastMoveStr);
+              if (tempChess.inCheck()) {
+                playCheckSound();
+              } else if (moveInfo && moveInfo.captured) {
+                playCaptureSound();
+              } else {
+                playMoveSound();
+              }
+            } catch (e) {
               playMoveSound();
             }
-          } catch (e) {
-            playMoveSound();
           }
         }
 
@@ -280,6 +284,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           } else {
             playMoveSound(); // Draw fallback
           }
+          deleteGameMessages(matchId);
         }
       }
 
@@ -290,9 +295,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       // DB snapshot while our write is still in-flight (piece rollback bug).
       const prevMovesCount = matchStateRef.current?.moves?.length ?? 0;
       const newMovesCount = matchData.moves?.length ?? 0;
-      const isOpponentTurn = matchData.turn === 'w'
+      const isPractice = matchData.mode === 'practice';
+      const isOpponentTurn = !isPractice && (matchData.turn === 'w'
         ? user?.uid !== matchData.whiteUid
-        : user?.uid !== matchData.blackUid;
+        : user?.uid !== matchData.blackUid);
       if (newMovesCount > prevMovesCount || isOpponentTurn || matchData.status !== 'active') {
         setLocalFen(matchData.boardFEN);
         try {
@@ -522,21 +528,36 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     onExit();
   };
 
-  // 4. Handle Piece Drops on chessboard
-  const onPieceDrop = (sourceSquare: string, targetSquare: string): boolean => {
-    if (!match || !isMyTurn || match.status !== 'active') return false;
+  useEffect(() => {
+    return () => {
+      if (matchStateRef.current && matchStateRef.current.status !== 'active') {
+        deleteGameMessages(matchId);
+      }
+    };
+  }, [matchId]);
 
+  const executeMove = (from: string, to: string, promotion?: string): boolean => {
+    if (!match) return false;
     try {
       const move = chessRef.current.move({
-        from: sourceSquare,
-        to: targetSquare,
-        promotion: 'q',
+        from,
+        to,
+        promotion,
       });
 
       if (move) {
         setSelectedSquare(null);
         const nextFen = chessRef.current.fen();
         setLocalFen(nextFen);
+
+        // Optimistic sound play
+        if (chessRef.current.inCheck()) {
+          playCheckSound();
+        } else if (move.captured) {
+          playCaptureSound();
+        } else {
+          playMoveSound();
+        }
 
         makeMove(matchId, user!.uid, nextFen, move.san).catch((err) => {
           console.error('Failed to submit move:', err);
@@ -580,8 +601,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     } catch (e) {
       return false;
     }
-
     return false;
+  };
+
+  // 4. Handle Piece Drops on chessboard
+  const onPieceDrop = (sourceSquare: string, targetSquare: string): boolean => {
+    if (!match || !isMyTurn || match.status !== 'active') return false;
+
+    // Check if it is a promotion
+    const tempChess = new Chess(chessRef.current.fen());
+    const moves = tempChess.moves({ verbose: true });
+    const isLegalPromo = moves.some(
+      m => m.from === sourceSquare && m.to === targetSquare && m.promotion
+    );
+
+    if (isLegalPromo) {
+      setPendingPromotion({ from: sourceSquare, to: targetSquare });
+      return false; // Snap back, promotion modal choice will execute
+    }
+
+    return executeMove(sourceSquare, targetSquare);
   };
 
   // Click square logic for legal moves highlight and click-to-move
@@ -604,6 +643,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       const legalMove = moves.find((m: any) => m.to === square);
 
       if (legalMove) {
+        if (legalMove.promotion) {
+          setPendingPromotion({ from: selectedSquare, to: square });
+          setSelectedSquare(null);
+          return;
+        }
         const success = onPieceDrop(selectedSquare, square);
         if (success) {
           setSelectedSquare(null);
@@ -622,6 +666,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         setSelectedSquare(square);
       }
     }
+  };
+
+  const handlePromote = (pieceType: 'q' | 'n' | 'r' | 'b') => {
+    if (!pendingPromotion) return;
+    const { from, to } = pendingPromotion;
+    setPendingPromotion(null);
+    executeMove(from, to, pieceType);
   };
 
   const handleResign = async () => {
@@ -1189,6 +1240,58 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           )}
         </div>
+
+      {/* ── Pawn Promotion Choice Modal ── */}
+      {pendingPromotion && (
+        <div 
+          className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in"
+          style={{ zIndex: 10001 }}
+        >
+          <div className="glass p-6 rounded-2xl border border-white/10 max-w-sm w-full text-center space-y-5 shadow-2xl animate-scale-up text-left">
+            <div>
+              <h3 className="text-sm font-bold text-slate-200">Pawn Promotion Choice</h3>
+              <p className="text-xs text-slate-400 mt-1">Choose the piece to replace your promoted pawn:</p>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-3">
+              {[
+                { id: 'q', name: 'Queen', key: 'q' },
+                { id: 'n', name: 'Knight', key: 'n' },
+                { id: 'r', name: 'Rook', key: 'r' },
+                { id: 'b', name: 'Bishop', key: 'b' }
+              ].map((p) => {
+                const color = isWhite ? 'w' : 'b';
+                const pieceTheme = settings.pieceTheme || 'classic';
+                const imgSrc = `/pieces/${pieceTheme}/${color}${p.key}.png`;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => handlePromote(p.id as any)}
+                    className="flex flex-col items-center justify-center p-3 bg-slate-900/60 hover:bg-violet-600/30 border border-white/5 hover:border-violet-500 rounded-xl transition-all cursor-pointer group"
+                  >
+                    <img 
+                      src={imgSrc} 
+                      alt={p.name} 
+                      className="w-12 h-12 object-contain group-hover:scale-110 transition-transform"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = `/pieces/classic/${color}${p.key}.png`;
+                      }}
+                    />
+                    <span className="text-[10px] font-semibold text-slate-400 group-hover:text-white mt-1">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            
+            <button
+              onClick={() => setPendingPromotion(null)}
+              className="w-full bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white py-2.5 rounded-xl text-xs font-semibold transition-all border border-white/5 cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Settings Modal Popup ── */}
       {showSettingsModal && (

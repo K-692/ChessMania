@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signOut, setPersistence, inMemoryPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db } from '../firebase';
 import type { UserProfile, WalletLedgerEntry } from '../types';
 import { doc, getDoc, setDoc, runTransaction, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
@@ -197,6 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async () => {
     try {
       setLoading(true);
+      await setPersistence(auth, inMemoryPersistence);
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error('Login error:', error);
@@ -393,6 +394,56 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribeAuth();
   }, []);
+
+  // Inactivity auto-logout after 10 mins (600,000 ms) and online reconnection logout
+  useEffect(() => {
+    if (!user) return;
+
+    let timeoutId: any;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(async () => {
+        console.log('Inactivity timeout reached (10 minutes). Logging out...');
+        try {
+          await logout();
+          alert('You have been logged out due to 10 minutes of inactivity.');
+        } catch (e) {
+          console.warn('Failed to logout on inactivity timeout:', e);
+        }
+      }, 10 * 60 * 1000); // 10 minutes
+    };
+
+    const activityEvents = [
+      'mousedown', 'mousemove', 'keypress',
+      'scroll', 'touchstart', 'click'
+    ];
+
+    resetTimer();
+
+    activityEvents.forEach((event) => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    const handleOnline = async () => {
+      console.log('Reconnected network event. Logging out...');
+      try {
+        await logout();
+        alert('You have been logged out because you reconnected. Please sign in again.');
+      } catch (e) {
+        console.warn('Failed to logout on reconnect:', e);
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach((event) => {
+        window.removeEventListener(event, resetTimer);
+      });
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, login, logout }}>
