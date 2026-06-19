@@ -436,9 +436,16 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                       <p className="text-[11px] text-slate-400 font-mono">
                         {CHALLENGE_MODES.find((m) => m.id === ch.mode)?.label} ({CHALLENGE_MODES.find((m) => m.id === ch.mode)?.tc}) •{' '}
                         {ch.stake === 0 ? (
-                          <span className="text-emerald-400 font-semibold">Friendly Match (0 🪙)</span>
+                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                            <span>Friendly Match (0</span>
+                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain inline" />
+                            <span>)</span>
+                          </span>
                         ) : (
-                          <strong className="text-amber-400">{formatCoins(ch.stake)}</strong>
+                          <span className="flex items-center gap-1">
+                            <strong className="text-amber-400">{formatCoins(ch.stake)}</strong>
+                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain inline" />
+                          </span>
                         )}
                       </p>
                     </div>
@@ -830,8 +837,22 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                       }`}
                     >
                       <span className="text-xs font-bold block">{mode.label}</span>
-                      <span className="text-[9px] font-mono text-slate-500">
-                        {mode.tc} • {challengeType === 'friendly' ? 'Free (0 🪙)' : (mode.price === 'all_in' ? 'ALL IN' : formatCoins(mode.price as number))}
+                      <span className="text-[9px] font-mono text-slate-500 flex items-center flex-wrap gap-1">
+                        <span>{mode.tc} •</span>
+                        {challengeType === 'friendly' ? (
+                          <span className="flex items-center gap-0.5">
+                            <span>Free (0</span>
+                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
+                            <span>)</span>
+                          </span>
+                        ) : mode.price === 'all_in' ? (
+                          <span>ALL IN</span>
+                        ) : (
+                          <span className="flex items-center gap-0.5">
+                            <span>{formatCoins(mode.price as number)}</span>
+                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
+                          </span>
+                        )}
                       </span>
                     </button>
                   ))}

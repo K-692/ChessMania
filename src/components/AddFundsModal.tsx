@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, getDocs, runTransaction, doc } from 'firebase/firestore';
-import { X, CreditCard, Globe, ChevronDown, CheckCircle2, AlertTriangle, Coins } from 'lucide-react';
+import { X, CreditCard, Globe, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 import type { UserProfile } from '../types';
 
 interface AddFundsModalProps {
@@ -13,22 +13,22 @@ interface AddFundsModalProps {
 export interface CoinPack {
   id: string;
   coins: number;
-  priceVal: number; // The base numeric price (same value across regions as requested)
-  label: string;
+  basePriceINR: number;
+  discountRate: string;
+  finalPriceINR: number;
+  imagePath: string;
 }
 
 export const COIN_PACKS: CoinPack[] = [
-  { id: 'pack_100', coins: 100, priceVal: 10, label: '100 Coins' },
-  { id: 'pack_1000', coins: 1000, priceVal: 100, label: '1,000 Coins' },
-  { id: 'pack_5000', coins: 5000, priceVal: 450, label: '5,000 Coins' },
-  { id: 'pack_10000', coins: 10000, priceVal: 850, label: '10,000 Coins' },
-  { id: 'pack_25000', coins: 25000, priceVal: 1999, label: '25,000 Coins' },
-  { id: 'pack_50000', coins: 50000, priceVal: 3499, label: '50,000 Coins' },
-  { id: 'pack_100000', coins: 100000, priceVal: 5999, label: '100,000 Coins' },
-  { id: 'pack_250000', coins: 250000, priceVal: 9999, label: '250,000 Coins' },
-  { id: 'pack_500000', coins: 500000, priceVal: 14999, label: '500,000 Coins' },
-  { id: 'pack_750000', coins: 750000, priceVal: 17999, label: '750,000 Coins' },
-  { id: 'pack_1000000', coins: 1000000, priceVal: 19999, label: '1,000,000 Coins' }
+  { id: 'pack_100', coins: 100, basePriceINR: 20, discountRate: '55% OFF', finalPriceINR: 9, imagePath: '/coin_pack/100 coins.png' },
+  { id: 'pack_1000', coins: 1000, basePriceINR: 165, discountRate: '40% OFF', finalPriceINR: 99, imagePath: '/coin_pack/1K-5K coins.png' },
+  { id: 'pack_5000', coins: 5000, basePriceINR: 640, discountRate: '30% OFF', finalPriceINR: 449, imagePath: '/coin_pack/1K-5K coins.png' },
+  { id: 'pack_10000', coins: 10000, basePriceINR: 1285, discountRate: '30% OFF', finalPriceINR: 899, imagePath: '/coin_pack/10K coins.png' },
+  { id: 'pack_25000', coins: 25000, basePriceINR: 2855, discountRate: '30% OFF', finalPriceINR: 1999, imagePath: '/coin_pack/25K coins.png' },
+  { id: 'pack_50000', coins: 50000, basePriceINR: 5555, discountRate: '28% OFF', finalPriceINR: 3999, imagePath: '/coin_pack/50K coins.png' },
+  { id: 'pack_100000', coins: 100000, basePriceINR: 9999, discountRate: '30% OFF', finalPriceINR: 6999, imagePath: '/coin_pack/100K coins.png' },
+  { id: 'pack_250000', coins: 250000, basePriceINR: 18570, discountRate: '30% OFF', finalPriceINR: 12999, imagePath: '/coin_pack/250K coins.png' },
+  { id: 'pack_500000', coins: 500000, basePriceINR: 30768, discountRate: '35% OFF', finalPriceINR: 19999, imagePath: '/coin_pack/500K coins.png' }
 ];
 
 export const CURRENCIES = {
@@ -38,7 +38,19 @@ export const CURRENCIES = {
   GBP: { symbol: '£', code: 'GBP', name: 'British Pound' }
 };
 
+export const CONVERSION_RATES = {
+  INR: 1.0,
+  USD: 83.50,
+  EUR: 89.60,
+  GBP: 106.20
+};
+
 type CurrencyCode = keyof typeof CURRENCIES;
+
+const convertPrice = (priceINR: number, currency: CurrencyCode): number => {
+  const rate = CONVERSION_RATES[currency] || 1.0;
+  return Math.round((priceINR / rate) * 100) / 100;
+};
 
 export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose }) => {
   const { user, profile } = useAuth();
@@ -97,7 +109,9 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
       let sum = 0;
       querySnap.forEach((docSnap) => {
         const data = docSnap.data();
-        if (typeof data.pricePaid === 'number') {
+        if (typeof data.pricePaidINR === 'number') {
+          sum += data.pricePaidINR;
+        } else if (typeof data.pricePaid === 'number') {
           sum += data.pricePaid;
         }
       });
@@ -116,7 +130,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
   if (!isOpen) return null;
 
   const currentCurrency = CURRENCIES[currencyCode];
-  const isCapExceeded = dailySpend + selectedPack.priceVal > 40000;
+  const isCapExceeded = dailySpend + selectedPack.finalPriceINR > 40000;
 
   // Credit coins in Firestore
   const creditCoins = async (txId: string, isReal: boolean) => {
@@ -152,7 +166,8 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
         balanceBefore,
         balanceAfter,
         createdAt: Date.now(),
-        pricePaid: selectedPack.priceVal,
+        pricePaid: convertPrice(selectedPack.finalPriceINR, currencyCode),
+        pricePaidINR: selectedPack.finalPriceINR,
         currency: currencyCode,
         paymentGateway: isReal ? 'razorpay' : 'sandbox',
         transactionId: txId
@@ -174,7 +189,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
 
     const options = {
       key: razorpayKey,
-      amount: selectedPack.priceVal * 100, // Razorpay takes amount in subunits (paise / cents)
+      amount: Math.round(convertPrice(selectedPack.finalPriceINR, currencyCode) * 100), // Razorpay takes amount in subunits (paise / cents)
       currency: currencyCode,
       name: 'Check & Mate Lounge',
       description: `Purchase of ${selectedPack.coins.toLocaleString()} Chess Coins`,
@@ -267,8 +282,8 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
         {/* Header */}
         <div className="flex items-center justify-between border-b border-white/5 pb-4 mb-4">
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400">
-              <Coins className="w-5 h-5" />
+            <div className="p-2 bg-amber-500/10 rounded-xl border border-amber-500/20 flex items-center justify-center w-9 h-9">
+              <img src="/coin_pack/100 coins.png" alt="Coins" className="w-5 h-5 object-contain" />
             </div>
             <div>
               <h3 className="text-xl font-bold text-white">Add Funds</h3>
@@ -335,7 +350,9 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {COIN_PACKS.map((pack) => {
                   const isSelected = selectedPack.id === pack.id;
-                  const wouldExceed = dailySpend + pack.priceVal > 40000;
+                  const wouldExceed = dailySpend + pack.finalPriceINR > 40000;
+                  const basePrice = convertPrice(pack.basePriceINR, currencyCode);
+                  const finalPrice = convertPrice(pack.finalPriceINR, currencyCode);
                   return (
                     <button
                       key={pack.id}
@@ -354,18 +371,28 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                       }`}
                     >
                       {/* Coins Indicator */}
-                      <div className="flex items-center space-x-1.5">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Coin" className="w-4 h-4 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125 shrink-0" />
+                      <div className="flex items-center space-x-2">
+                        <img src={pack.imagePath} alt="Coin Pack" className="w-8 h-8 object-contain shrink-0" />
                         <span className="text-sm font-bold text-slate-200 font-mono">
                           {pack.coins.toLocaleString()}
                         </span>
                       </div>
                       
+                      {/* Discount & Base Price */}
+                      <div className="mt-3 flex items-center space-x-2">
+                        <span className="text-[10px] text-slate-500 line-through font-mono">
+                          {currentCurrency.symbol}{basePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-[9px] bg-red-500/10 text-red-400 border border-red-500/20 px-1 py-0.2 rounded font-bold">
+                          {pack.discountRate}
+                        </span>
+                      </div>
+
                       {/* Price Display */}
-                      <div className="mt-4 flex items-baseline justify-between w-full">
-                        <span className="text-[10px] text-slate-500 uppercase tracking-wider">Price</span>
+                      <div className="mt-1 flex items-baseline justify-between w-full">
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wider">Final Price</span>
                         <span className="text-base font-black text-amber-400 font-mono">
-                          {currentCurrency.symbol}{pack.priceVal.toLocaleString()}
+                          {currentCurrency.symbol}{finalPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
                       </div>
 
@@ -384,7 +411,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                 <div>
                   <span className="text-xs text-slate-500">Selected Pack:</span>
                   <p className="text-sm font-bold text-white">
-                    {selectedPack.coins.toLocaleString()} Coins for <span className="text-amber-400 font-mono">{currentCurrency.symbol}{selectedPack.priceVal.toLocaleString()}</span>
+                    {selectedPack.coins.toLocaleString()} Coins for <span className="text-amber-400 font-mono">{currentCurrency.symbol}{convertPrice(selectedPack.finalPriceINR, currencyCode).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </p>
                 </div>
                 <button
@@ -519,7 +546,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                   type="submit"
                   className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold py-3 rounded-xl transition-all border border-amber-500/20 cursor-pointer shadow-lg shadow-amber-500/10 text-center"
                 >
-                  Pay {currentCurrency.symbol}{selectedPack.priceVal.toLocaleString()}
+                  Pay {currentCurrency.symbol}{convertPrice(selectedPack.finalPriceINR, currencyCode).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </button>
               </div>
             </form>
@@ -555,7 +582,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                 </div>
                 <div className="flex justify-between text-slate-500">
                   <span>Amount Paid:</span>
-                  <span className="text-slate-300 text-right">{currentCurrency.symbol}{selectedPack.priceVal.toLocaleString()}</span>
+                  <span className="text-slate-300 text-right">{currentCurrency.symbol}{convertPrice(selectedPack.finalPriceINR, currencyCode).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex justify-between text-slate-500">
                   <span>Currency:</span>

@@ -73,5 +73,13 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
       allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
+
+    match /mail/{id} {
+      allow create: if isAuthenticated();
+    }
+
+    match /config/{id} {
+      allow read: if isAuthenticated();
+    }
   }
 }

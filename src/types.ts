@@ -15,6 +15,8 @@ export interface UserProfile {
   wins?: number;
   losses?: number;
   draws?: number;
+  country?: string;
+  lastCountryChangedAt?: number | null;
 }
 
 export type GameMode =
@@ -86,6 +88,7 @@ export interface WalletLedgerEntry {
   balanceAfter: number;
   createdAt: number;
   pricePaid?: number; // Fiat price paid for purchase
+  pricePaidINR?: number; // Fiat price paid in base INR
   currency?: string; // Currency used for purchase (INR, USD, etc.)
 }
 

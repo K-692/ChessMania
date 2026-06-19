@@ -20,7 +20,7 @@ export function formatCoins(amount: number): string {
   }
 
   const result = isNegative ? `-${formatted}` : formatted;
-  return `${result} 🪙`;
+  return result;
 }
 
 /**

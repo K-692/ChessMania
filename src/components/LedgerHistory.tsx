@@ -103,7 +103,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
 
       <div className="space-y-2">
         <h2 className="text-2xl font-bold tracking-tight text-slate-100 flex items-center space-x-2.5">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-6 h-6 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
+          <img src="/coin_pack/100 coins.png" alt="Coin" className="w-6 h-6 object-contain" />
           <span>Transactions</span>
         </h2>
       </div>

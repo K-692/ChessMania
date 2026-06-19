@@ -1,8 +1,80 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { ChevronLeft, Trophy, Calendar, Coins, Gamepad2, Award, Percent, Star } from 'lucide-react';
+import { db } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
+import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
+
+const isCountryChangeLocked = (lastChangedAt?: number | null) => {
+  if (!lastChangedAt) return false;
+  const lastDate = new Date(lastChangedAt);
+  const nowDate = new Date();
+  return lastDate.getFullYear() === nowDate.getFullYear() && lastDate.getMonth() === nowDate.getMonth();
+};
+
+const getNextCalendarMonthStart = (lastChangedAt: number) => {
+  const date = new Date(lastChangedAt);
+  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+};
+
+const getCountryFlag = (countryName: string): string => {
+  const normalized = countryName.trim().toLowerCase();
+  const flagMap: Record<string, string> = {
+    india: '🇮🇳',
+    in: '🇮🇳',
+    'united states': '🇺🇸',
+    usa: '🇺🇸',
+    us: '🇺🇸',
+    'united kingdom': '🇬🇧',
+    uk: '🇬🇧',
+    gb: '🇬🇧',
+    england: '🇬🇧',
+    canada: '🇨🇦',
+    ca: '🇨🇦',
+    australia: '🇦🇺',
+    au: '🇦🇺',
+    germany: '🇩🇪',
+    de: '🇩🇪',
+    france: '🇫🇷',
+    fr: '🇫🇷',
+    italy: '🇮🇹',
+    it: '🇮🇹',
+    spain: '🇪🇸',
+    es: '🇪🇸',
+    japan: '🇯🇵',
+    jp: '🇯🇵',
+    china: '🇨🇳',
+    cn: '🇨🇳',
+    brazil: '🇧🇷',
+    br: '🇧🇷',
+    russia: '🇷🇺',
+    ru: '🇷🇺',
+    mexico: '🇲🇽',
+    mx: '🇲🇽',
+    netherlands: '🇳🇱',
+    nl: '🇳🇱',
+    switzerland: '🇨🇭',
+    ch: '🇨🇭',
+    sweden: '🇸🇪',
+    se: '🇸🇪',
+    norway: '🇳🇴',
+    no: '🇳🇴',
+    finland: '🇫🇮',
+    fi: '🇫🇮',
+    denmark: '🇩🇰',
+    dk: '🇩🇰',
+    singapore: '🇸🇬',
+    sg: '🇸🇬',
+    'new zealand': '🇳🇿',
+    nz: '🇳🇿',
+    'south africa': '🇿🇦',
+    za: '🇿🇦',
+    'south korea': '🇰🇷',
+    kr: '🇰🇷'
+  };
+  return flagMap[normalized] || '🏳️';
+};
 
 interface ProfileViewProps {
   onBack: () => void;
@@ -24,6 +96,48 @@ const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }>
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
   const { user, profile } = useAuth();
+  const [isEditCountryOpen, setIsEditCountryOpen] = useState(false);
+  const [countryInput, setCountryInput] = useState('');
+  const [savingCountry, setSavingCountry] = useState(false);
+  const [countryError, setCountryError] = useState('');
+
+  const handleOpenEditCountry = () => {
+    setCountryInput(profile?.country || '');
+    setCountryError('');
+    setIsEditCountryOpen(true);
+  };
+
+  const handleSaveCountry = async () => {
+    if (!user || !profile) return;
+    
+    if (isCountryChangeLocked(profile.lastCountryChangedAt)) {
+      setCountryError('Your represented country is currently locked this month.');
+      return;
+    }
+
+    const trimmed = countryInput.trim();
+    if (!trimmed) {
+      setCountryError('Country name cannot be empty.');
+      return;
+    }
+
+    setSavingCountry(true);
+    setCountryError('');
+
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        country: trimmed,
+        lastCountryChangedAt: Date.now()
+      });
+      setIsEditCountryOpen(false);
+    } catch (err: any) {
+      console.error('Error saving country:', err);
+      setCountryError(err.message || 'Failed to update country. Please try again.');
+    } finally {
+      setSavingCountry(false);
+    }
+  };
 
   if (!user || !profile) {
     return (
@@ -117,6 +231,17 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
                   <Trophy className="w-4 h-4 text-amber-400" />
                   <span>Elo: <strong className="text-amber-300 font-mono">{profile.rating}</strong></span>
                 </span>
+                <span className="text-slate-600 hidden sm:inline">•</span>
+                <span className="flex items-center gap-1.5 bg-slate-900/40 px-2 py-0.5 rounded-lg border border-white/5 text-xs text-slate-300">
+                  <span className="text-sm select-none mr-1">{getCountryFlag(profile.country || '')}</span>
+                  <span>{profile.country || 'No Represented Country'}</span>
+                  <button
+                    onClick={handleOpenEditCountry}
+                    className="ml-2 text-xs text-violet-400 hover:text-violet-300 underline cursor-pointer"
+                  >
+                    Edit
+                  </button>
+                </span>
               </div>
             </div>
 
@@ -148,8 +273,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
 
         {/* Total Coins Earned Card */}
         <div className="glass p-5 rounded-xl border border-white/5 flex items-center space-x-4">
-          <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400">
-            <Coins className="w-6 h-6" />
+          <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400 flex items-center justify-center w-12 h-12">
+            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-6 h-6 object-contain" />
           </div>
           <div>
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Total Coins Earned</span>
@@ -371,6 +496,100 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
           })}
         </div>
       </div>
+
+      {/* Edit Country Modal */}
+      {isEditCountryOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-4">
+          <div className="glass max-w-md w-full rounded-2xl border border-white/10 p-6 shadow-2xl relative flex flex-col text-left">
+            <button
+              onClick={() => setIsEditCountryOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <Globe className="w-5 h-5 text-violet-400" />
+                <span>Represent Country</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Choose the country you want to represent. This can only be updated once per calendar month.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              {(() => {
+                const isLocked = isCountryChangeLocked(profile.lastCountryChangedAt);
+                if (isLocked && profile.lastCountryChangedAt) {
+                  const unlockDate = getNextCalendarMonthStart(profile.lastCountryChangedAt);
+                  return (
+                    <div className="bg-amber-950/20 border border-amber-500/10 rounded-xl p-4 space-y-3">
+                      <div className="flex items-center space-x-2 text-amber-400 font-semibold text-xs">
+                        <Lock className="w-4 h-4 animate-pulse" />
+                        <span>Country Edit Locked</span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        You have already set your country representation for this calendar month. You can update it again in the next month.
+                      </p>
+                      <div className="flex items-center space-x-2 text-[10px] text-slate-500">
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>Available on: <strong className="text-slate-400">{unlockDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
+                      </div>
+                      <button
+                        onClick={() => setIsEditCountryOpen(false)}
+                        className="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2.5 rounded-lg transition-all cursor-pointer"
+                      >
+                        Close
+                      </button>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                        Country Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. India, United States"
+                        value={countryInput}
+                        onChange={(e) => setCountryInput(e.target.value)}
+                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500"
+                        maxLength={50}
+                        disabled={savingCountry}
+                      />
+                    </div>
+
+                    {countryError && (
+                      <p className="text-xs text-red-400 font-semibold">{countryError}</p>
+                    )}
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setIsEditCountryOpen(false)}
+                        className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold py-2.5 rounded-lg transition-all border border-white/5 cursor-pointer text-center"
+                        disabled={savingCountry}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={handleSaveCountry}
+                        className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold py-2.5 rounded-lg transition-all border border-violet-500/20 cursor-pointer text-center shadow-lg shadow-violet-600/10"
+                        disabled={savingCountry}
+                      >
+                        {savingCountry ? 'Saving...' : 'Represent'}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

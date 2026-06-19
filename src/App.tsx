@@ -394,14 +394,14 @@ const AppContent: React.FC = () => {
                 </span>
               </h1>
               <p className="text-base text-slate-400 font-light leading-relaxed">
-                Step into the arena where your brain meets the bank! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your wallet grow continuously, get backup recovery top-ups, and dominate the global rankings!
+                Step into the arena where your brain meets the bank! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your wallet grow continuously with hourly coin credits, represent your country globally, and dominate the global rankings!
               </p>
 
               {/* Bullet points explaining the Chess Coin Stakes */}
               <div className="space-y-4 border-y border-white/5 py-6 my-2">
                 <div className="flex items-start space-x-3.5">
                   <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
+                    <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-slate-200">Play Chess, Earn Coins</h4>
@@ -424,8 +424,8 @@ const AppContent: React.FC = () => {
                     <img src="https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg" alt="King" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(99,102,241,0.5)] brightness-125" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-200">Daily Bank Interest & Cooldown Recovery</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">Earn 1% daily interest on your balance. Went broke? Wait 1 hour to claim a 100 recovery coin top-up.</p>
+                    <h4 className="text-sm font-semibold text-slate-200">Hourly Coin Credits & Growth</h4>
+                    <p className="text-xs text-slate-400 mt-0.5">Receive 100 coins credited to your wallet balance automatically for every hour active, up to a maximum limit of 1000 coins.</p>
                   </div>
                 </div>
               </div>
@@ -614,7 +614,7 @@ const AppContent: React.FC = () => {
                   {/* Bank Balance Column */}
                   <div className="space-y-3">
                     <div className="flex items-center space-x-2 text-slate-400">
-                      <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
+                      <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
                       <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Balance</span>
                     </div>
                     <div className="space-y-3">

@@ -123,6 +123,8 @@ export function sanitizeProfile(
     wins: typeof data?.wins === 'number' && !isNaN(data.wins) ? data.wins : 0,
     losses: typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : 0,
     draws: typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : 0,
+    country: data?.country || '',
+    lastCountryChangedAt: data?.lastCountryChangedAt || null,
   };
 
   if (
@@ -133,7 +135,9 @@ export function sanitizeProfile(
     JSON.stringify(sanitized.gameplayCounts) !== JSON.stringify(data?.gameplayCounts) ||
     sanitized.wins !== data?.wins ||
     sanitized.losses !== data?.losses ||
-    sanitized.draws !== data?.draws
+    sanitized.draws !== data?.draws ||
+    sanitized.country !== data?.country ||
+    sanitized.lastCountryChangedAt !== data?.lastCountryChangedAt
   ) {
     hasChanges = true;
   }

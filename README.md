@@ -12,9 +12,10 @@ Welcome to **Check & Mate**, a premium, real-time online chess lounge where your
 *   **Real-time Chess Engine**: High-fidelity board rendering and strict legal-move enforcement powered by `chess.js` and `react-chessboard`.
 *   **Dynamic Elo Matchmaking**: Queue and find matches automatically based on rating bands (±100 Elo) and stake levels. The search band automatically expands every 10 seconds to keep queues fast!
 *   **Staking & Wallet Integrity**: All games require staking entry coins. The winner takes the entire pool! Every transaction is written through atomic Firestore transactions with immutable ledger auditing.
-*   **Lazy Bank Interest**: Earn **1% daily compound interest** on your coin balance. The app applies interest continuously via lazy-accrual when you perform actions.
-*   **Zero-Balance Cooldown Recovery**: Went completely broke? The system tracks your zero-balance timestamp and awards a 100-coin top-up after 1 hour.
-*   **Friendships & Friendly Challenges**: Add recent opponents, track head-to-head match stats, and send/accept friendly match challenges in real-time.
+*   **Hourly Coin Credits**: Earn **100 coins automatically for every hour active**, credited to your wallet up to a maximum limit of 1000 coins.
+*   **Geographical Coin Packs**: Add funds using regional currency pricing (USD, EUR, GBP, INR) converted dynamically from base INR prices using monthly frozen exchange rates. A daily spend limit of 40,000 INR protects players.
+*   **Country Representation**: Represent your country in matches and profiles. Select a country to display your national flag emoji (limited to one update per calendar month).
+*   **Secure Ticket Reporting**: Submit support queries securely from Settings. The client logs the query in Firestore, which automatically dispatches email confirmations to both the user and the developer via Firebase Trigger Email integration.
 *   **Premium Glassmorphic Design**: A stunning visual interface featuring dark mode, neon glowing accents, smooth slide-out views, and sound effects.
 
 ---

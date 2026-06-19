@@ -89,7 +89,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
         </div>
         <div className="flex flex-col text-left leading-[1.05] tracking-widest bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent select-none font-black py-0.5">
           <span className="text-[11px] uppercase font-black">CHECK</span>
-          <span className="text-[9px] font-bold text-slate-400 text-center">&</span>
+          <span className="text-[9px] font-bold text-slate-400 text-left">&</span>
           <span className="text-[11px] uppercase font-black">MATE</span>
         </div>
       </div>
@@ -155,7 +155,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               {/* Wallet Info */}
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 pl-3 pr-2 py-1.5 rounded-lg">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125 shrink-0" />
+                  <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain shrink-0" />
                   <span className="text-amber-300 font-semibold text-sm mr-1">
                     {profile ? formatCoins(profile.bankBalance) : '---'}
                   </span>

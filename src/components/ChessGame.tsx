@@ -698,7 +698,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             <div>
               <p className="text-[10px] text-slate-500 uppercase tracking-widest">Total Prize Pool</p>
               <p className="text-base font-bold text-amber-400 flex items-center space-x-1.5 mt-0.5">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-4.5 h-4.5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
+                <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4.5 h-4.5 object-contain" />
                 <span>
                   {formatCoins(
                     match.mode === 'all_in' && match.allInStakes
@@ -929,9 +929,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                       isWinner ? 'bg-emerald-950/30 border-emerald-500/20' : isDraw ? 'bg-amber-950/30 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
                     }`}>
                       <img
-                        src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg"
+                        src="/coin_pack/100 coins.png"
                         alt="Coins"
-                        className="w-5 h-5 filter invert brightness-125"
+                        className="w-5 h-5 object-contain"
                       />
                       <div className="text-left">
                         <p className="text-[8px] text-slate-500 uppercase tracking-widest">Wallet Impact</p>

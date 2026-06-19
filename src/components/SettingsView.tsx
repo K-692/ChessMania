@@ -3,7 +3,7 @@ import { Volume2, VolumeX, Music, ArrowLeft, Eye, Check, Palette, HelpCircle, Se
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -322,12 +322,73 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   setIsSubmitting(true);
                   setSubmitError('');
                   try {
+                    // 1. Add support query log
                     await addDoc(collection(db, 'supportQueries'), {
                       uid: user.uid,
                       email: user.email || 'unknown@gmail.com',
                       query: queryText.trim(),
                       createdAt: Date.now()
                     });
+
+                    // 2. Fetch admin email from /config/support
+                    let adminEmail = 'developer@checkmate.com'; // fallback placeholder
+                    try {
+                      const configDoc = await getDoc(doc(db, 'config', 'support'));
+                      if (configDoc.exists() && configDoc.data().adminEmail) {
+                        adminEmail = configDoc.data().adminEmail;
+                      }
+                    } catch (configErr) {
+                      console.warn("Could not read support config document:", configErr);
+                    }
+
+                    // 3. Write mail triggers to /mail
+                    const mailCol = collection(db, 'mail');
+                    
+                    // User notification
+                    await addDoc(mailCol, {
+                      to: user.email || 'unknown@gmail.com',
+                      message: {
+                        subject: '[Check & Mate Support] Ticket Submitted Successfully',
+                        html: `
+                          <div style="font-family: sans-serif; padding: 20px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+                            <h2 style="color: #6d28d9; margin-bottom: 20px;">Support Ticket Received</h2>
+                            <p>Hello ${user.displayName || 'Player'},</p>
+                            <p>Thank you for reaching out. We have logged your query and our team will get back to you shortly.</p>
+                            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                            <p><strong>Your Submitted Ticket:</strong></p>
+                            <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #6d28d9; font-style: italic; margin-bottom: 20px; white-space: pre-wrap;">
+                              ${queryText.trim()}
+                            </div>
+                            <p style="font-size: 12px; color: #64748b;">This is an automated confirmation of receipt. Please do not reply directly to this mail.</p>
+                          </div>
+                        `
+                      }
+                    });
+
+                    // Admin notification
+                    await addDoc(mailCol, {
+                      to: adminEmail,
+                      message: {
+                        subject: `[Check & Mate Admin] Support Query from ${user.displayName || 'Player'}`,
+                        html: `
+                          <div style="font-family: sans-serif; padding: 20px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
+                            <h2 style="color: #ea580c; margin-bottom: 20px;">New Support Ticket Received</h2>
+                            <p><strong>Player Details:</strong></p>
+                            <ul style="list-style: none; padding-left: 0;">
+                              <li><strong>Name:</strong> ${user.displayName || 'N/A'}</li>
+                              <li><strong>Email:</strong> ${user.email || 'N/A'}</li>
+                              <li><strong>UID:</strong> ${user.uid}</li>
+                            </ul>
+                            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                            <p><strong>Query:</strong></p>
+                            <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #ea580c; font-style: italic; margin-bottom: 20px; white-space: pre-wrap;">
+                              ${queryText.trim()}
+                            </div>
+                          </div>
+                        `
+                      }
+                    });
+
                     setSubmitSuccess(true);
                   } catch (err: any) {
                     console.error('Error saving support query:', err);
