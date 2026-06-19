@@ -588,16 +588,8 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                             </span>
                             <span>•</span>
                             <span>
-                              Record: <span className="text-emerald-400">{fProfile.wins || 0}W</span> - <span className="text-red-400">{fProfile.losses || 0}L</span> - <span className="text-amber-400">{fProfile.draws || 0}D</span>
+                              Record: <span className="text-emerald-400">{userStats?.wins || 0}W</span> - <span className="text-red-400">{userStats?.losses || 0}L</span> - <span className="text-amber-400">{userStats?.draws || 0}D</span>
                             </span>
-                            {userStats && (userStats.wins > 0 || userStats.losses > 0 || userStats.draws > 0) && (
-                              <>
-                                <span>•</span>
-                                <span className="bg-slate-950/60 border border-white/5 px-2 py-0.5 rounded text-slate-400 font-medium font-mono">
-                                  H2H: <span className="text-emerald-400 font-bold">{userStats.wins}W</span> - <span className="text-red-400 font-bold">{userStats.losses}L</span>{userStats.draws > 0 && <span className="text-slate-400"> - {userStats.draws}D</span>}
-                                </span>
-                              </>
-                            )}
                           </p>
                         </div>
                       </div>

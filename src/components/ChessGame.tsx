@@ -1260,7 +1260,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 { id: 'r', name: 'Rook', key: 'r' },
                 { id: 'b', name: 'Bishop', key: 'b' }
               ].map((p) => {
-                const color = isWhite ? 'w' : 'b';
+                const color = chessRef.current.turn();
                 const pieceTheme = settings.pieceTheme || 'classic';
                 const imgSrc = `/pieces/${pieceTheme}/${color}${p.key}.png`;
                 return (
