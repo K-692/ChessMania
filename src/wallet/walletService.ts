@@ -3,10 +3,10 @@ import { doc, runTransaction, collection } from 'firebase/firestore';
 import type { UserProfile, WalletLedgerEntry } from '../types';
 
 /**
- * Calculates interest and top-ups due for a profile.
+ * Calculates hourly rewards due for a profile.
  * Does not write to DB; returns modified profile and ledger entries to write.
  */
-export function calculateInterestAndTopUp(
+export function calculateHourlyReward(
   profile: UserProfile,
   nowMs: number
 ): {
@@ -18,89 +18,63 @@ export function calculateInterestAndTopUp(
 
   // Ensure balance and timestamps are valid numbers
   const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
-  const lastInterestAppliedAt = typeof profile.lastInterestAppliedAt === 'number' && !isNaN(profile.lastInterestAppliedAt) 
-    ? profile.lastInterestAppliedAt 
+  const lastHourlyRewardAt = typeof profile.lastHourlyRewardAt === 'number' && !isNaN(profile.lastHourlyRewardAt)
+    ? profile.lastHourlyRewardAt
     : (profile.createdAt && !isNaN(profile.createdAt) ? profile.createdAt : nowMs);
-
-  let zeroBalanceAt = profile.zeroBalanceAt;
-  if (zeroBalanceAt !== null && zeroBalanceAt !== undefined) {
-    if (typeof zeroBalanceAt !== 'number' || isNaN(zeroBalanceAt)) {
-      zeroBalanceAt = null;
-    }
-  }
 
   // Apply default fallbacks directly to the updatedProfile copy
   updatedProfile.bankBalance = baseBalance;
-  updatedProfile.lastInterestAppliedAt = lastInterestAppliedAt;
-  updatedProfile.zeroBalanceAt = zeroBalanceAt;
+  updatedProfile.lastHourlyRewardAt = lastHourlyRewardAt;
+  updatedProfile.zeroBalanceAt = null; // We remove zero-balance recovery since hourly reward covers it
 
-  // 1. Daily Interest: 1% per day (compounded daily or simple interest per day elapsed)
-  // We use fractional days for continuous lazy interest updates down to the millisecond
-  const elapsedMs = nowMs - lastInterestAppliedAt;
-  const dayMs = 24 * 60 * 60 * 1000;
-  const elapsedDays = isNaN(elapsedMs) || elapsedMs <= 0 ? 0 : elapsedMs / dayMs;
+  // Hourly Reward: 100 coins for every hour the user's balance is below 1000, capped at 1000.
+  const hourMs = 60 * 60 * 1000;
+  const elapsedMs = nowMs - lastHourlyRewardAt;
+  const elapsedHours = isNaN(elapsedMs) || elapsedMs <= 0 ? 0 : Math.floor(elapsedMs / hourMs);
 
-  if (elapsedMs > 0 && baseBalance > 0) {
-    const rawInterest = baseBalance * 0.01 * elapsedDays;
-    // Keep 4 decimal places of precision for granular coins
-    const interestEarned = isNaN(rawInterest) ? 0 : Math.round(rawInterest * 10000) / 10000;
+  if (elapsedHours > 0) {
+    let currentBalance = baseBalance;
+    let totalCoinsEarned = profile.totalCoinsEarned || baseBalance;
+    let earnedThisSession = 0;
 
-    if (interestEarned > 0.0001) {
-      const balanceBefore = baseBalance;
-      updatedProfile.bankBalance = Math.round((baseBalance + interestEarned) * 10000) / 10000;
-      updatedProfile.totalCoinsEarned = Math.round(((profile.totalCoinsEarned || baseBalance) + interestEarned) * 10000) / 10000;
-      updatedProfile.lastInterestAppliedAt = nowMs; // Reset timer to current check
+    // Loop through each full hour to apply the reward
+    for (let i = 0; i < elapsedHours; i++) {
+      if (currentBalance < 1000) {
+        const increment = Math.min(100, 1000 - currentBalance);
+        if (increment > 0) {
+          currentBalance = Math.round((currentBalance + increment) * 10000) / 10000;
+          totalCoinsEarned = Math.round((totalCoinsEarned + increment) * 10000) / 10000;
+          earnedThisSession += increment;
+        }
+      }
+    }
+
+    if (earnedThisSession > 0) {
+      updatedProfile.bankBalance = currentBalance;
+      updatedProfile.totalCoinsEarned = totalCoinsEarned;
 
       ledgerEntries.push({
         uid: profile.uid,
-        type: 'interest',
-        amount: interestEarned,
+        type: 'hourly_reward',
+        amount: earnedThisSession,
         matchId: null,
-        balanceBefore,
-        balanceAfter: updatedProfile.bankBalance,
+        balanceBefore: baseBalance,
+        balanceAfter: currentBalance,
         createdAt: nowMs,
       });
     }
-  } else if (elapsedMs > 0) {
-    updatedProfile.lastInterestAppliedAt = nowMs;
-  }
 
-  // 2. Zero-Balance Recovery: 100 coins after 1 hour of zero balance
-  if (updatedProfile.bankBalance <= 0) {
-    if (updatedProfile.zeroBalanceAt === null || updatedProfile.zeroBalanceAt === undefined) {
-      updatedProfile.zeroBalanceAt = nowMs;
-    } else {
-      const zeroElapsed = nowMs - updatedProfile.zeroBalanceAt;
-      const hourMs = 60 * 60 * 1000;
-      if (!isNaN(zeroElapsed) && zeroElapsed >= hourMs) {
-        const balanceBefore = updatedProfile.bankBalance;
-        updatedProfile.bankBalance = 100;
-        updatedProfile.zeroBalanceAt = null;
-        updatedProfile.totalCoinsEarned = (updatedProfile.totalCoinsEarned || 0) + 100;
-
-        ledgerEntries.push({
-          uid: profile.uid,
-          type: 'topup',
-          amount: 100,
-          matchId: null,
-          balanceBefore,
-          balanceAfter: 100,
-          createdAt: nowMs,
-        });
-      }
-    }
-  } else {
-    // If balance is positive, zeroBalanceAt should be null
-    updatedProfile.zeroBalanceAt = null;
+    // Advance the hourly reward timestamp by the number of hours processed
+    updatedProfile.lastHourlyRewardAt = lastHourlyRewardAt + (elapsedHours * hourMs);
   }
 
   return { updatedProfile, ledgerEntries };
 }
 
 /**
- * Runs a Firestore transaction to apply daily interest and zero-balance recovery top-ups.
+ * Runs a Firestore transaction to apply hourly rewards.
  */
-export async function applyLazyInterestAndTopUpTx(uid: string): Promise<UserProfile> {
+export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile> {
   const userDocRef = doc(db, 'users', uid);
   const ledgerColRef = collection(db, 'walletLedger');
 
@@ -113,14 +87,14 @@ export async function applyLazyInterestAndTopUpTx(uid: string): Promise<UserProf
     const currentProfile = userDoc.data() as UserProfile;
     const now = Date.now();
 
-    const { updatedProfile, ledgerEntries } = calculateInterestAndTopUp(currentProfile, now);
+    const { updatedProfile, ledgerEntries } = calculateHourlyReward(currentProfile, now);
 
     // If changes occurred, commit them
     const balanceChanged = updatedProfile.bankBalance !== currentProfile.bankBalance;
-    const interestTimestampChanged = updatedProfile.lastInterestAppliedAt !== currentProfile.lastInterestAppliedAt;
-    const zeroBalanceTimestampChanged = updatedProfile.zeroBalanceAt !== currentProfile.zeroBalanceAt;
+    const rewardTimestampChanged = updatedProfile.lastHourlyRewardAt !== currentProfile.lastHourlyRewardAt;
+    const zeroBalanceChanged = updatedProfile.zeroBalanceAt !== currentProfile.zeroBalanceAt;
 
-    if (balanceChanged || interestTimestampChanged || zeroBalanceTimestampChanged) {
+    if (balanceChanged || rewardTimestampChanged || zeroBalanceChanged) {
       transaction.set(userDocRef, updatedProfile);
 
       // Write ledger entries
@@ -133,3 +107,4 @@ export async function applyLazyInterestAndTopUpTx(uid: string): Promise<UserProf
     return updatedProfile;
   });
 }
+

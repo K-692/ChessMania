@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Music, ArrowLeft, Eye, Check, Palette } from 'lucide-react';
+import { Volume2, VolumeX, Music, ArrowLeft, Eye, Check, Palette, HelpCircle, Send, X, AlertTriangle } from 'lucide-react';
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
+import { useAuth } from '../auth/AuthContext';
+import { db } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -24,6 +27,12 @@ const PIECE_IMAGES: Record<string, string> = {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [settings, setSettings] = useState(getSoundSettings());
+  const { user } = useAuth();
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [queryText, setQueryText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState<boolean | null>(null);
+  const [submitError, setSubmitError] = useState('');
 
   useEffect(() => {
     // Sync external changes (e.g. if muted from landing page)
@@ -238,7 +247,167 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             })}
           </div>
         </div>
+
+        {/* Support Section */}
+        <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors border-t border-white/5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400 shrink-0">
+                <HelpCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-slate-200">Facing any issue? Report us.</h4>
+                <p className="text-xs text-slate-500">Need help or want to report a bug? Send us a ticket.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setQueryText('');
+                setSubmitSuccess(null);
+                setSubmitError('');
+                setIsReportModalOpen(true);
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-lg border border-amber-500/25 cursor-pointer self-start sm:self-auto"
+            >
+              Report an Issue
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Report Issue Pop Up Modal */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <div className="glass max-w-lg w-full rounded-2xl border border-white/10 p-6 shadow-2xl relative space-y-6 text-left animate-fade-in">
+            <button
+              onClick={() => setIsReportModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <HelpCircle className="w-5 h-5 text-amber-400" />
+                <span>Report an Issue / Query</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Describe the problem or query you are experiencing. Our support team will review this.
+              </p>
+            </div>
+
+            {submitSuccess ? (
+              <div className="bg-emerald-950/20 border border-emerald-500/10 rounded-xl p-4 text-center space-y-3">
+                <p className="text-sm font-semibold text-emerald-400">Query Submitted Successfully!</p>
+                <p className="text-xs text-slate-300">
+                  Thank you for reporting. Your query has been logged securely under your account. We will review it shortly.
+                </p>
+                <button
+                  onClick={() => setIsReportModalOpen(false)}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2.5 rounded-lg transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!queryText.trim()) return;
+                  if (!user) {
+                    setSubmitError('You must be signed in to submit queries.');
+                    return;
+                  }
+
+                  setIsSubmitting(true);
+                  setSubmitError('');
+                  try {
+                    await addDoc(collection(db, 'supportQueries'), {
+                      uid: user.uid,
+                      email: user.email || 'unknown@gmail.com',
+                      query: queryText.trim(),
+                      createdAt: Date.now()
+                    });
+                    setSubmitSuccess(true);
+                  } catch (err: any) {
+                    console.error('Error saving support query:', err);
+                    setSubmitError(err.message || 'Failed to submit query. Please try again.');
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }}
+                className="space-y-4"
+              >
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Submitter Email
+                  </label>
+                  <input
+                    type="text"
+                    readOnly
+                    disabled
+                    value={user?.email || 'Not logged in'}
+                    className="w-full bg-slate-900/60 border border-white/5 rounded-xl px-4 py-3 text-sm text-slate-400 font-mono outline-none"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    Query will be registered under your Google Account email.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                    Describe your issue / query
+                  </label>
+                  <textarea
+                    value={queryText}
+                    onChange={(e) => setQueryText(e.target.value)}
+                    required
+                    placeholder="Provide details about the issue you are facing..."
+                    rows={5}
+                    maxLength={1000}
+                    className="w-full bg-slate-900/60 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-amber-500/50 transition-all font-sans resize-none"
+                  />
+                  <div className="text-[10px] text-slate-500 flex justify-between">
+                    <span>Max 1000 characters</span>
+                    <span>{queryText.length}/1000</span>
+                  </div>
+                </div>
+
+                {submitError && (
+                  <div className="flex items-center gap-2 bg-red-950/20 border border-red-500/10 rounded-xl p-3 text-xs text-red-400">
+                    <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse" />
+                    <span>{submitError}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsReportModalOpen(false)}
+                    className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold py-3 rounded-xl transition-all border border-white/5 cursor-pointer text-center"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !queryText.trim()}
+                    className="flex-1 flex items-center justify-center space-x-2 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 disabled:opacity-50 text-white text-xs font-semibold py-3 rounded-xl transition-all border border-amber-500/20 cursor-pointer shadow-lg shadow-amber-500/10"
+                  >
+                    {isSubmitting ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Submit Ticket</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

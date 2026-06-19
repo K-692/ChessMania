@@ -9,13 +9,15 @@ import { Leaderboard } from './components/Leaderboard';
 import { ProfileView } from './components/ProfileView';
 import { SocialView } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
+import { AddFundsModal } from './components/AddFundsModal';
 import type { GameMode, Match, UserProfile } from './types';
 import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
-import { Edit2, X, Lock, Calendar, UserPlus, Check } from 'lucide-react';
+import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
 import './utils/sound';
+import { applyLazyHourlyRewardTx } from './wallet/walletService';
 
 
 const AppContent: React.FC = () => {
@@ -39,11 +41,11 @@ const AppContent: React.FC = () => {
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
 
-  // Recovery topup countdown state
-  const [recoveryTimer, setRecoveryTimer] = useState<string | null>(null);
+  // Add Funds modal state
+  const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
 
-  // Live continuous ticking balance state
-  const [tickingBalance, setTickingBalance] = useState<number>(1000);
+  // Hourly reward countdown state
+  const [hourlyRewardTimer, setHourlyRewardTimer] = useState<string>('00:00');
 
   // Real-time online players count state
   const [onlineCount, setOnlineCount] = useState<number>(1);
@@ -150,56 +152,43 @@ const AppContent: React.FC = () => {
     };
   }, []);
 
-  // 1c. Monitor Zero-Balance Cooldown countdown
+  // 1c. Monitor Hourly Reward countdown
   useEffect(() => {
-    if (!profile || profile.zeroBalanceAt === null) {
-      setRecoveryTimer(null);
+    if (!profile || view !== 'dashboard') return;
+
+    const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
+
+    if (baseBalance >= 1000) {
+      setHourlyRewardTimer('Limit Reached');
       return;
     }
 
-    const updateTimer = () => {
-      const elapsed = Date.now() - profile.zeroBalanceAt!;
-      const hourMs = 60 * 60 * 1000;
-      const remaining = hourMs - elapsed;
+    const lastHourlyRewardAt = typeof profile.lastHourlyRewardAt === 'number' && !isNaN(profile.lastHourlyRewardAt)
+      ? profile.lastHourlyRewardAt
+      : (profile.createdAt || Date.now());
 
-      if (remaining <= 0) {
-        setRecoveryTimer('Eligible! Perform action/reload to claim 100 coins.');
+    const updateTimer = () => {
+      const now = Date.now();
+      const hourMs = 60 * 60 * 1000;
+      const elapsedMs = now - lastHourlyRewardAt;
+      
+      // Find out when the next hour will complete
+      const elapsedHours = Math.floor(elapsedMs / hourMs);
+      const nextRewardTime = lastHourlyRewardAt + (elapsedHours + 1) * hourMs;
+      const remainingMs = nextRewardTime - now;
+
+      if (remainingMs <= 0) {
+        setHourlyRewardTimer('Eligible!');
+        applyLazyHourlyRewardTx(profile.uid).catch(console.error);
       } else {
-        const mins = Math.floor(remaining / 60000);
-        const secs = Math.floor((remaining % 60000) / 1000);
-        setRecoveryTimer(`Recovery top-up in ${mins}:${secs < 10 ? '0' : ''}${secs}`);
+        const mins = Math.floor(remainingMs / 60000);
+        const secs = Math.floor((remainingMs % 60000) / 1000);
+        setHourlyRewardTimer(`${mins}:${secs < 10 ? '0' : ''}${secs}`);
       }
     };
 
     updateTimer();
     const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
-  }, [profile]);
-
-  // 1d. Real-time balance ticking at 1% daily rate (fractional increment every 100ms)
-  useEffect(() => {
-    if (!profile || view !== 'dashboard') return;
-
-    const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
-    const lastApplied = typeof profile.lastInterestAppliedAt === 'number' && !isNaN(profile.lastInterestAppliedAt)
-      ? profile.lastInterestAppliedAt
-      : (profile.createdAt || Date.now());
-
-    const updateTicking = () => {
-      const now = Date.now();
-      const elapsedMs = now - lastApplied;
-      const dayMs = 24 * 60 * 60 * 1000;
-      
-      // Calculate fractional daily interest: balance * 0.01 * (elapsedMs / dayMs)
-      const elapsedDays = elapsedMs / dayMs;
-      const accrued = baseBalance * 0.01 * elapsedDays;
-      const safeAccrued = isNaN(accrued) || accrued < 0 ? 0 : accrued;
-      setTickingBalance(baseBalance + safeAccrued);
-    };
-
-    updateTicking();
-    const interval = setInterval(updateTicking, 100); // Ticker updates every 100ms for high fluid precision
-
     return () => clearInterval(interval);
   }, [profile, view]);
 
@@ -495,6 +484,7 @@ const AppContent: React.FC = () => {
         }}
         currentView={view}
         isGameActive={view === 'game'}
+        onAddFunds={() => setIsAddFundsOpen(true)}
       />
 
       <main className="flex-grow">
@@ -610,80 +600,90 @@ const AppContent: React.FC = () => {
               {/* Combined Wallet & Balance Card */}
               <div className="glass p-6 rounded-xl border border-white/5 md:col-span-2 flex flex-col justify-between space-y-4">
                 <div className="flex items-center justify-between border-b border-white/5 pb-3">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Wallet Balance & Interest Growth</span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Wallet & Rewards</span>
                   <div className="flex items-center space-x-2">
                     <span className="flex h-2 w-2 relative">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                     </span>
-                    <span className="text-[10px] text-emerald-400 font-medium font-mono">Lazy Compound Active</span>
+                    <span className="text-[10px] text-emerald-400 font-medium font-mono">Hourly +100 Active</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-start">
                   {/* Bank Balance Column */}
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-center space-x-2 text-slate-400">
                       <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
                       <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Balance</span>
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-3">
                       <h3 className="text-4xl font-black font-mono text-amber-400 tracking-tight">
                         {profile ? formatCoins(profile.bankBalance) : '1K'}
                       </h3>
                       <p className="text-xs text-slate-500">
                         Available Play Stakes (Coins)
                       </p>
+                      
+                      <button
+                        onClick={() => setIsAddFundsOpen(true)}
+                        className="flex items-center space-x-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 px-3 py-1.5 rounded-xl font-bold shadow-lg shadow-amber-500/10 transition-all border border-amber-400/20 cursor-pointer text-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-slate-950 stroke-[3]" />
+                        <span>Add Funds</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Growth / Ticker Column */}
+                  {/* Hourly Reward countdown Column */}
                   <div className="space-y-2 border-t sm:border-t-0 sm:border-l border-white/5 pt-4 sm:pt-0 sm:pl-6">
                     <div className="flex items-center space-x-2 text-slate-400">
                       <img src="https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg" alt="King" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(16,185,129,0.5)] brightness-125" />
-                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Live Interest Growth</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Hourly Reward</span>
                     </div>
 
-                    {recoveryTimer ? (
-                      <div className="bg-red-950/20 border border-red-500/10 rounded-lg p-2.5">
-                        <p className="text-xs font-bold text-red-400 animate-pulse flex items-center space-x-1.5">
-                          <span>⚠️ Cooldown:</span>
-                          <span className="font-mono">{recoveryTimer}</span>
+                    {profile && profile.bankBalance >= 1000 ? (
+                      <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-slate-400">
+                          Balance limit reached (1,000+ Coins)
                         </p>
-                        <p className="text-[10px] text-slate-500 mt-1">
-                          Coins are locking. Free 100 coins will vest on cooldown end.
+                        <p className="text-[10px] text-slate-500 leading-relaxed">
+                          Hourly reward is paused. Spend your coins on game entries or challenges to resume earning free coins!
                         </p>
                       </div>
                     ) : (
-                      <div className="space-y-2">
-                        {(() => {
-                          const valStr = (Math.ceil(tickingBalance * 10000) / 10000).toFixed(4);
-                          const [integerPart, decimalPart] = valStr.split('.');
-                          return (
-                            <div className="font-mono text-emerald-400 tracking-tight interest-glow inline-flex items-baseline select-none">
-                              <span className="text-3xl font-black">{integerPart}</span>
-                              <span className="text-sm font-bold opacity-80">.{decimalPart}</span>
-                              <span className="text-2xl ml-1">🪙</span>
-                            </div>
-                          );
-                        })()}
-                        <p className="text-[10px] text-slate-500">
-                          Accruing interest continuously at 1% daily rate
-                        </p>
-                        <div className="pt-2 border-t border-white/5 space-y-1">
-                          <div className="text-[10px] text-slate-400 flex justify-between">
-                            <span>Est. Tomorrow:</span>
-                            <span className="font-bold text-emerald-300 font-mono">
-                              {profile ? formatCoins(profile.bankBalance * 1.01) : '---'}
-                            </span>
+                      <div className="space-y-3">
+                        <div className="flex items-baseline justify-between">
+                          <span className="text-xs text-slate-400">Next Credit:</span>
+                          <span className="font-mono text-emerald-400 text-lg font-bold">
+                            {hourlyRewardTimer}
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <div className="w-full bg-slate-950/80 rounded-full h-2 overflow-hidden border border-white/5">
+                            {(() => {
+                              const lastReward = profile?.lastHourlyRewardAt || profile?.createdAt || Date.now();
+                              const elapsed = Date.now() - lastReward;
+                              const pct = Math.min(100, Math.max(0, ((elapsed % (60 * 60 * 1000)) / (60 * 60 * 1000)) * 100));
+                              return (
+                                <div
+                                  className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-1000"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              );
+                            })()}
                           </div>
-                          <div className="text-[10px] text-slate-500 flex justify-between">
-                            <span>Daily Growth:</span>
-                            <span className="font-semibold text-slate-400 font-mono">
-                              +{profile ? formatCoins(profile.bankBalance * 0.01) : '---'}
-                            </span>
+                          <div className="flex justify-between text-[9px] text-slate-500">
+                            <span>0m</span>
+                            <span>+100 Coins</span>
+                            <span>60m</span>
                           </div>
                         </div>
+
+                        <p className="text-[10px] text-slate-500">
+                          Earn 100 coins every hour while balance is below 1,000 coins.
+                        </p>
                       </div>
                     )}
                   </div>
@@ -827,6 +827,11 @@ const AppContent: React.FC = () => {
         isOpen={isPlayModalOpen}
         onClose={() => setIsPlayModalOpen(false)}
         onStartSearch={(mode, stake) => setMatchmakingConfig({ mode, stake })}
+      />
+
+      <AddFundsModal
+        isOpen={isAddFundsOpen}
+        onClose={() => setIsAddFundsOpen(false)}
       />
 
       {matchmakingConfig && (

@@ -9,10 +9,9 @@ interface LedgerHistoryProps {
   onBack: () => void;
 }
 
-export function formatTimestampToIST(utcMs: number): string {
+export function formatTimestampLocal(utcMs: number): string {
   const date = new Date(utcMs);
-  return new Intl.DateTimeFormat('en-IN', {
-    timeZone: 'Asia/Kolkata',
+  return new Intl.DateTimeFormat(undefined, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -64,8 +63,10 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
       case 'seed': return 'Account Seed Credits';
       case 'interest': return 'Lazy Daily Bank Interest (1%)';
       case 'topup': return 'Zero-Balance Recovery Credit';
+      case 'hourly_reward': return 'Hourly Reward Credit';
       case 'game_escrow': return 'Match Entry Stakes (Escrow)';
       case 'game_payout': return 'Match Settlement Payout';
+      case 'purchase': return 'Coins Pack Purchase';
       default: return type;
     }
   };
@@ -103,11 +104,8 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
       <div className="space-y-2">
         <h2 className="text-2xl font-bold tracking-tight text-slate-100 flex items-center space-x-2.5">
           <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-6 h-6 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
-          <span>Coin Ledger Audit Trail</span>
+          <span>Transactions</span>
         </h2>
-        <p className="text-sm text-slate-500">
-          Immutable historical log of all coin balances, game settlements, interest credits, and recovery top-ups (Timestamps rendered in IST).
-        </p>
       </div>
 
       {loading ? (
@@ -119,7 +117,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
         <div className="glass p-12 rounded-xl text-center border border-white/5 space-y-2">
           <Info className="w-8 h-8 text-slate-500 mx-auto" />
           <p className="text-slate-400 font-medium">No ledger records found</p>
-          <p className="text-xs text-slate-600">Transactions will appear here once interest accumulates or you participate in games.</p>
+          <p className="text-xs text-slate-600">Transactions will appear here once rewards accrue or you make purchases/play games.</p>
         </div>
       ) : (
         <div className="glass rounded-xl border border-white/5 overflow-hidden">
@@ -130,7 +128,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
                   <th className="px-6 py-4">Transaction / Event</th>
                   <th className="px-6 py-4">Change Amount</th>
                   <th className="px-6 py-4">Wallet Balance</th>
-                  <th className="px-6 py-4">Timestamp (IST)</th>
+                  <th className="px-6 py-4">Timestamp</th>
                   <th className="px-6 py-4">Reference Match ID</th>
                 </tr>
               </thead>
@@ -157,7 +155,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
                     {/* Timestamp in IST */}
                     <td className="px-6 py-4 text-slate-400 flex items-center space-x-1.5">
                       <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                      <span>{formatTimestampToIST(entry.createdAt)}</span>
+                      <span>{formatTimestampLocal(entry.createdAt)}</span>
                     </td>
 
                     {/* Reference ID */}

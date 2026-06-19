@@ -3,7 +3,7 @@ import { signInWithPopup, signOut, type User as FirebaseUser } from 'firebase/au
 import { auth, googleProvider, db } from '../firebase';
 import type { UserProfile, WalletLedgerEntry } from '../types';
 import { doc, getDoc, setDoc, runTransaction, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
-import { applyLazyInterestAndTopUpTx } from '../wallet/walletService';
+import { applyLazyHourlyRewardTx } from '../wallet/walletService';
 
 interface AuthContextType {
   user: FirebaseUser | null;
@@ -93,6 +93,12 @@ export function sanitizeProfile(
     hasChanges = true;
   }
 
+  let lastHourlyRewardAt = data?.lastHourlyRewardAt;
+  if (typeof lastHourlyRewardAt !== 'number' || isNaN(lastHourlyRewardAt)) {
+    lastHourlyRewardAt = data?.lastInterestAppliedAt || createdAt;
+    hasChanges = true;
+  }
+
   let totalCoinsEarned = data?.totalCoinsEarned;
   if (typeof totalCoinsEarned !== 'number' || isNaN(totalCoinsEarned)) {
     const parsed = Number(totalCoinsEarned);
@@ -110,6 +116,7 @@ export function sanitizeProfile(
     lastActiveAt,
     zeroBalanceAt,
     lastInterestAppliedAt,
+    lastHourlyRewardAt,
     lastUsernameChangedAt: data?.lastUsernameChangedAt || null,
     totalCoinsEarned,
     gameplayCounts: data?.gameplayCounts || {},
@@ -122,6 +129,7 @@ export function sanitizeProfile(
     sanitized.displayName !== data?.displayName ||
     sanitized.photoURL !== data?.photoURL ||
     sanitized.lastUsernameChangedAt !== data?.lastUsernameChangedAt ||
+    sanitized.lastHourlyRewardAt !== data?.lastHourlyRewardAt ||
     JSON.stringify(sanitized.gameplayCounts) !== JSON.stringify(data?.gameplayCounts) ||
     sanitized.wins !== data?.wins ||
     sanitized.losses !== data?.losses ||
@@ -204,8 +212,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (docSnap.exists()) {
-        // Profile exists, apply daily interest and recovery top-ups lazily
-        await applyLazyInterestAndTopUpTx(firebaseUser.uid);
+        // Profile exists, apply hourly rewards lazily
+        await applyLazyHourlyRewardTx(firebaseUser.uid);
 
         // Correct legacy profile rating from 1200 to 0 if they haven't played any games
         const docSnapAfterInterest = await getDoc(userDocRef);

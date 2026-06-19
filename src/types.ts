@@ -8,6 +8,7 @@ export interface UserProfile {
   lastActiveAt: number; // UTC timestamp
   zeroBalanceAt: number | null; // UTC timestamp when balance hit zero
   lastInterestAppliedAt: number; // UTC timestamp of last lazy interest accrual
+  lastHourlyRewardAt?: number; // UTC timestamp of last lazy hourly reward credit
   lastUsernameChangedAt?: number | null; // UTC timestamp when username was last updated
   totalCoinsEarned?: number; // Total coins earned by the player
   gameplayCounts?: Record<string, number>; // Maps game mode to play count
@@ -73,7 +74,7 @@ export interface Match {
   heartbeats?: Record<string, number>; // Live client heartbeats (UID -> timestamp)
 }
 
-export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'game_escrow' | 'game_payout';
+export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'hourly_reward' | 'game_escrow' | 'game_payout' | 'purchase';
 
 export interface WalletLedgerEntry {
   id?: string;
@@ -84,6 +85,8 @@ export interface WalletLedgerEntry {
   balanceBefore: number;
   balanceAfter: number;
   createdAt: number;
+  pricePaid?: number; // Fiat price paid for purchase
+  currency?: string; // Currency used for purchase (INR, USD, etc.)
 }
 
 export interface RatingLedgerEntry {

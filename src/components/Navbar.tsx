@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { LogIn, LogOut, Volume2, VolumeX } from 'lucide-react';
+import { LogIn, LogOut, Volume2, VolumeX, Plus } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
@@ -11,9 +11,10 @@ interface NavbarProps {
   onNavigate: (view: 'dashboard' | 'ledger' | 'leaderboard' | 'profile' | 'social' | 'settings') => void;
   currentView: string;
   isGameActive?: boolean;
+  onAddFunds?: () => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameActive = false }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameActive = false, onAddFunds }) => {
   const { user, profile, login, logout, loading } = useAuth();
   const [muted, setMuted] = useState(() => getSoundSettings().muted);
   const [pendingCount, setPendingCount] = useState(0);
@@ -83,12 +84,14 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
           }
         }}
       >
-        <div className="flex items-center justify-center bg-slate-900/60 p-0.5 rounded-xl shadow-lg border border-white/5 overflow-hidden w-11 h-11">
+        <div className="flex items-center justify-center bg-slate-900/60 p-0.5 rounded-xl shadow-lg border border-white/5 overflow-hidden w-11 h-11 shrink-0">
           <img src="/game_logo.png" alt="Check & Mate Logo" className="w-full h-full object-cover" />
         </div>
-        <span className="text-xl font-bold tracking-wider bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-          CHECK & MATE
-        </span>
+        <div className="flex flex-col text-left leading-[1.05] tracking-widest bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent select-none font-black py-0.5">
+          <span className="text-[11px] uppercase font-black">CHECK</span>
+          <span className="text-[9px] font-bold text-slate-400 text-center">&</span>
+          <span className="text-[11px] uppercase font-black">MATE</span>
+        </div>
       </div>
 
       <div className="flex items-center space-x-6">
@@ -117,7 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   currentView === 'ledger' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Wallet Audit
+                Wallet
               </button>
               <button
                 onClick={() => onNavigate('profile')}
@@ -151,11 +154,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
               {/* Wallet Info */}
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 px-3 py-1.5 rounded-lg">
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125" />
-                  <span className="text-amber-300 font-semibold text-sm">
+                <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 pl-3 pr-2 py-1.5 rounded-lg">
+                  <img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" alt="Pawn" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(245,158,11,0.5)] brightness-125 shrink-0" />
+                  <span className="text-amber-300 font-semibold text-sm mr-1">
                     {profile ? formatCoins(profile.bankBalance) : '---'}
                   </span>
+                  {onAddFunds && (
+                    <button
+                      onClick={onAddFunds}
+                      className="p-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded transition-all cursor-pointer flex items-center justify-center"
+                      title="Add Funds"
+                    >
+                      <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                    </button>
+                  )}
                 </div>
 
                 {/* Rating Info */}
