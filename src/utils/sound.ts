@@ -4,6 +4,7 @@ const DEFAULT_SETTINGS = {
   muted: false,
   showLegalMoves: true,
   boardTheme: 'green' as string,
+  pieceTheme: 'classic' as string,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
@@ -43,21 +44,15 @@ export function updateSoundSettings(newSettings: Partial<typeof settings>) {
 }
 
 function adjustThemeVolume() {
-  if (!audioCtx) return;
-  const ctx = getAudioContext();
-  const now = ctx.currentTime;
   const vol = settings.muted ? 0 : settings.musicVolume;
-  const targetGain = 0.04 * vol;
-
-  themeNodes.forEach(node => {
-    try {
-      node.gain.gain.cancelScheduledValues(now);
-      node.gain.gain.setValueAtTime(node.gain.gain.value, now);
-      node.gain.gain.linearRampToValueAtTime(targetGain, now + 0.1);
-    } catch (e) {
-      console.warn("Error adjusting theme node volume:", e);
+  if (themeAudio) {
+    themeAudio.volume = vol * 0.3;
+    if (vol > 0) {
+      themeAudio.play().catch(() => {});
+    } else {
+      themeAudio.pause();
     }
-  });
+  }
 }
 
 // Professional Wood Click synthesizer
@@ -89,75 +84,24 @@ export function playWoodClickSound() {
   }
 }
 
-let themeInterval: any = null;
-let themeNodes: { oscs: OscillatorNode[]; gain: GainNode; filter: BiquadFilterNode }[] = [];
+let themeAudio: HTMLAudioElement | null = null;
 
 export function startCinematicTheme() {
-  if (themeInterval) return; // Already running
+  if (themeAudio) return; // Already running
   
-  const ctx = getAudioContext();
-  const chords = [
-    [146.83, 220.00, 349.23, 440.00], // Dm (D3, A3, F4, A4)
-    [116.54, 174.61, 293.66, 349.23], // Bb (Bb2, F3, D4, F4)
-    [87.31, 130.81, 220.00, 261.63],  // F (F2, C3, A3, C4)
-    [130.81, 196.00, 329.63, 392.00]   // C (C3, G3, E4, G4)
-  ];
-  
-  let chordIdx = 0;
-  
-  const playNextChord = () => {
-    try {
-      if (ctx.state === 'suspended') return;
-      const now = ctx.currentTime;
-      const notes = chords[chordIdx];
-      chordIdx = (chordIdx + 1) % chords.length;
-      
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(300, now);
-      filter.frequency.exponentialRampToValueAtTime(800, now + 4);
-      filter.frequency.exponentialRampToValueAtTime(300, now + 8);
-      
-      const gain = ctx.createGain();
-      const vol = settings.muted ? 0 : settings.musicVolume;
-      const maxVolume = 0.04 * vol;
-
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(maxVolume, now + 2.5); // Very soft background volume
-      gain.gain.setValueAtTime(maxVolume, now + 5.5);
-      gain.gain.linearRampToValueAtTime(0, now + 8);
-      
-      const oscs = notes.map((freq) => {
-        const osc = ctx.createOscillator();
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(freq, now);
-        osc.detune.setValueAtTime((Math.random() - 0.5) * 12, now);
-        osc.connect(filter);
-        return osc;
+  try {
+    themeAudio = new Audio('/Checkmate Horizon.mp3');
+    themeAudio.loop = true;
+    const vol = settings.muted ? 0 : settings.musicVolume;
+    themeAudio.volume = vol * 0.3;
+    if (vol > 0) {
+      themeAudio.play().catch(e => {
+        console.warn("Failed to play background theme song automatically:", e);
       });
-      
-      filter.connect(gain);
-      gain.connect(ctx.destination);
-      
-      oscs.forEach(osc => osc.start(now));
-      
-      const nodeRef = { oscs, gain, filter };
-      themeNodes.push(nodeRef);
-      
-      setTimeout(() => {
-        try {
-          oscs.forEach(osc => osc.stop());
-          themeNodes = themeNodes.filter(n => n !== nodeRef);
-        } catch (err) {}
-      }, 8500);
-      
-    } catch (e) {
-      console.warn("Failed to play theme chord:", e);
     }
-  };
-
-  playNextChord();
-  themeInterval = setInterval(playNextChord, 8000);
+  } catch (e) {
+    console.warn("Failed to initialize background audio:", e);
+  }
 }
 
 // Global click event to initialize/resume AudioContext and play wooden clicks on interactives

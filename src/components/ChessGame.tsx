@@ -6,7 +6,7 @@ import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo } from '../game/gameService';
 import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send } from 'lucide-react';
+import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
@@ -16,33 +16,15 @@ interface ChessGameProps {
   onExit: () => void;
 }
 
-const PIECE_IMAGES: Record<string, string> = {
-  P: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
-  R: 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
-  N: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
-  B: 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
-  Q: 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
-  p: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
-  r: 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
-  n: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
-  b: 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
-  q: 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
-};
-
-// Piece point values for material advantage calculation
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 
-// Board colour themes
-const BOARD_THEMES: Record<string, { dark: string; light: string; label: string; isAngle?: boolean }> = {
-  green:         { dark: '#779556', light: '#ebecd0', label: 'Green' },
-  wood:          { dark: '#b58863', light: '#f0d9b5', label: 'Wood' },
-  'green-angle': { dark: '#779556', light: '#ebecd0', label: 'Green Angle', isAngle: true },
-  'wood-angle':  { dark: '#b58863', light: '#f0d9b5', label: 'Wood Angle', isAngle: true },
-  blue:          { dark: '#4b7db8', light: '#dee3e6', label: 'Blue' },
-  'blue-angle':  { dark: '#4b7db8', light: '#dee3e6', label: 'Blue Angle', isAngle: true },
-  walnut:        { dark: '#7a4a2e', light: '#d8b98a', label: 'Walnut' },
-  ice:           { dark: '#6f8fa9', light: '#dce9f0', label: 'Ice' },
-};
+const BOARD_THEMES = [
+  '8_BIT', 'BASES', 'BLUE', 'BROWN', 'BUBBLEGUM', 'BURLED_WOOD', 'DARK_WOOD', 'DASH', 'GLASS', 'GRAFFITI', 'GREEN', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'METAL', 'NEON', 'NEWSPAPER', 'ORANGE', 'OVERLAY', 'PARCHMENT', 'PURPLE', 'RED', 'SAND', 'SKY', 'STONE', 'TAN', 'TOURNAMENT', 'TRANSLUCENT', 'WALNUT'
+];
+
+const PIECE_THEMES = [
+  '3D_CHESSKID', '3D_PLASTIC', '3D_STAUNTON', '3D_WOOD', '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
+];
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const { user } = useAuth();
@@ -319,7 +301,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       // Profiles are fetched in a separate effect
 
       // Sync player disconnection states & initialization timers using heartbeats
-      if (matchData.status === 'active') {
+      if (matchData.status === 'active' && matchData.mode !== 'practice') {
         const myUid = user?.uid;
         const oppUid = myUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
 
@@ -390,7 +372,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   // Ticker — runs independently; reads from stable refs so it never needs to restart on snapshots
   useEffect(() => {
-    if (!match || match.status !== 'active') return;
+    if (!match || match.status !== 'active' || match.mode === 'practice') return;
 
     const interval = setInterval(() => {
       const baseline = clockBaselineRef.current;
@@ -422,7 +404,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   // 3. Handle disconnection timeouts (1 minute limit)
   useEffect(() => {
-    if (!match || match.status !== 'active') return;
+    if (!match || match.status !== 'active' || match.mode === 'practice') return;
 
     const interval = setInterval(() => {
       const now = Date.now();
@@ -581,42 +563,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return false;
   };
 
-  // Click square logic for legal moves and click-to-move
+  // Click square logic for legal moves highlight (drag-and-drop is required to make a move)
   const onSquareClick = (square: string) => {
     if (!match || !isMyTurn || match.status !== 'active') return;
 
     const piece = chessRef.current.get(square as any);
     const myColor = isWhite ? 'w' : 'b';
 
-    if (selectedSquare) {
+    if (piece && piece.color === myColor) {
       if (selectedSquare === square) {
         setSelectedSquare(null);
-        return;
-      }
-
-      const moves = chessRef.current.moves({
-        square: selectedSquare as any,
-        verbose: true
-      });
-      const legalMove = moves.find((m: any) => m.to === square);
-
-      if (legalMove) {
-        const success = onPieceDrop(selectedSquare, square);
-        if (success) {
-          setSelectedSquare(null);
-          return;
-        }
-      }
-
-      if (piece && piece.color === myColor) {
-        setSelectedSquare(square);
       } else {
-        setSelectedSquare(null);
+        setSelectedSquare(square);
       }
     } else {
-      if (piece && piece.color === myColor) {
-        setSelectedSquare(square);
-      }
+      setSelectedSquare(null);
     }
   };
 
@@ -733,7 +694,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   if (!match) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-12 h-12 object-contain animate-bounce" />
         <p className="text-slate-400">Loading game room...</p>
       </div>
     );
@@ -798,37 +759,65 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   // Material advantage from my perspective: positive means I'm up
   const myMaterialAdv = isWhite ? captured.advantage : -captured.advantage;
 
-  const boardTheme = BOARD_THEMES[settings.boardTheme] ?? BOARD_THEMES['green'];
+  const boardStyle: React.CSSProperties = {
+    backgroundImage: `url('/boards/${settings.boardTheme}.png')`,
+    backgroundSize: 'cover',
+  };
+
+  const pieceTheme = settings.pieceTheme || 'classic';
+  const customPieces: Record<string, (props?: any) => React.JSX.Element> = {};
+  const pieceKeys = ['wP', 'wN', 'wB', 'wR', 'wQ', 'wK', 'bP', 'bN', 'bB', 'bR', 'bQ', 'bK'];
+  pieceKeys.forEach((key) => {
+    const file = key[0] + key[1].toLowerCase();
+    customPieces[key] = (props) => (
+      <img
+        src={`/pieces/${pieceTheme}/${file}.png`}
+        alt={key}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          ...props?.svgStyle
+        }}
+      />
+    );
+  });
+
+  const getPieceImage = (p: string) => {
+    const isWhitePiece = p === p.toUpperCase();
+    const file = isWhitePiece ? 'w' + p.toLowerCase() : 'b' + p;
+    return `/pieces/${settings.pieceTheme || 'classic'}/${file}.png`;
+  };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-4 space-y-4">
-      {/* Main Game Screen (Left side Chessboard, Right side player info & logs) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch lg:h-[calc(100vh-120px)]">
-        {/* Left half: Chessboard (fits top-to-bottom of the left half) */}
-        <div className="lg:col-span-7 flex flex-col justify-center items-center p-4 bg-slate-900/10 rounded-2xl border border-white/5 h-full min-h-[360px]">
-          <div className="chessboard-container aspect-square w-full max-w-[min(100%,560px,78vh)] bg-[#1a1c23] shadow-2xl rounded-2xl overflow-hidden border border-white/10">
-            <Chessboard
-              options={{
-                position: localFen,
-                onPieceDrop: ({ sourceSquare, targetSquare }) => {
-                  if (targetSquare) {
-                    return onPieceDrop(sourceSquare, targetSquare);
-                  }
-                  return false;
-                },
-                boardOrientation: isWhite ? 'white' : 'black',
-                allowDragging: match.status === 'active' && isMyTurn,
-                darkSquareStyle: { backgroundColor: boardTheme.dark },
-                lightSquareStyle: { backgroundColor: boardTheme.light },
-                squareStyles: customSquareStyles,
-                onSquareClick: ({ square }) => onSquareClick(square),
-              }}
-            />
-          </div>
+    <div className="w-full h-auto lg:h-[calc(100vh-64px)] xl:h-[calc(100vh-80px)] flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden bg-transparent">
+      {/* Left Column: Chessboard (fits top-to-bottom of the left half) */}
+      <div className="w-full lg:w-auto lg:h-full flex items-center justify-start bg-slate-900/10 p-0 shrink-0">
+        <div className="chessboard-container aspect-square w-full h-auto lg:h-[calc(100vh-64px)] lg:max-h-[calc(100vh-64px)] lg:w-[calc(100vh-64px)] xl:h-[calc(100vh-80px)] xl:max-h-[calc(100vh-80px)] xl:w-[calc(100vh-80px)] bg-[#1a1c23] shadow-2xl overflow-hidden border border-white/10 lg:border-y-0 lg:border-l-0 flex items-center justify-center">
+          <Chessboard
+            options={{
+              position: localFen,
+              onPieceDrop: ({ sourceSquare, targetSquare }) => {
+                if (targetSquare) {
+                  return onPieceDrop(sourceSquare, targetSquare);
+                }
+                return false;
+              },
+              boardOrientation: isWhite ? 'white' : 'black',
+              allowDragging: match.status === 'active' && isMyTurn,
+              darkSquareStyle: { backgroundColor: 'transparent' },
+              lightSquareStyle: { backgroundColor: 'transparent' },
+              boardStyle,
+              pieces: customPieces,
+              squareStyles: customSquareStyles,
+              onSquareClick: ({ square }) => onSquareClick(square),
+            }}
+          />
         </div>
+      </div>
 
-        {/* Right half: Actions, Players, Clocks, Info, Moves */}
-        <div className="lg:col-span-5 flex flex-col justify-between p-5 bg-slate-950/20 rounded-2xl border border-white/5 space-y-4 lg:max-h-[calc(100vh-120px)] overflow-y-auto">
+      {/* Right Column: Actions, Players, Clocks, Info, Moves */}
+      <div className="flex-grow flex flex-col p-4 lg:p-6 bg-slate-950/20 border-t lg:border-t-0 lg:border-l border-white/5 lg:h-full lg:overflow-hidden justify-between space-y-3">
           {/* Header Action Menu */}
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <button
@@ -885,7 +874,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
                 />
                 <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#121318] ${
-                  isOpponentDisconnected ? 'bg-red-500' : 'bg-emerald-500'
+                  (isOpponentDisconnected && match.mode !== 'practice') ? 'bg-red-500' : 'bg-emerald-500'
                 }`} />
               </div>
               <div>
@@ -904,7 +893,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                       <span className="text-[8px] text-slate-600">No captures</span>
                     ) : (
                       oppCaptured.map((p, i) => (
-                        <img key={i} src={PIECE_IMAGES[p]} alt={p} className="w-3.5 h-3.5 object-contain" />
+                        <img key={i} src={getPieceImage(p)} alt={p} className="w-3.5 h-3.5 object-contain" />
                       ))
                     )}
                     {/* Show opponent's material advantage if they are up */}
@@ -918,12 +907,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
             {/* Opponent Clock */}
             <div className={`flex items-center space-x-2 px-2.5 py-1 rounded-lg border font-mono text-sm font-semibold ${
-              !isMyTurn && match.status === 'active' && !isOpponentDisconnected
+              !isMyTurn && match.status === 'active' && !(isOpponentDisconnected && match.mode !== 'practice')
                 ? 'bg-violet-950/20 border-violet-500/30 text-violet-300'
                 : 'bg-slate-900/60 border-white/5 text-slate-400'
             }`}>
               <Clock className="w-3.5 h-3.5" />
-              <span>{formatClock(oppClock)}</span>
+              <span>{match.mode === 'practice' ? '∞' : formatClock(oppClock)}</span>
             </div>
           </div>
 
@@ -958,7 +947,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                       <span className="text-[8px] text-slate-600">No captures</span>
                     ) : (
                       myCaptured.map((p, i) => (
-                        <img key={i} src={PIECE_IMAGES[p]} alt={p} className="w-3.5 h-3.5 object-contain" />
+                        <img key={i} src={getPieceImage(p)} alt={p} className="w-3.5 h-3.5 object-contain" />
                       ))
                     )}
                     {/* Show my material advantage if I'm up */}
@@ -972,17 +961,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
             {/* Player Clock */}
             <div className={`flex items-center space-x-2 px-2.5 py-1 rounded-lg border font-mono text-sm font-semibold ${
-              isMyTurn && match.status === 'active' && !isOpponentDisconnected
+              isMyTurn && match.status === 'active' && !(isOpponentDisconnected && match.mode !== 'practice')
                 ? 'bg-violet-950/20 border-violet-500/30 text-violet-300'
                 : 'bg-slate-900/60 border-white/5 text-slate-400'
             }`}>
               <Clock className="w-3.5 h-3.5" />
-              <span>{formatClock(myClock)}</span>
+              <span>{match.mode === 'practice' ? '∞' : formatClock(myClock)}</span>
             </div>
           </div>
 
           {/* Disconnection Warning Message */}
-          {match.status === 'active' && isOpponentDisconnected && (
+          {match.status === 'active' && match.mode !== 'practice' && isOpponentDisconnected && (
             <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl flex items-center justify-between text-amber-300 animate-pulse text-xs text-left">
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
@@ -1142,7 +1131,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
           {activeRightTab === 'moves' ? (
             /* Moves List Log */
-            <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[160px] max-h-[200px]">
+            <div className="glass p-3 rounded-xl border border-white/5 flex-grow flex flex-col h-0 min-h-[120px] lg:min-h-0 animate-fade-in">
               <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
                 {match.moves.length === 0 ? (
                   <p className="text-slate-600 text-xs italic">No moves played yet.</p>
@@ -1172,7 +1161,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           ) : (
             /* Live Chat Panel */
-            <div className="glass p-4 rounded-xl border border-white/5 flex-grow flex flex-col min-h-[160px] max-h-[200px] justify-between">
+            <div className="glass p-3 rounded-xl border border-white/5 flex-grow flex flex-col h-0 min-h-[120px] lg:min-h-0 justify-between animate-fade-in">
               <div className="overflow-y-auto pr-2 text-left space-y-2 flex-grow scrollbar-thin text-xs">
                 {gameMessages.length === 0 ? (
                   <p className="text-slate-600 text-xs italic">No messages yet. Send a friendly greeting!</p>
@@ -1230,28 +1219,27 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           )}
         </div>
-      </div>
 
       {/* ── Settings Modal Popup ── */}
       {showSettingsModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
-          <div className="glass-card w-full max-w-sm rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-5 max-h-[calc(100vh-120px)] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in" style={{ zIndex: 10000 }}>
+          <div className="glass-card w-full max-w-lg rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-4 max-h-[calc(100vh-80px)] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
               <h3 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
-                <Settings className="w-4 h-4 text-violet-400" />
+                <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-4.5 h-4.5 object-contain" />
                 <span>Game Settings</span>
               </h3>
               <button
                 onClick={() => setShowSettingsModal(false)}
                 className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4.5 h-4.5" />
               </button>
             </div>
 
             <div className="space-y-4">
               {/* Music volume */}
-              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2">
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-white/5 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-200">Theme Music Volume</span>
                   <span className="text-[10px] font-mono text-slate-400">{Math.round(settings.musicVolume * 100)}%</span>
@@ -1271,60 +1259,102 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 />
               </div>
 
-              {/* SFX checkbox */}
-              <div className="flex items-center justify-between bg-slate-900/60 p-3.5 rounded-xl border border-white/5">
-                <span className="text-xs font-semibold text-slate-200">Enable Sound Effects</span>
-                <input
-                  type="checkbox"
-                  checked={settings.effectsEnabled}
-                  onChange={() => updateSoundSettings({ effectsEnabled: !settings.effectsEnabled })}
-                  className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
-                />
-              </div>
+              {/* SFX and Legal Moves row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* SFX checkbox */}
+                <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                  <span className="text-xs font-semibold text-slate-200">Enable Sound Effects</span>
+                  <input
+                    type="checkbox"
+                    checked={settings.effectsEnabled}
+                    onChange={() => updateSoundSettings({ effectsEnabled: !settings.effectsEnabled })}
+                    className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                  />
+                </div>
 
-              {/* Legal moves checkbox */}
-              <div className="flex items-center justify-between bg-slate-900/60 p-3.5 rounded-xl border border-white/5">
-                <span className="text-xs font-semibold text-slate-200">Show Legal Moves Hint</span>
-                <input
-                  type="checkbox"
-                  checked={!!settings.showLegalMoves}
-                  onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
-                  className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
-                />
+                {/* Legal moves checkbox */}
+                <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                  <span className="text-xs font-semibold text-slate-200">Show Legal Moves Hint</span>
+                  <input
+                    type="checkbox"
+                    checked={!!settings.showLegalMoves}
+                    onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
+                    className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                  />
+                </div>
               </div>
 
               {/* Board Theme selector */}
               <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2.5">
                 <span className="text-xs font-semibold text-slate-200 block">Board Theme</span>
-                <div className="grid grid-cols-1 gap-1.5">
-                  {Object.entries(BOARD_THEMES).map(([key, theme]) => (
-                    <button
-                      key={key}
-                      onClick={() => {
-                        updateSoundSettings({ boardTheme: key });
-                        setSettings(s => ({ ...s, boardTheme: key }));
-                      }}
-                      className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all cursor-pointer ${
-                        settings.boardTheme === key
-                          ? 'border-violet-500/60 bg-violet-500/10 text-white'
-                          : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {/* Mini board preview swatch */}
-                        <div className="grid grid-cols-2 gap-[1px] w-5 h-5 rounded overflow-hidden shrink-0">
-                          <div style={{ backgroundColor: theme.light }} className="w-2.5 h-2.5" />
-                          <div style={{ backgroundColor: theme.dark }} className="w-2.5 h-2.5" />
-                          <div style={{ backgroundColor: theme.dark }} className="w-2.5 h-2.5" />
-                          <div style={{ backgroundColor: theme.light }} className="w-2.5 h-2.5" />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
+                  {BOARD_THEMES.map((theme) => {
+                    const key = theme.toLowerCase();
+                    const isActive = settings.boardTheme === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          updateSoundSettings({ boardTheme: key });
+                          setSettings(s => ({ ...s, boardTheme: key }));
+                        }}
+                        className={`flex flex-col items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-center relative overflow-hidden ${
+                          isActive
+                            ? 'border-violet-500 bg-violet-500/10 text-white font-bold ring-2 ring-violet-500/40'
+                            : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
+                        }`}
+                      >
+                        <div 
+                          className="w-full aspect-square rounded border border-white/10 shrink-0 select-none shadow-sm mb-1.5 bg-cover bg-center"
+                          style={{ backgroundImage: `url('/boards/${key}.png')` }}
+                        />
+                        <span className="text-[9px] font-bold text-slate-200 flex items-center justify-center gap-1 w-full truncate">
+                          <span>{theme.replace(/_/g, ' ')}</span>
+                          {isActive && <Check className="w-3 h-3 text-violet-400 shrink-0" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Chess Piece Style selector */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-white/5 space-y-2.5">
+                <span className="text-xs font-semibold text-slate-200 block">Chess Piece Style</span>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[160px] overflow-y-auto pr-2 scrollbar-thin">
+                  {PIECE_THEMES.map((theme) => {
+                    const key = theme.toLowerCase();
+                    const isActive = (settings.pieceTheme || 'classic') === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          updateSoundSettings({ pieceTheme: key });
+                          setSettings(s => ({ ...s, pieceTheme: key }));
+                        }}
+                        className={`flex flex-col items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-center relative overflow-hidden ${
+                          isActive
+                            ? 'border-violet-500 bg-violet-500/10 text-white font-bold ring-2 ring-violet-500/40'
+                            : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-300'
+                        }`}
+                      >
+                        <div className="w-full aspect-square rounded bg-slate-950/40 border border-white/5 flex items-center justify-center p-1.5 mb-1.5">
+                          <img 
+                            src={`/pieces/${key}/wn.png`} 
+                            alt="White Knight" 
+                            className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
+                            }}
+                          />
                         </div>
-                        <span className="text-xs font-medium">{theme.label}</span>
-                      </div>
-                      {settings.boardTheme === key && (
-                        <span className="text-violet-400 text-[10px] font-bold">✓ Active</span>
-                      )}
-                    </button>
-                  ))}
+                        <span className="text-[9px] font-bold text-slate-200 flex items-center justify-center gap-1 w-full truncate">
+                          <span>{theme.replace(/_/g, ' ')}</span>
+                          {isActive && <Check className="w-3 h-3 text-violet-400 shrink-0" />}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

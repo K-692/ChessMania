@@ -17,18 +17,23 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameActive = false, onAddFunds }) => {
   const { user, profile, login, logout, loading } = useAuth();
   const [muted, setMuted] = useState(() => getSoundSettings().muted);
+  const [pieceTheme, setPieceTheme] = useState(() => getSoundSettings().pieceTheme || 'classic');
   const [pendingCount, setPendingCount] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      const currentMuted = getSoundSettings().muted;
-      if (currentMuted !== muted) {
-        setMuted(currentMuted);
+      const currentSettings = getSoundSettings();
+      if (currentSettings.muted !== muted) {
+        setMuted(currentSettings.muted);
+      }
+      const currentTheme = currentSettings.pieceTheme || 'classic';
+      if (currentTheme !== pieceTheme) {
+        setPieceTheme(currentTheme);
       }
     }, 500);
     return () => clearInterval(interval);
-  }, [muted]);
+  }, [muted, pieceTheme]);
 
   useEffect(() => {
     if (!user) {
@@ -175,7 +180,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
                   {/* Rating Info */}
                   <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 px-3 py-1.5 rounded-lg">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" alt="Rook" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(139,92,246,0.5)] brightness-125" />
+                    <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-5 h-5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
                     <span className="text-violet-300 font-semibold text-sm">
                       {profile ? profile.rating : '---'}
                     </span>
@@ -281,7 +286,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
               {/* Compact Rating */}
               <div className="flex items-center space-x-1 bg-slate-900/60 border border-white/5 px-2.5 py-1.5 rounded-lg shrink-0">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" alt="Rook" className="w-4.5 h-4.5 filter invert drop-shadow-[0_0_2px_rgba(139,92,246,0.5)] brightness-125" />
+                <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-4.5 h-4.5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
                 <span className="text-violet-300 font-bold text-xs font-mono">
                   {profile ? profile.rating : '---'}
                 </span>

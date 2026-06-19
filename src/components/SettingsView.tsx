@@ -9,21 +9,13 @@ interface SettingsViewProps {
   onBack: () => void;
 }
 
-const BOARD_THEMES: Record<string, { dark: string; light: string; label: string; isAngle?: boolean }> = {
-  green:         { dark: '#779556', light: '#ebecd0', label: 'Green' },
-  wood:          { dark: '#b58863', light: '#f0d9b5', label: 'Wood' },
-  'green-angle': { dark: '#779556', light: '#ebecd0', label: 'Green Angle', isAngle: true },
-  'wood-angle':  { dark: '#b58863', light: '#f0d9b5', label: 'Wood Angle', isAngle: true },
-  blue:          { dark: '#4b7db8', light: '#dee3e6', label: 'Blue' },
-  'blue-angle':  { dark: '#4b7db8', light: '#dee3e6', label: 'Blue Angle', isAngle: true },
-};
+const BOARD_THEMES = [
+  '8_BIT', 'BASES', 'BLUE', 'BROWN', 'BUBBLEGUM', 'BURLED_WOOD', 'DARK_WOOD', 'DASH', 'GLASS', 'GRAFFITI', 'GREEN', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'METAL', 'NEON', 'NEWSPAPER', 'ORANGE', 'OVERLAY', 'PARCHMENT', 'PURPLE', 'RED', 'SAND', 'SKY', 'STONE', 'TAN', 'TOURNAMENT', 'TRANSLUCENT', 'WALNUT'
+];
 
-const PIECE_IMAGES: Record<string, string> = {
-  P: 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg', // White Pawn
-  N: 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg', // White Knight
-  p: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg', // Black Pawn
-  n: 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg', // Black Knight
-};
+const PIECE_THEMES = [
+  '3D_CHESSKID', '3D_PLASTIC', '3D_STAUNTON', '3D_WOOD', '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
+];
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [settings, setSettings] = useState(getSoundSettings());
@@ -183,12 +175,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             </div>
             <div>
               <h4 className="text-sm font-semibold text-slate-200">Board Theme</h4>
-              <p className="text-xs text-slate-500">Customize the colors and styling of the chessboard</p>
+              <p className="text-xs text-slate-500">Customize the background design of the chessboard</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-            {Object.entries(BOARD_THEMES).map(([key, theme]) => {
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+            {BOARD_THEMES.map((theme) => {
+              const key = theme.toLowerCase();
               const isActive = settings.boardTheme === key;
               return (
                 <button
@@ -197,51 +190,71 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     updateSoundSettings({ boardTheme: key });
                     setSettings(s => ({ ...s, boardTheme: key }));
                   }}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left ${
+                  className={`flex flex-col items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-center relative overflow-hidden ${
                     isActive
-                      ? 'border-violet-500 bg-violet-500/10 text-white font-bold'
+                      ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
                       : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
                   }`}
                 >
-                  <span className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                    <span>{theme.label}</span>
-                    {isActive && <Check className="w-4 h-4 text-violet-400" />}
+                  {/* Board background preview */}
+                  <div 
+                    className="w-full aspect-square rounded-lg border border-white/10 shrink-0 select-none shadow-md mb-2 bg-cover bg-center"
+                    style={{ backgroundImage: `url('/boards/${key}.png')` }}
+                  />
+                  <span className="text-[10px] font-bold text-slate-200 flex items-center justify-center gap-1.5 w-full truncate">
+                    <span>{theme.replace('_', ' ')}</span>
+                    {isActive && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
                   </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
-                  {/* 2x2 Swatch Grid Preview */}
-                  <div className="grid grid-cols-2 w-12 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 select-none shadow-md">
-                    {theme.isAngle ? (
-                      <>
-                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['N']} alt="N" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['p']} alt="p" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['n']} alt="n" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['P']} alt="P" className="w-full h-full object-contain" />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['n']} alt="n" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['N']} alt="N" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.dark }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['p']} alt="p" className="w-full h-full object-contain" />
-                        </div>
-                        <div style={{ backgroundColor: theme.light }} className="w-6 h-6 flex items-center justify-center p-0.5">
-                          <img src={PIECE_IMAGES['P']} alt="P" className="w-full h-full object-contain" />
-                        </div>
-                      </>
-                    )}
+        {/* Row 5: Chess Piece Style Selection */}
+        <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors border-t border-white/5">
+          <div className="flex items-center space-x-4">
+            <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0 flex items-center justify-center">
+              <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-5 h-5 object-contain" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-slate-200">Chess Piece Style</h4>
+              <p className="text-xs text-slate-500">Customize the design style of the chess pieces</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+            {PIECE_THEMES.map((theme) => {
+              const key = theme.toLowerCase();
+              const isActive = (settings.pieceTheme || 'classic') === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => {
+                    updateSoundSettings({ pieceTheme: key });
+                    setSettings(s => ({ ...s, pieceTheme: key }));
+                  }}
+                  className={`flex flex-col items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer text-center relative overflow-hidden ${
+                    isActive
+                      ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
+                      : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
+                  }`}
+                >
+                  {/* Knight Piece design preview */}
+                  <div className="w-full aspect-square rounded-lg bg-slate-950/40 border border-white/5 flex items-center justify-center p-2 mb-2">
+                    <img 
+                      src={`/pieces/${key}/wn.png`} 
+                      alt="White Knight" 
+                      className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
+                      }}
+                    />
                   </div>
+                  <span className="text-[10px] font-bold text-slate-200 flex items-center justify-center gap-1.5 w-full truncate">
+                    <span>{theme.replace(/_/g, ' ')}</span>
+                    {isActive && <Check className="w-3.5 h-3.5 text-violet-400 shrink-0" />}
+                  </span>
                 </button>
               );
             })}

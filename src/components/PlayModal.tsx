@@ -7,6 +7,7 @@ import { formatCoins } from '../utils/format';
 interface PlayModalProps {
   isOpen: boolean;
   onClose: () => void;
+  pieceTheme?: string;
   onStartSearch: (
     mode: GameMode,
     stake: number,
@@ -139,8 +140,8 @@ const GAME_MODES_INFO = [
   },
   {
     id: 'practice' as GameMode,
-    name: 'Practice Bot 🤖',
-    timeControl: '10 min',
+    name: 'Practice',
+    timeControl: 'No Timer',
     purpose: 'Practice your skills against an AI Chess Engine bot with selectable ELO rating and piece color.',
     entryPrice: 0,
     difficulty: '🤖 Bot Engine',
@@ -150,13 +151,23 @@ const GAME_MODES_INFO = [
   }
 ];
 
-export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSearch }) => {
+export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceTheme, onStartSearch }) => {
   const { profile } = useAuth();
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [allInChoice, setAllInChoice] = useState<string>('10 | 5');
   const [practiceColor, setPracticeColor] = useState<'white' | 'black' | 'random'>('white');
-  const [practiceElo, setPracticeElo] = useState<number>(1200);
+  const userElo = profile?.rating || 800;
+  const [practiceElo, setPracticeElo] = useState<number>(userElo);
   const carouselRef = useRef<HTMLDivElement>(null);
+
+  // Sync user ELO on profile load
+  useEffect(() => {
+    if (profile?.rating) {
+      setPracticeElo(profile.rating);
+    }
+  }, [profile?.rating]);
+
+  const knightImgSrc = `/pieces/${pieceTheme || 'classic'}/wn.png`;
 
   // Auto-scroll selected card into center view
   useEffect(() => {
@@ -245,7 +256,7 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
         <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 bg-slate-900/50">
           <div>
             <h3 className="text-lg font-bold text-slate-100 flex items-center space-x-2">
-              <img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" alt="Knight" className="w-5 h-5 filter invert brightness-125 animate-pulse" />
+              <img src={knightImgSrc} alt="Knight" className="w-5 h-5 object-contain animate-pulse" />
               <span>Select Your Arena Clash</span>
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
@@ -352,9 +363,18 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
                       {/* Entry fee */}
                       <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
                         <span className="text-[9px] text-slate-500 uppercase tracking-wider font-semibold">Entry</span>
-                        <span className="font-mono text-[10px] font-bold text-amber-400">
-                          {modeInfo.entryPrice === 'all_in' ? 'ALL IN' : formatCoins(modeInfo.entryPrice as number)}
-                        </span>
+                        <div className="flex items-center space-x-1.5">
+                          {modeInfo.entryPrice !== 'practice' && modeInfo.entryPrice !== 0 && (
+                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain" />
+                          )}
+                          <span className="font-mono text-[10px] font-bold text-amber-400">
+                            {modeInfo.entryPrice === 'practice' || modeInfo.entryPrice === 0
+                              ? 'FREE'
+                              : modeInfo.entryPrice === 'all_in'
+                              ? 'ALL IN'
+                              : formatCoins(modeInfo.entryPrice as number)}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Milestone progress bar */}
@@ -431,29 +451,26 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
               {selectedMode.id === 'practice' && (
                 <div className="space-y-4 border-t border-white/5 pt-3 animate-fade-in">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
-                      Choose Bot Difficulty / Elo
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block text-left">
+                      Choose Bot's Elo
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { elo: 800, label: '800 (Beginner)' },
-                        { elo: 1200, label: '1200 (Casual)' },
-                        { elo: 1600, label: '1600 (Advanced)' },
-                        { elo: 2000, label: '2000 (Master)' },
-                      ].map((item) => (
-                        <button
-                          key={item.elo}
-                          type="button"
-                          onClick={() => setPracticeElo(item.elo)}
-                          className={`py-2 px-2.5 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                            practiceElo === item.elo
-                              ? 'border-violet-500 bg-violet-500/20 text-violet-300'
-                              : 'border-white/5 bg-slate-900/40 hover:bg-slate-900 text-slate-400'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      ))}
+                    <div className="space-y-2 bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[10px] text-slate-500 font-mono">400 ELO</span>
+                        <span className="text-violet-400 font-bold text-xs bg-violet-500/10 px-2.5 py-0.5 rounded border border-violet-500/20 font-mono">
+                          {practiceElo} ELO
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">2800 ELO</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="400"
+                        max="2800"
+                        step="10"
+                        value={practiceElo}
+                        onChange={(e) => setPracticeElo(parseInt(e.target.value))}
+                        className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-violet-500 border border-white/5"
+                      />
                     </div>
                   </div>
 
@@ -505,13 +522,18 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, onStartSe
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4 flex-shrink-0">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">Total Play Stake:</span>
-                <span className="font-mono font-bold text-amber-400 text-sm">
-                  {selectedMode.id === 'practice'
-                    ? 'FREE'
-                    : selectedMode.entryPrice === 'all_in'
-                    ? `ALL IN (${formatCoins(userBalance)})`
-                    : formatCoins(selectedMode.entryPrice as number)}
-                </span>
+                <div className="flex items-center space-x-1.5">
+                  {selectedMode.id !== 'practice' && (
+                    <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4 h-4 object-contain" />
+                  )}
+                  <span className="font-mono font-bold text-amber-400 text-sm">
+                    {selectedMode.id === 'practice'
+                      ? 'FREE'
+                      : selectedMode.entryPrice === 'all_in'
+                      ? `ALL IN (${formatCoins(userBalance)})`
+                      : formatCoins(selectedMode.entryPrice as number)}
+                  </span>
+                </div>
               </div>
 
               {isInsufficient && selectedMode.id !== 'practice' ? (

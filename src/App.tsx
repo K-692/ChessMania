@@ -17,7 +17,7 @@ import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
-import './utils/sound';
+import { getSoundSettings } from './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
 import { createPracticeMatch } from './game/gameService';
 
@@ -26,6 +26,17 @@ const AppContent: React.FC = () => {
   const { user, profile, login, loading } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
   
+  // Settings sync state for dynamic piece style Knight image
+  const [settings, setSettings] = useState(() => getSoundSettings());
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSettings(getSoundSettings());
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const knightImgSrc = `/pieces/${settings.pieceTheme || 'classic'}/wn.png`;
+
   // Play modal state
   const [isPlayModalOpen, setIsPlayModalOpen] = useState(false);
   
@@ -387,9 +398,9 @@ const AppContent: React.FC = () => {
       <div className="min-h-screen bg-transparent flex flex-col relative overflow-hidden">
         {/* Ambient Floating Chess Pieces */}
         <img 
-          src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" 
+          src={knightImgSrc} 
           alt="" 
-          className="absolute top-[15%] left-[5%] w-24 h-24 opacity-[0.03] filter invert pointer-events-none animate-float-1" 
+          className="absolute top-[15%] left-[5%] w-24 h-24 opacity-[0.03] pointer-events-none animate-float-1" 
         />
         <img 
           src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" 
@@ -470,7 +481,7 @@ const AppContent: React.FC = () => {
                   onClick={login}
                   className="w-full sm:w-auto flex items-center justify-center space-x-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-8 py-4 rounded-xl font-semibold shadow-xl shadow-violet-600/25 hover:shadow-violet-600/35 transition-all text-base border border-violet-500/25 cursor-pointer"
                 >
-                  <img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" alt="Knight" className="w-6 h-6 filter invert brightness-125" />
+                  <img src={knightImgSrc} alt="Knight" className="w-6 h-6 object-contain" />
                   <span>Play Chess Now (Get 1,000 Coins)</span>
                 </button>
               </div>
@@ -505,6 +516,10 @@ const AppContent: React.FC = () => {
 
           </div>
         </main>
+
+        <footer className="w-full text-center py-4 text-xs text-slate-500 border-t border-white/5 relative z-10">
+          Song credit: IamKrishMusic
+        </footer>
       </div>
     );
   }
@@ -739,7 +754,7 @@ const AppContent: React.FC = () => {
                 className="w-full sm:w-auto flex items-center justify-center space-x-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-6 py-3.5 rounded-xl font-semibold transition-all cursor-pointer play-btn-glow border border-violet-500/25"
               >
                 {/* Wikimedia Chess Knight SVG */}
-                <img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" alt="Knight" className="w-5 h-5 filter invert brightness-125" />
+                <img src={knightImgSrc} alt="Knight" className="w-5 h-5 object-contain" />
                 <span>Play Now</span>
               </button>
             </div>
@@ -828,7 +843,7 @@ const AppContent: React.FC = () => {
                           <span className="hidden sm:block text-[10px] text-slate-400 font-medium animate-pulse">
                             {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
                           </span>
-                        ) : oppProfile ? (
+                        ) : oppProfile && !oppUid.startsWith('bot_') ? (
                           <button
                             onClick={() => handleSendOpponentFriendRequest(oppUid)}
                             className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2 py-0.5 rounded transition-all cursor-pointer"
@@ -867,6 +882,7 @@ const AppContent: React.FC = () => {
         <PlayModal
           isOpen={isPlayModalOpen}
           onClose={() => setIsPlayModalOpen(false)}
+          pieceTheme={settings.pieceTheme}
           onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
             if (mode === 'practice' && practiceConfig && user) {
               try {

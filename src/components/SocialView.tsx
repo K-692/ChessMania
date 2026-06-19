@@ -267,6 +267,12 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         return;
       }
 
+      if (targetUser.uid && targetUser.uid.startsWith('bot_')) {
+        setRequestError('Bots cannot be added as friends');
+        setIsSendingRequest(false);
+        return;
+      }
+
       const qExist1 = query(
         collection(db, 'friendships'),
         where('requesterUid', '==', user.uid),
