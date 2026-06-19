@@ -40,9 +40,9 @@ export const CURRENCIES = {
 
 export const CONVERSION_RATES = {
   INR: 1.0,
-  USD: 83.50,
-  EUR: 89.60,
-  GBP: 106.20
+  USD: 95.4,
+  EUR: 110.0,
+  GBP: 127.7
 };
 
 type CurrencyCode = keyof typeof CURRENCIES;
