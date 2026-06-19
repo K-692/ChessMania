@@ -460,17 +460,24 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceThem
                         <span className="text-violet-400 font-bold text-xs bg-violet-500/10 px-2.5 py-0.5 rounded border border-violet-500/20 font-mono">
                           {practiceElo} ELO
                         </span>
-                        <span className="text-[10px] text-slate-500 font-mono">2800 ELO</span>
+                        <span className="text-[10px] text-slate-500 font-mono">2850 ELO</span>
                       </div>
                       <input
                         type="range"
                         min="400"
-                        max="2800"
+                        max="2850"
                         step="10"
                         value={practiceElo}
                         onChange={(e) => setPracticeElo(parseInt(e.target.value))}
                         className="w-full h-1.5 bg-slate-950 rounded-lg appearance-none cursor-pointer accent-violet-500 border border-white/5"
                       />
+                      <div className="text-[10px] font-medium text-slate-400 mt-1 text-center bg-white/5 py-1 px-2 rounded border border-white/5">
+                        {practiceElo <= 1000 && "⭐ Beginner Bot (Depth 4-6)"}
+                        {practiceElo > 1000 && practiceElo <= 1800 && "⭐⭐ Intermediate Bot (Depth 7-10)"}
+                        {practiceElo > 1800 && practiceElo <= 2350 && "⭐⭐⭐ IM Eric Rosen / Levy Rozman level (Depth 12)"}
+                        {practiceElo > 2350 && practiceElo <= 2750 && "⚡ GM Hikaru Nakamura level (Depth 18)"}
+                        {practiceElo > 2750 && "💀 GM Magnus Carlsen level (Depth 20)"}
+                      </div>
                     </div>
                   </div>
 

@@ -8,7 +8,7 @@ import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc,
 import { db } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check } from 'lucide-react';
 import { formatCoins } from '../utils/format';
-import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
+import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
 
 interface ChessGameProps {
@@ -44,6 +44,34 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
+
+  // Pre-move and illegal move visual states
+  const [preMoves, setPreMoves] = useState<{ from: string; to: string; promotion?: string }[]>([]);
+  const [illegalMoveSquares, setIllegalMoveSquares] = useState<{ from: string; to: string } | null>(null);
+  
+  const preMovesRef = useRef(preMoves);
+  useEffect(() => {
+    preMovesRef.current = preMoves;
+  }, [preMoves]);
+
+  const getOptimisticState = (baseFen: string, queue: typeof preMoves) => {
+    const tempChess = new Chess(baseFen);
+    for (const pm of queue) {
+      try {
+        tempChess.move({
+          from: pm.from,
+          to: pm.to,
+          promotion: pm.promotion || 'q'
+        });
+      } catch (e) {
+        break;
+      }
+    }
+    return {
+      fen: tempChess.fen(),
+      chess: tempChess
+    };
+  };
 
   // Game live messaging states
   const [activeRightTab, setActiveRightTab] = useState<'moves' | 'chat'>('moves');
@@ -229,7 +257,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       } catch (err) {
         console.error("Error making bot move:", err);
       }
-    }, 1200);
+    }, 400);
 
     return () => clearTimeout(timer);
   }, [match?.turn, match?.status, matchId, localFen]);
@@ -310,11 +338,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         ? user?.uid !== matchData.whiteUid
         : user?.uid !== matchData.blackUid);
       if (newMovesCount > prevMovesCount || isOpponentTurn || matchData.status !== 'active') {
-        setLocalFen(matchData.boardFEN);
-        try {
-          chessRef.current.load(matchData.boardFEN);
-        } catch (e) {
-          console.warn('FEN sync mismatch:', e);
+        if (preMovesRef.current.length > 0) {
+          const opt = getOptimisticState(matchData.boardFEN, preMovesRef.current);
+          setLocalFen(opt.fen);
+          chessRef.current.load(opt.fen);
+        } else {
+          setLocalFen(matchData.boardFEN);
+          try {
+            chessRef.current.load(matchData.boardFEN);
+          } catch (e) {
+            console.warn('FEN sync mismatch:', e);
+          }
         }
       }
 
@@ -372,6 +406,93 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     return () => unsubscribe();
   }, [matchId, whiteProfile, blackProfile, user]);
+
+  // Hook to execute queued pre-moves when it becomes our turn
+  useEffect(() => {
+    if (!match || match.status !== 'active') return;
+
+    if (isMyTurn && preMoves.length > 0) {
+      const nextMove = preMoves[0];
+      setIllegalMoveSquares(null);
+
+      const officialChess = new Chess(match.boardFEN);
+      let moveRes = null;
+      try {
+        moveRes = officialChess.move({
+          from: nextMove.from,
+          to: nextMove.to,
+          promotion: nextMove.promotion || 'q'
+        });
+      } catch (err) {}
+
+      if (moveRes) {
+        const nextFen = officialChess.fen();
+        
+        if (officialChess.inCheck()) {
+          playCheckSound();
+        } else if (moveRes.captured) {
+          playCaptureSound();
+        } else {
+          playMoveSound();
+        }
+
+        const remaining = preMoves.slice(1);
+        setPreMoves(remaining);
+
+        const opt = getOptimisticState(nextFen, remaining);
+        setLocalFen(opt.fen);
+        chessRef.current.load(opt.fen);
+
+        makeMove(matchId, user!.uid, nextFen, moveRes.san).catch((err) => {
+          console.error('Failed to submit pre-move:', err);
+          setPreMoves([]);
+          setLocalFen(match.boardFEN);
+          chessRef.current.load(match.boardFEN);
+        });
+
+        if (officialChess.isGameOver()) {
+          let status: MatchStatus = 'active';
+          let winnerUid: string | null = null;
+
+          if (officialChess.isCheckmate()) {
+            status = 'checkmate';
+            winnerUid = user!.uid;
+          } else if (officialChess.isDraw()) {
+            status = 'draw';
+          } else if (officialChess.isStalemate()) {
+            status = 'stalemate';
+          }
+
+          if (status !== 'active') {
+            const now = Date.now();
+            const elapsed = now - match.lastMoveAt;
+            const updatedClocks = {
+              ...match.clocks,
+              [user!.uid]: Math.max(0, match.clocks[user!.uid] - elapsed),
+            };
+
+            updateDoc(doc(db, 'matches', matchId), {
+              boardFEN: nextFen,
+              clocks: updatedClocks,
+              status,
+              winnerUid,
+              finishedAt: now,
+            });
+          }
+        }
+      } else {
+        playIllegalMoveSound();
+        setIllegalMoveSquares({ from: nextMove.from, to: nextMove.to });
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
+
+        setTimeout(() => {
+          setIllegalMoveSquares(null);
+        }, 1550);
+      }
+    }
+  }, [isMyTurn, match?.boardFEN, preMoves]);
 
   // 2. Realtime clock countdowns
   // Sync baseline ref ONLY when lastMoveAt changes (i.e., real move or reconnect reset)
@@ -616,73 +737,176 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   // 4. Handle Piece Drops on chessboard
   const onPieceDrop = (sourceSquare: string, targetSquare: string): boolean => {
-    if (!match || !isMyTurn || match.status !== 'active') return false;
+    if (!match || match.status !== 'active') return false;
 
-    // Check if it is a promotion
-    const tempChess = new Chess(chessRef.current.fen());
-    const moves = tempChess.moves({ verbose: true });
-    const isLegalPromo = moves.some(
-      m => m.from === sourceSquare && m.to === targetSquare && m.promotion
-    );
+    if (isMyTurn) {
+      // Check if it is a promotion
+      const tempChess = new Chess(chessRef.current.fen());
+      const moves = tempChess.moves({ verbose: true });
+      const isLegalPromo = moves.some(
+        m => m.from === sourceSquare && m.to === targetSquare && m.promotion
+      );
 
-    if (isLegalPromo) {
-      setPendingPromotion({ from: sourceSquare, to: targetSquare });
-      return false; // Snap back, promotion modal choice will execute
+      if (isLegalPromo) {
+        setPendingPromotion({ from: sourceSquare, to: targetSquare });
+        return false; // Snap back, promotion modal choice will execute
+      }
+
+      return executeMove(sourceSquare, targetSquare);
+    } else if (settings.preMoveEnabled && preMoves.length < 3) {
+      // Pre-move drop handling
+      const opt = getOptimisticState(match.boardFEN, preMoves);
+      const tempChess = new Chess(opt.fen);
+      const moves = tempChess.moves({ verbose: true });
+      const isLegalPromo = moves.some(
+        m => m.from === sourceSquare && m.to === targetSquare && m.promotion
+      );
+
+      if (isLegalPromo) {
+        setPendingPromotion({ from: sourceSquare, to: targetSquare });
+        return false;
+      }
+
+      let moveRes = null;
+      try {
+        moveRes = tempChess.move({ from: sourceSquare, to: targetSquare });
+      } catch (e) {}
+
+      if (moveRes) {
+        const nextPreMoves = [...preMoves, { from: sourceSquare, to: targetSquare }];
+        setPreMoves(nextPreMoves);
+        const newOpt = getOptimisticState(match.boardFEN, nextPreMoves);
+        setLocalFen(newOpt.fen);
+        chessRef.current.load(newOpt.fen);
+        playMoveSound();
+        return true;
+      } else {
+        playIllegalMoveSound();
+        setIllegalMoveSquares({ from: sourceSquare, to: targetSquare });
+        setTimeout(() => setIllegalMoveSquares(null), 1500);
+        return false;
+      }
     }
 
-    return executeMove(sourceSquare, targetSquare);
+    return false;
   };
 
   // Click square logic for legal moves highlight and click-to-move
   const onSquareClick = (square: string) => {
-    if (!match || !isMyTurn || match.status !== 'active') return;
+    if (!match || match.status !== 'active') return;
 
-    const piece = chessRef.current.get(square as any);
-    const myColor = isWhite ? 'w' : 'b';
+    if (isMyTurn) {
+      const piece = chessRef.current.get(square as any);
+      const myColor = isWhite ? 'w' : 'b';
 
-    if (selectedSquare) {
-      if (selectedSquare === square) {
-        setSelectedSquare(null);
-        return;
-      }
-
-      const moves = chessRef.current.moves({
-        square: selectedSquare as any,
-        verbose: true
-      });
-      const legalMove = moves.find((m: any) => m.to === square);
-
-      if (legalMove) {
-        if (legalMove.promotion) {
-          setPendingPromotion({ from: selectedSquare, to: square });
+      if (selectedSquare) {
+        if (selectedSquare === square) {
           setSelectedSquare(null);
           return;
         }
-        const success = onPieceDrop(selectedSquare, square);
-        if (success) {
-          setSelectedSquare(null);
-          return;
-        }
-      }
 
-      // If clicked on another own piece, select that instead
-      if (piece && piece.color === myColor) {
-        setSelectedSquare(square);
+        const moves = chessRef.current.moves({
+          square: selectedSquare as any,
+          verbose: true
+        });
+        const legalMove = moves.find((m: any) => m.to === square);
+
+        if (legalMove) {
+          if (legalMove.promotion) {
+            setPendingPromotion({ from: selectedSquare, to: square });
+            setSelectedSquare(null);
+            return;
+          }
+          const success = onPieceDrop(selectedSquare, square);
+          if (success) {
+            setSelectedSquare(null);
+            return;
+          }
+        }
+
+        // If clicked on another own piece, select that instead
+        if (piece && piece.color === myColor) {
+          setSelectedSquare(square);
+        } else {
+          setSelectedSquare(null);
+        }
       } else {
-        setSelectedSquare(null);
+        if (piece && piece.color === myColor) {
+          setSelectedSquare(square);
+        }
       }
-    } else {
-      if (piece && piece.color === myColor) {
-        setSelectedSquare(square);
+    } else if (settings.preMoveEnabled && preMoves.length < 3) {
+      const opt = getOptimisticState(match.boardFEN, preMoves);
+      const piece = opt.chess.get(square as any);
+      const myColor = isWhite ? 'w' : 'b';
+
+      if (selectedSquare) {
+        if (selectedSquare === square) {
+          setSelectedSquare(null);
+          return;
+        }
+
+        const moves = opt.chess.moves({
+          square: selectedSquare as any,
+          verbose: true
+        });
+        const legalMove = moves.find((m: any) => m.to === square);
+
+        if (legalMove) {
+          if (legalMove.promotion) {
+            setPendingPromotion({ from: selectedSquare, to: square });
+            setSelectedSquare(null);
+            return;
+          }
+          const success = onPieceDrop(selectedSquare, square);
+          if (success) {
+            setSelectedSquare(null);
+            return;
+          }
+        }
+
+        // If clicked on another own piece, select that instead
+        if (piece && piece.color === myColor) {
+          setSelectedSquare(square);
+        } else {
+          setSelectedSquare(null);
+        }
+      } else {
+        if (piece && piece.color === myColor) {
+          setSelectedSquare(square);
+        }
       }
     }
   };
 
   const handlePromote = (pieceType: 'q' | 'n' | 'r' | 'b') => {
-    if (!pendingPromotion) return;
+    if (!pendingPromotion || !match) return;
     const { from, to } = pendingPromotion;
     setPendingPromotion(null);
-    executeMove(from, to, pieceType);
+    
+    if (isMyTurn) {
+      executeMove(from, to, pieceType);
+    } else {
+      const opt = getOptimisticState(match.boardFEN, preMoves);
+      const tempChess = new Chess(opt.fen);
+      let moveRes = null;
+      try {
+        moveRes = tempChess.move({ from, to, promotion: pieceType });
+      } catch (e) {}
+
+      if (moveRes) {
+        const nextPreMoves = [...preMoves, { from, to, promotion: pieceType }];
+        setPreMoves(nextPreMoves);
+        const newOpt = getOptimisticState(match.boardFEN, nextPreMoves);
+        setLocalFen(newOpt.fen);
+        chessRef.current.load(newOpt.fen);
+        playMoveSound();
+      } else {
+        playIllegalMoveSound();
+        setIllegalMoveSquares({ from, to });
+        setTimeout(() => setIllegalMoveSquares(null), 1500);
+      }
+    }
   };
 
   const handleResign = async () => {
@@ -855,6 +1079,28 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     });
   }
 
+  // Highlight queued pre-moves
+  preMoves.forEach((pm) => {
+    customSquareStyles[pm.from] = {
+      backgroundColor: 'rgba(244, 63, 94, 0.25)', // soft rose/coral
+    };
+    customSquareStyles[pm.to] = {
+      backgroundColor: 'rgba(244, 63, 94, 0.45)', // stronger rose/coral
+    };
+  });
+
+  // Highlight illegal move squares if set
+  if (illegalMoveSquares) {
+    customSquareStyles[illegalMoveSquares.from] = {
+      backgroundColor: 'rgba(239, 68, 68, 0.4)',
+      boxShadow: 'inset 0 0 0 3px #ef4444',
+    };
+    customSquareStyles[illegalMoveSquares.to] = {
+      backgroundColor: 'rgba(239, 68, 68, 0.6)',
+      boxShadow: 'inset 0 0 0 3px #ef4444',
+    };
+  }
+
   const captured = getCapturedPieces();
   // myCaptured = pieces I captured from opponent
   const myCaptured = isWhite ? captured.capturedByWhite : captured.capturedByBlack;
@@ -916,13 +1162,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 return false;
               },
               boardOrientation: isWhite ? 'white' : 'black',
-              allowDragging: match.status === 'active' && isMyTurn,
+              allowDragging: match.status === 'active' && (isMyTurn || (settings.preMoveEnabled && preMoves.length < 3)),
+              animationDurationInMs: 100,
               darkSquareStyle: { backgroundColor: 'transparent' },
               lightSquareStyle: { backgroundColor: 'transparent' },
               boardStyle,
               pieces: customPieces,
               squareStyles: customSquareStyles,
               onSquareClick: ({ square }) => onSquareClick(square),
+              onSquareRightClick: () => {
+                if (preMoves.length > 0) {
+                  setPreMoves([]);
+                  setLocalFen(match.boardFEN);
+                  chessRef.current.load(match.boardFEN);
+                }
+              }
             }}
           />
         </div>
@@ -1349,8 +1603,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 />
               </div>
 
-              {/* SFX and Legal Moves row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* SFX, Legal Moves and Pre-moves row */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* SFX checkbox */}
                 <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
                   <span className="text-xs font-semibold text-slate-200">Enable Sound Effects</span>
@@ -1369,6 +1623,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                     type="checkbox"
                     checked={!!settings.showLegalMoves}
                     onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
+                    className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                  />
+                </div>
+
+                {/* Pre-move checkbox */}
+                <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                  <span className="text-xs font-semibold text-slate-200">Enable Pre-moves (Max 3)</span>
+                  <input
+                    type="checkbox"
+                    checked={!!(settings as any).preMoveEnabled}
+                    onChange={() => updateSoundSettings({ preMoveEnabled: !(settings as any).preMoveEnabled })}
                     className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                   />
                 </div>

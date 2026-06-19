@@ -93,14 +93,18 @@ function minimax(
 }
 
 function getDepthForElo(elo: number): number {
-  if (elo <= 600) return 2;
-  if (elo <= 800) return 3;
-  if (elo <= 1000) return 4;
-  if (elo <= 1200) return 5;
-  if (elo <= 1400) return 6;
-  if (elo <= 1600) return 7;
-  if (elo <= 1800) return 9;
-  return 12; // 2000+
+  if (elo <= 600) return 4;
+  if (elo <= 800) return 5;
+  if (elo <= 1000) return 6;
+  if (elo <= 1200) return 7;
+  if (elo <= 1400) return 8;
+  if (elo <= 1600) return 9;
+  if (elo <= 1800) return 10;
+  if (elo <= 2000) return 11;
+  if (elo <= 2350) return 12; // 2350 FIDE elo -> depth 12
+  if (elo <= 2550) return 15;
+  if (elo <= 2750) return 18; // 2750 FIDE elo -> depth 18
+  return 20; // 2850 FIDE elo -> depth 20
 }
 
 export async function getBotMove(
