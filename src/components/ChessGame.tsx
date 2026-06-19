@@ -9,7 +9,7 @@ import { db } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings } from '../utils/sound';
-import { getBestAchievement } from '../utils/achievements';
+import { ProfilePopup } from './ProfilePopup';
 
 interface ChessGameProps {
   matchId: string;
@@ -57,7 +57,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   // Settings and Profile dialog visibility states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
-  const [selectedProfileGameplay, setSelectedProfileGameplay] = useState<Record<string, number>>({});
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
@@ -570,7 +569,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     if (uSnap.exists()) {
       const data = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
       setSelectedProfile(data);
-      setSelectedProfileGameplay(data.gameplayCounts || {});
     }
   };
 
@@ -1093,86 +1091,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
       {/* ── Profile Details Modal Popup ── */}
       {selectedProfile && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
-          <div className="glass-card w-full max-w-sm rounded-2xl border border-white/10 flex flex-col shadow-2xl p-6 text-left space-y-4 max-h-[calc(100vh-120px)] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-white/5 pb-2.5">
-              <h3 className="text-sm font-bold text-slate-200">User Profile Details</h3>
-              <button
-                onClick={() => setSelectedProfile(null)}
-                className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="flex items-center space-x-3">
-              <img
-                src={selectedProfile.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
-                alt={selectedProfile.displayName}
-                className="w-14 h-14 rounded-full object-cover ring-2 ring-violet-500/50"
-              />
-              <div className="space-y-0.5">
-                <h4 className="text-base font-bold text-white flex items-center gap-1">
-                  <span>{selectedProfile.displayName}</span>
-                  {selectedProfile.rating >= 2500 && (
-                    <span className="font-serif font-extrabold bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent border border-amber-400/60 bg-amber-950/40 px-1 rounded text-[7px] uppercase" title="Grandmaster">
-                      GM
-                    </span>
-                  )}
-                </h4>
-                <p className="text-[10px] text-slate-400 font-mono">Member since: {new Date(selectedProfile.createdAt).toLocaleDateString()}</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center">
-                <p className="text-[8px] text-slate-500 uppercase tracking-wider">Elo Rating</p>
-                <p className="text-base font-bold text-violet-300 mt-0.5">{selectedProfile.rating}</p>
-              </div>
-              <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center">
-                <p className="text-[8px] text-slate-500 uppercase tracking-wider">Coins Balance</p>
-                <p className="text-base font-bold text-amber-400 mt-0.5">{formatCoins(selectedProfile.bankBalance)}</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2">
-              <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">Record</h5>
-              <div className="grid grid-cols-3 gap-1 text-center text-xs">
-                <div className="text-emerald-400 font-bold">
-                  <p className="text-[8px] text-slate-500 uppercase">Wins</p>
-                  <p className="text-xs mt-0.5">{selectedProfile.wins || 0}</p>
-                </div>
-                <div className="text-red-400 font-bold">
-                  <p className="text-[8px] text-slate-500 uppercase">Losses</p>
-                  <p className="text-xs mt-0.5">{selectedProfile.losses || 0}</p>
-                </div>
-                <div className="text-slate-400 font-bold">
-                  <p className="text-[8px] text-slate-500 uppercase">Draws</p>
-                  <p className="text-xs mt-0.5">{selectedProfile.draws || 0}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2">
-              <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">Best Achievement</h5>
-              {(() => {
-                const bestAch = getBestAchievement(selectedProfileGameplay);
-                if (bestAch) {
-                  return (
-                    <div className="flex items-center space-x-2.5 bg-violet-950/20 border border-violet-500/20 p-2 rounded-lg">
-                      <span className="text-xl">{bestAch.badge.split(' ')[0]}</span>
-                      <div className="text-left">
-                        <p className="text-xs font-bold text-violet-300">{bestAch.name}</p>
-                        <p className="text-[9px] text-slate-400 leading-tight">{bestAch.description}</p>
-                      </div>
-                    </div>
-                  );
-                }
-                return <p className="text-[10px] text-slate-500 italic text-center">No achievements unlocked yet.</p>;
-              })()}
-            </div>
-          </div>
-        </div>
+        <ProfilePopup 
+          profile={selectedProfile} 
+          onClose={() => setSelectedProfile(null)} 
+        />
       )}
     </div>
   );

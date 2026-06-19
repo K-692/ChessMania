@@ -3,7 +3,7 @@ import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X } from 'lucide-react';
-import { formatCoins } from '../utils/format';
+
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
 
 const isCountryChangeLocked = (lastChangedAt?: number | null) => {
@@ -278,7 +278,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
           </div>
           <div>
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Total Coins Earned</span>
-            <span className="text-2xl font-black font-mono text-amber-400">{formatCoins(profile.totalCoinsEarned ?? profile.bankBalance)}</span>
+            <span className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1.5 whitespace-nowrap">
+              <span>{(profile.totalCoinsEarned ?? profile.bankBalance).toLocaleString()}</span>
+              <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
+            </span>
           </div>
         </div>
 

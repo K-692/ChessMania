@@ -10,6 +10,7 @@ import { ProfileView } from './components/ProfileView';
 import { SocialView } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
+import { ProfilePopup } from './components/ProfilePopup';
 import type { GameMode, Match, UserProfile } from './types';
 import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
 import { db } from './firebase';
@@ -60,6 +61,7 @@ const AppContent: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [nameError, setNameError] = useState('');
   const [isSavingName, setIsSavingName] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
   const handleSaveUsername = async () => {
     if (!user || !profile) return;
@@ -618,8 +620,8 @@ const AppContent: React.FC = () => {
                       <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Balance</span>
                     </div>
                     <div className="space-y-3">
-                      <h3 className="text-4xl font-black font-mono text-amber-400 tracking-tight">
-                        {profile ? formatCoins(profile.bankBalance) : '1K'}
+                      <h3 className="text-2xl sm:text-3xl md:text-4xl font-black font-mono text-amber-400 tracking-tight whitespace-nowrap truncate" title={profile ? profile.bankBalance.toLocaleString() : '1,000'}>
+                        {profile ? profile.bankBalance.toLocaleString() : '1,000'}
                       </h3>
                       <p className="text-xs text-slate-500">
                         Available Play Stakes (Coins)
@@ -759,7 +761,13 @@ const AppContent: React.FC = () => {
                         </span>
 
                         {oppProfile?.photoURL && (
-                          <img src={oppProfile.photoURL} alt={oppProfile.displayName} className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0" />
+                          <img 
+                            src={oppProfile.photoURL} 
+                            alt={oppProfile.displayName} 
+                            className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity" 
+                            title="View Profile"
+                            onClick={() => setSelectedProfile(oppProfile)}
+                          />
                         )}
 
                         <div className="min-w-0">
@@ -975,6 +983,13 @@ const AppContent: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {selectedProfile && (
+        <ProfilePopup 
+          profile={selectedProfile} 
+          onClose={() => setSelectedProfile(null)} 
+        />
       )}
     </div>
   );

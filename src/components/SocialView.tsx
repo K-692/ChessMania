@@ -7,6 +7,7 @@ import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
 import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell } from 'lucide-react';
 import type { UserProfile, Friendship, FriendlyChallenge, GameMode } from '../types';
+import { ProfilePopup } from './ProfilePopup';
 
 interface SocialViewProps {
   onBack: () => void;
@@ -29,6 +30,7 @@ const CHALLENGE_MODES = [
 
 export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) => {
   const { user, profile } = useAuth();
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
   // Friend Request States
   const [searchUsername, setSearchUsername] = useState('');
@@ -547,7 +549,9 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                           <img
                             src={fProfile.photoURL}
                             alt={fProfile.displayName}
-                            className="w-10 h-10 rounded-full object-cover border border-white/10"
+                            className="w-10 h-10 rounded-full object-cover border border-white/10 cursor-pointer hover:opacity-85 transition-opacity"
+                            title="View Profile"
+                            onClick={() => setSelectedProfile(fProfile)}
                           />
                           <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121318] ${
                             online ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]' : 'bg-slate-600'
@@ -884,6 +888,12 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
             </div>
           </div>
         </div>
+      )}
+      {selectedProfile && (
+        <ProfilePopup 
+          profile={selectedProfile} 
+          onClose={() => setSelectedProfile(null)} 
+        />
       )}
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { LogIn, LogOut, Volume2, VolumeX, Plus } from 'lucide-react';
-import { formatCoins } from '../utils/format';
+
 import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
@@ -156,8 +156,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 pl-3 pr-2 py-1.5 rounded-lg">
                   <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain shrink-0" />
-                  <span className="text-amber-300 font-semibold text-sm mr-1">
-                    {profile ? formatCoins(profile.bankBalance) : '---'}
+                  <span className="text-amber-300 font-semibold text-sm mr-1 whitespace-nowrap">
+                    {profile ? profile.bankBalance.toLocaleString() : '---'}
                   </span>
                   {onAddFunds && (
                     <button

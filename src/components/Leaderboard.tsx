@@ -5,6 +5,7 @@ import type { UserProfile } from '../types';
 import { formatCoins } from '../utils/format';
 import { ChevronLeft, Trophy, Medal, Star } from 'lucide-react';
 import { getBestAchievement } from '../utils/achievements';
+import { ProfilePopup } from './ProfilePopup';
 
 interface LeaderboardProps {
   onBack: () => void;
@@ -13,6 +14,7 @@ interface LeaderboardProps {
 export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
   const [leaders, setLeaders] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -112,7 +114,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
                         <img 
                           src={player.photoURL} 
                           alt={player.displayName} 
-                          className="w-8 h-8 rounded-full object-cover border border-white/10"
+                          className="w-8 h-8 rounded-full object-cover border border-white/10 cursor-pointer hover:opacity-85 transition-opacity"
+                          title="View Profile"
+                          onClick={() => setSelectedProfile(player)}
                         />
                         <span className="font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
                           <span>{player.displayName}</span>
@@ -143,7 +147,10 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
 
                     {/* Coins Balance */}
                     <td className="px-6 py-4 font-mono font-semibold text-amber-400">
-                      {formatCoins(player.totalCoinsEarned ?? player.bankBalance)}
+                      <div className="flex items-center space-x-1">
+                        <span>{formatCoins(player.totalCoinsEarned ?? player.bankBalance)}</span>
+                        <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4 h-4 object-contain" />
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -151,6 +158,12 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
             </table>
           </div>
         </div>
+      )}
+      {selectedProfile && (
+        <ProfilePopup 
+          profile={selectedProfile} 
+          onClose={() => setSelectedProfile(null)} 
+        />
       )}
     </div>
   );
