@@ -178,7 +178,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         const botColor = match.turn;
         
         const { getBotMove } = await import('../utils/chessBot');
-        const move = getBotMove(localFen, elo, botColor);
+        const move = await getBotMove(localFen, elo, botColor);
         
         if (move) {
           const tempChess = new Chess(localFen);
@@ -241,6 +241,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     const unsubscribe = onSnapshot(matchRef, async (docSnap) => {
       if (!docSnap.exists()) return;
       const matchData = docSnap.data() as Match;
+
+      // Close active practice matches older than 1 day
+      if (matchData.mode === 'practice' && matchData.status === 'active' && (Date.now() - matchData.createdAt > 24 * 60 * 60 * 1000)) {
+        updateDoc(matchRef, {
+          status: 'terminated',
+          finishedAt: Date.now()
+        }).catch(console.warn);
+        return;
+      }
+
       const prevMatch = matchStateRef.current;
 
       // Realtime sound triggers on moves and captures
@@ -1501,6 +1511,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 timeout: 'by Timeout',
                 stalemate: 'by Stalemate',
                 draw: 'by Mutual Agreement',
+                terminated: 'by Auto-Termination',
               }[match.status] || '';
 
               // Calculate Elo changes

@@ -92,44 +92,61 @@ function minimax(
   }
 }
 
-export function getBotMove(
+function getDepthForElo(elo: number): number {
+  if (elo <= 600) return 2;
+  if (elo <= 800) return 3;
+  if (elo <= 1000) return 4;
+  if (elo <= 1200) return 5;
+  if (elo <= 1400) return 6;
+  if (elo <= 1600) return 7;
+  if (elo <= 1800) return 9;
+  return 12; // 2000+
+}
+
+export async function getBotMove(
   fen: string,
   elo: number,
   botColor: 'w' | 'b'
-): { san: string; from: string; to: string; promotion?: string } | null {
+): Promise<{ san: string; from: string; to: string; promotion?: string } | null> {
+  const depth = getDepthForElo(elo);
+
+  try {
+    const response = await fetch("https://chess-api.com/v1", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ fen, depth })
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.from && data.to) {
+        let promotion = undefined;
+        if (data.promotion) {
+          promotion = data.promotion.toLowerCase();
+        } else if (data.isPromotion) {
+          promotion = 'q';
+        }
+        return {
+          san: data.san || '',
+          from: data.from,
+          to: data.to,
+          promotion
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("Failed to fetch move from Stockfish API, falling back to minimax:", err);
+  }
+
+  // Fallback to local minimax engine
   const chess = new Chess(fen);
   const moves = chess.moves({ verbose: true });
   if (moves.length === 0) return null;
 
-  let depth = 2;
-  let randomChance = 0.0;
-
-  if (elo <= 800) {
-    depth = 1;
-    randomChance = 0.50; // 50% random moves for beginner difficulty
-  } else if (elo <= 1200) {
-    depth = 2;
-    randomChance = 0.20; // 20% random moves
-  } else if (elo <= 1600) {
-    depth = 3;
-    randomChance = 0.05; // 5% random moves
-  } else {
-    depth = 3; // depth 3 is fast and solid for ELO 2000 in browser
-    randomChance = 0.0;
-  }
-
-  // Play random move sometimes based on Elo handicap
-  if (Math.random() < randomChance) {
-    const randomMove = moves[Math.floor(Math.random() * moves.length)];
-    return {
-      san: randomMove.san,
-      from: randomMove.from,
-      to: randomMove.to,
-      promotion: randomMove.promotion
-    };
-  }
-
-  const { move } = minimax(chess, depth, -Infinity, Infinity, true, botColor);
+  const fallbackDepth = elo <= 800 ? 1 : elo <= 1400 ? 2 : 3;
+  const { move } = minimax(chess, fallbackDepth, -Infinity, Infinity, true, botColor);
   if (!move) {
     const fallbackMove = moves[Math.floor(Math.random() * moves.length)];
     return {

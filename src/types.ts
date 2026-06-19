@@ -45,7 +45,7 @@ export interface MatchQueueEntry {
   timeControl?: string; // Chosen time control for All In
 }
 
-export type MatchStatus = 'active' | 'checkmate' | 'stalemate' | 'draw' | 'resigned' | 'timeout';
+export type MatchStatus = 'active' | 'checkmate' | 'stalemate' | 'draw' | 'resigned' | 'timeout' | 'terminated';
 
 export interface MatchClocks {
   [uid: string]: number; // remaining time in milliseconds

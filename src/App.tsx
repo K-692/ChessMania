@@ -12,7 +12,7 @@ import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
 import type { GameMode, Match, UserProfile } from './types';
-import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
@@ -346,14 +346,33 @@ const AppContent: React.FC = () => {
         collection(db, 'matches'),
         where('players', 'array-contains', user.uid),
         orderBy('createdAt', 'desc'),
-        limit(5)
+        limit(20)
       );
       const querySnap = await getDocs(q);
       const matches: Match[] = [];
       querySnap.forEach((docSnap) => {
         matches.push({ id: docSnap.id, ...docSnap.data() } as Match);
       });
-      setRecentMatches(matches);
+
+      // Close active practice matches older than 1 day
+      const now = Date.now();
+      const oneDayMs = 24 * 60 * 60 * 1000;
+      const cleanedMatches = await Promise.all(matches.map(async (m) => {
+        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > oneDayMs)) {
+          try {
+            await updateDoc(doc(db, 'matches', m.id), {
+              status: 'terminated',
+              finishedAt: now
+            });
+            return { ...m, status: 'terminated', finishedAt: now } as Match;
+          } catch (err) {
+            console.warn("Failed to terminate old practice match:", err);
+          }
+        }
+        return m;
+      }));
+
+      setRecentMatches(cleanedMatches.slice(0, 5));
 
       // Fetch opponent profiles for all unique opponent UIDs
       const uniqueOpponentUids = [...new Set(matches.map((m) =>
