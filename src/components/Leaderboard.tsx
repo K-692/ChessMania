@@ -58,8 +58,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
           winRateRatio: data.winRateRatio || 0,
           createdAt: data.updatedAt || Date.now(),
           lastActiveAt: data.updatedAt || Date.now(),
-          zeroBalanceAt: null,
-          lastInterestAppliedAt: 0,
+          zeroBalanceAt: null
         } as UserProfile);
       });
       setLeaders(topProfiles);

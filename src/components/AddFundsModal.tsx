@@ -96,18 +96,20 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
       const q = query(
         collection(db, 'transactions'),
         where('userId', '==', user.uid),
-        where('type', '==', 'coinPack'),
-        where('createdAt', '>=', startOfDay)
+        where('type', '==', 'coinPack')
       );
 
       const querySnap = await getDocs(q);
       let sum = 0;
       querySnap.forEach((docSnap) => {
         const data = docSnap.data();
-        if (typeof data.pricePaidINR === 'number') {
-          sum += data.pricePaidINR;
-        } else if (typeof data.pricePaid === 'number') {
-          sum += data.pricePaid;
+        const createdAt = data.createdAt;
+        if (typeof createdAt === 'number' && createdAt >= startOfDay) {
+          if (typeof data.pricePaidINR === 'number') {
+            sum += data.pricePaidINR;
+          } else if (typeof data.pricePaid === 'number') {
+            sum += data.pricePaid;
+          }
         }
       });
       setDailySpend(sum);

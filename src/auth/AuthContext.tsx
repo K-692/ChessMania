@@ -122,15 +122,9 @@ export function sanitizeProfile(
     hasChanges = true;
   }
 
-  let lastInterestAppliedAt = data?.lastInterestAppliedAt;
-  if (typeof lastInterestAppliedAt !== 'number' || isNaN(lastInterestAppliedAt)) {
-    lastInterestAppliedAt = createdAt;
-    hasChanges = true;
-  }
-
   let lastHourlyRewardAt = data?.lastHourlyRewardAt;
   if (typeof lastHourlyRewardAt !== 'number' || isNaN(lastHourlyRewardAt)) {
-    lastHourlyRewardAt = data?.lastInterestAppliedAt || createdAt;
+    lastHourlyRewardAt = createdAt;
     hasChanges = true;
   }
 
@@ -188,7 +182,6 @@ export function sanitizeProfile(
     createdAt,
     lastActiveAt,
     zeroBalanceAt,
-    lastInterestAppliedAt,
     lastHourlyRewardAt,
     lastUsernameChangedAt: data?.lastUsernameChangedAt || null,
     totalCoinsEarned,

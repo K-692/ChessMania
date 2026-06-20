@@ -9,7 +9,6 @@ export interface UserProfile {
   createdAt: number;        // UTC timestamp
   lastActiveAt: number;     // UTC timestamp
   zeroBalanceAt: number | null; // UTC timestamp when balance hit zero
-  lastInterestAppliedAt: number; // UTC timestamp of last lazy interest accrual
   lastHourlyRewardAt?: number; // UTC timestamp of last lazy hourly reward credit
   lastUsernameChangedAt?: number | null; // UTC timestamp when username was last updated
   totalCoinsEarned?: number; // Total coins earned by the player

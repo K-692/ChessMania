@@ -156,8 +156,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               currentBalance: 0,
               createdAt: Date.now(),
               lastActiveAt: Date.now(),
-              zeroBalanceAt: null,
-              lastInterestAppliedAt: Date.now()
+              zeroBalanceAt: null
             });
           } else {
             const snap = await getDoc(doc(db, 'users', match.whiteUid));
@@ -177,8 +176,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               currentBalance: 0,
               createdAt: Date.now(),
               lastActiveAt: Date.now(),
-              zeroBalanceAt: null,
-              lastInterestAppliedAt: Date.now()
+              zeroBalanceAt: null
             });
           } else {
             const snap = await getDoc(doc(db, 'users', match.blackUid));

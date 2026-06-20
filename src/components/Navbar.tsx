@@ -139,7 +139,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                     currentView === 'ledger' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Wallet
+                  Transactions
                 </button>
                 <button
                   onClick={() => onNavigate('profile')}
@@ -377,7 +377,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   : 'text-slate-300 hover:bg-white/5 border border-transparent'
               }`}
             >
-              <span>Wallet Ledger</span>
+              <span>Transactions</span>
             </button>
             <button
               onClick={() => {

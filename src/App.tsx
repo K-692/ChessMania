@@ -395,8 +395,7 @@ const AppContent: React.FC = () => {
             currentBalance: 0,
             createdAt: Date.now(),
             lastActiveAt: Date.now(),
-            zeroBalanceAt: null,
-            lastInterestAppliedAt: Date.now()
+            zeroBalanceAt: null
           };
           continue;
         }

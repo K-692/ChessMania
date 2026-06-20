@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import type { WalletLedgerEntry } from '../types';
 import { ChevronLeft, Calendar, Info, RefreshCw } from 'lucide-react';
 
@@ -31,11 +31,10 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
     if (!user) return;
     setLoading(true);
     try {
+      // Query without orderBy to avoid needing a Firestore composite index
       const q = query(
         collection(db, 'transactions'),
-        where('userId', '==', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(50)
+        where('userId', '==', user.uid)
       );
       
       const querySnapshot = await getDocs(q);
@@ -50,7 +49,11 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
           amount: typeof data.coins === 'number' ? data.coins : (data.amount || 0),
         } as WalletLedgerEntry);
       });
-      setLedger(entries);
+      
+      // Sort in memory by createdAt descending
+      entries.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      
+      setLedger(entries.slice(0, 100));
     } catch (err) {
       console.error('Error fetching ledger:', err);
     } finally {
