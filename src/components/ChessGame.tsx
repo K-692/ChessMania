@@ -1608,7 +1608,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               </div>
 
               {/* SFX, Legal Moves and Pre-moves row */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Master Sound checkbox */}
+                <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
+                  <span className="text-xs font-semibold text-slate-200">Master Sound (On/Off)</span>
+                  <input
+                    type="checkbox"
+                    checked={!settings.muted}
+                    onChange={() => {
+                      const nextMuted = !settings.muted;
+                      updateSoundSettings({ muted: nextMuted });
+                      setSettings(s => ({ ...s, muted: nextMuted }));
+                    }}
+                    className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
+                  />
+                </div>
+
                 {/* SFX checkbox */}
                 <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
                   <span className="text-xs font-semibold text-slate-200">Enable Sound Effects</span>

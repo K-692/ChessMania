@@ -197,6 +197,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
         currency: order.currency,
         name: 'Check & Mate',
         description: `Purchase of ${selectedPack.coins.toLocaleString()} Chess Coins`,
+        image: `${window.location.origin}/game_logo.png`,
         order_id: order.id,
         prefill: {
           email: user.email || ''
