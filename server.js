@@ -10,6 +10,28 @@ import { getFirestore } from 'firebase-admin/firestore';
 // Load environment variables
 dotenv.config();
 
+// Razorpay Environment Diagnostics
+const rzpKeyId = process.env.VITE_RAZORPAY_KEY_ID;
+const rzpKeySecret = process.env.RAZORPAY_KEY_SECRET;
+
+console.log('----------------------------------------------------');
+console.log('📊 [Diagnostics] Checking Razorpay Configuration:');
+if (!rzpKeyId) {
+  console.error('❌ VITE_RAZORPAY_KEY_ID is missing from the environment!');
+} else {
+  console.log(`✅ VITE_RAZORPAY_KEY_ID: "${rzpKeyId.substring(0, 8)}..." (Length: ${rzpKeyId.length})`);
+}
+
+if (!rzpKeySecret) {
+  console.error('❌ RAZORPAY_KEY_SECRET is missing from the environment!');
+} else {
+  const maskedSecret = rzpKeySecret.length > 6 
+    ? `${rzpKeySecret.substring(0, 3)}...${rzpKeySecret.substring(rzpKeySecret.length - 3)}`
+    : '***';
+  console.log(`✅ RAZORPAY_KEY_SECRET: "${maskedSecret}" (Length: ${rzpKeySecret.length})`);
+}
+console.log('----------------------------------------------------');
+
 const app = express();
 const PORT = process.env.PORT || 5001;
 

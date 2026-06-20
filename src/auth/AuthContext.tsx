@@ -595,8 +595,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
         const timeSinceLastActivity = Date.now() - lastActivity;
 
-        if (lastActivity > 0 && timeSinceLastActivity > 10 * 1000) {
-          console.log('Detected inactivity over 10 seconds on startup. Logging out...');
+        if (lastActivity > 0 && timeSinceLastActivity > 5 * 60 * 1000) {
+          console.log('Detected inactivity over 5 minutes on startup. Logging out...');
           await writeBackToFirestore(firebaseUser.uid);
           await signOut(auth);
           setUser(null);
@@ -683,14 +683,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem('checkmate_last_activity', Date.now().toString());
 
       timeoutId = setTimeout(async () => {
-        console.log('Inactivity timeout reached (10 seconds). Logging out...');
+        console.log('Inactivity timeout reached (5 minutes). Logging out...');
         try {
           await logout();
-          alert('You have been logged out due to 10 seconds of inactivity.');
+          alert('You have been logged out due to 5 minutes of inactivity.');
         } catch (e) {
           console.warn('Failed to logout on inactivity timeout:', e);
         }
-      }, 10 * 1000); // 10 seconds
+      }, 5 * 60 * 1000); // 5 minutes
     };
 
     const activityEvents = [

@@ -6,7 +6,7 @@ import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo, calculateElo } from '../game/gameService';
 import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check } from 'lucide-react';
+import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2 } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
@@ -1050,12 +1050,32 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     }
   };
 
-  // ── Null Guard for match ──
-  if (!match) {
+  // ── Null Guard for match and profiles ──
+  if (!match || !whiteProfile || !blackProfile) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-12 h-12 object-contain animate-bounce" />
-        <p className="text-slate-400">Loading game room...</p>
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#0b0c10]/95 backdrop-blur-md text-white p-4 space-y-8">
+        <div className="relative flex justify-center items-center">
+          {/* Floating neon background glow */}
+          <div className="absolute inset-0 bg-violet-600/15 rounded-full blur-3xl w-48 h-48 mx-auto" />
+          
+          <div className="relative p-6 bg-slate-900/60 rounded-full border border-white/10 shadow-2xl">
+            <Loader2 className="w-16 h-16 text-violet-500 animate-spin relative" />
+          </div>
+        </div>
+        
+        <div className="text-center space-y-3 max-w-sm">
+          <h3 className="text-2xl font-black tracking-wider bg-gradient-to-r from-violet-400 via-violet-500 to-indigo-400 bg-clip-text text-transparent uppercase">
+            Entering Arena
+          </h3>
+          <p className="text-sm text-slate-400 font-medium font-mono leading-relaxed">
+            Synchronizing match data and player profiles...
+          </p>
+          <div className="flex justify-center items-center gap-1.5 pt-2">
+            <span className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-2 h-2 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        </div>
       </div>
     );
   }
