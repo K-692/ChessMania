@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import type { UserProfile } from '../types';
 import { formatCoins } from '../utils/format';
 import { ChevronLeft, Trophy, Medal, Star } from 'lucide-react';
@@ -16,17 +16,51 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
+  const handleViewProfile = async (uid: string) => {
+    try {
+      const docRef = doc(db, 'users', uid);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        setSelectedProfile(snap.data() as UserProfile);
+      } else {
+        const leader = leaders.find(l => l.uid === uid);
+        if (leader) setSelectedProfile(leader);
+      }
+    } catch (err) {
+      console.error("Error fetching user profile:", err);
+      const leader = leaders.find(l => l.uid === uid);
+      if (leader) setSelectedProfile(leader);
+    }
+  };
+
   useEffect(() => {
     const q = query(
-      collection(db, 'users'),
-      orderBy('rating', 'desc'),
+      collection(db, 'leaderboards', 'global', 'players'),
+      orderBy('eloRating', 'desc'),
       limit(10)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const topProfiles: UserProfile[] = [];
       snapshot.forEach((docSnap) => {
-        topProfiles.push(docSnap.data() as UserProfile);
+        const data = docSnap.data();
+        topProfiles.push({
+          uid: data.uid,
+          displayName: data.displayName || 'Chess Player',
+          photoURL: data.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+          currentEloRating: data.eloRating || 0,
+          rating: data.eloRating || 0, // compatibility
+          currentBalance: data.coinsEarned || 0,
+          bankBalance: data.coinsEarned || 0, // compatibility
+          totalCoinsEarned: data.coinsEarned || 0,
+          gameplayCounts: data.gameplayCounts || {},
+          totalGamesPlayed: data.totalGamesPlayed || 0,
+          winRateRatio: data.winRateRatio || 0,
+          createdAt: data.updatedAt || Date.now(),
+          lastActiveAt: data.updatedAt || Date.now(),
+          zeroBalanceAt: null,
+          lastInterestAppliedAt: 0,
+        } as UserProfile);
       });
       setLeaders(topProfiles);
       setLoading(false);
@@ -116,7 +150,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ onBack }) => {
                           alt={player.displayName} 
                           className="w-8 h-8 rounded-full object-cover border border-white/10 cursor-pointer hover:opacity-85 transition-opacity"
                           title="View Profile"
-                          onClick={() => setSelectedProfile(player)}
+                          onClick={() => handleViewProfile(player.uid)}
                         />
                         <span className="font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
                           <span>{player.displayName}</span>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { X, CreditCard, Globe, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 interface AddFundsModalProps {
@@ -94,9 +94,9 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
       const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
 
       const q = query(
-        collection(db, 'walletLedger'),
-        where('uid', '==', user.uid),
-        where('type', '==', 'purchase'),
+        collection(db, 'transactions'),
+        where('userId', '==', user.uid),
+        where('type', '==', 'coinPack'),
         where('createdAt', '>=', startOfDay)
       );
 
@@ -204,43 +204,45 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
           pack_id: selectedPack.id,
           coins: selectedPack.coins.toString()
         },
-        handler: (res: any) => {
+        handler: async (res: any) => {
           const paymentId = res.razorpay_payment_id;
-          console.log(`Payment captured on client side: ${paymentId}. Waiting for webhook sync...`);
-          
-          // Start real-time Firestore listener on the transactions collection for this payment
-          const txDocRef = doc(db, 'transactions', paymentId);
-          const unsubscribe = onSnapshot(txDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const data = docSnap.data();
-              if (data.status === 'processed') {
-                // Clean up listener
-                unsubscribe();
-                // Show success screen
-                setSuccessTxId(paymentId);
-                setCheckoutStep('success');
-              }
-            }
-          }, (err) => {
-            console.error('Error listening to transaction doc:', err);
-            // Fail-safe fallback: wait 3 seconds and check user balance
-            setTimeout(() => {
-              setCheckoutStep('success');
-            }, 3000);
-          });
+          const orderId = res.razorpay_order_id;
+          const signature = res.razorpay_signature;
 
-          // Set a safety timeout of 15 seconds to avoid getting stuck if webhook fails
-          setTimeout(() => {
-            unsubscribe();
-            // Check if we are still processing, transition to selection
-            setCheckoutStep((current) => {
-              if (current === 'processing') {
-                setErrorMessage('Webhook verification timed out. If coins are not credited shortly, please contact support.');
-                return 'checkout';
-              }
-              return current;
+          console.log(`Payment captured on client side: ${paymentId}. Verifying payment signature...`);
+          setCheckoutStep('processing');
+
+          try {
+            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+            const verifyResponse = await fetch(`${apiBaseUrl}/api/verify-payment`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                razorpay_order_id: orderId,
+                razorpay_payment_id: paymentId,
+                razorpay_signature: signature
+              })
             });
-          }, 15000);
+
+            if (!verifyResponse.ok) {
+              const errData = await verifyResponse.json();
+              throw new Error(errData.error || 'Payment verification failed.');
+            }
+
+            const verifyResult = await verifyResponse.json();
+            if (verifyResult.status === 'success') {
+              setSuccessTxId(paymentId);
+              setCheckoutStep('success');
+            } else {
+              throw new Error('Payment verification returned an unsuccessful status.');
+            }
+          } catch (err: any) {
+            console.error('Verification error:', err);
+            setErrorMessage(err.message || 'Payment verification failed. If coins are not credited shortly, please contact support.');
+            setCheckoutStep('checkout');
+          }
         },
         modal: {
           ondismiss: () => {

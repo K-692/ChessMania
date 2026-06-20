@@ -151,7 +151,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               displayName: `Chess Bot (${elo})`,
               photoURL: '/game_modes/practice.png',
               rating: elo,
+              currentEloRating: elo,
               bankBalance: 0,
+              currentBalance: 0,
               createdAt: Date.now(),
               lastActiveAt: Date.now(),
               zeroBalanceAt: null,
@@ -170,7 +172,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               displayName: `Chess Bot (${elo})`,
               photoURL: '/game_modes/practice.png',
               rating: elo,
+              currentEloRating: elo,
               bankBalance: 0,
+              currentBalance: 0,
               createdAt: Date.now(),
               lastActiveAt: Date.now(),
               zeroBalanceAt: null,
@@ -1250,7 +1254,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
                     <Award className="w-2.5 h-2.5 text-violet-500" />
-                    <span>Elo {oppProfile?.rating || '---'}</span>
+                    <span>Elo {oppProfile?.currentEloRating !== undefined ? oppProfile.currentEloRating : (oppProfile?.rating || '---')}</span>
                   </span>
                   
                   {/* Captured pieces by opponent (= my pieces they took) */}
@@ -1304,7 +1308,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
                     <Award className="w-2.5 h-2.5 text-violet-500" />
-                    <span>Elo {myProfile?.rating || '---'}</span>
+                    <span>Elo {myProfile?.currentEloRating !== undefined ? myProfile.currentEloRating : (myProfile?.rating || '---')}</span>
                   </span>
                   
                   {/* Captured pieces by me (= opponent pieces I took) */}
@@ -1786,13 +1790,15 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               const myProfile = isWhite ? whiteProfile : blackProfile;
               const oppProfile = isWhite ? blackProfile : whiteProfile;
               let eloDelta = 0;
-              let newElo = myProfile?.rating || 0;
+              const myRating = myProfile ? (myProfile.currentEloRating !== undefined ? myProfile.currentEloRating : myProfile.rating) : 0;
+              let newElo = myRating;
 
               if (myProfile && oppProfile && match.mode !== 'practice' && match.stake > 0) {
+                const oppRating = oppProfile.currentEloRating !== undefined ? oppProfile.currentEloRating : oppProfile.rating;
                 const myScore = isDraw ? 0.5 : isWinner ? 1 : 0;
-                const eloResult = calculateElo(myProfile.rating, oppProfile.rating, myScore);
+                const eloResult = calculateElo(myRating, oppRating, myScore);
                 eloDelta = eloResult.delta;
-                newElo = Math.max(100, myProfile.rating + eloDelta);
+                newElo = Math.max(100, myRating + eloDelta);
               }
 
               return (
@@ -1821,7 +1827,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
                     {/* Final Coin Balance */}
                     <div className="text-xs text-slate-400 font-medium">
-                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins(profile?.bankBalance || 0)}</span>
+                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins((profile?.currentBalance !== undefined ? profile.currentBalance : profile?.bankBalance) || 0)}</span>
                     </div>
                   </div>
 

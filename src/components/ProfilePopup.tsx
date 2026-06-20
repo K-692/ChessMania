@@ -92,7 +92,7 @@ export const ProfilePopup: React.FC<ProfilePopupProps> = ({ profile, onClose }) 
           <div className="space-y-0.5">
             <h4 className="text-base font-bold text-white flex items-center gap-1.5 flex-wrap">
               <span>{profile.displayName}</span>
-              {profile.rating >= 2500 && (
+              {profile.currentEloRating >= 2500 && (
                 <span className="font-serif font-extrabold bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent border border-amber-400/60 bg-amber-950/40 px-1 rounded text-[7px] uppercase" title="Grandmaster">
                   GM
                 </span>
@@ -110,12 +110,12 @@ export const ProfilePopup: React.FC<ProfilePopupProps> = ({ profile, onClose }) 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center">
             <p className="text-[8px] text-slate-500 uppercase tracking-wider">Elo Rating</p>
-            <p className="text-base font-bold text-violet-300 mt-0.5">{profile.rating}</p>
+            <p className="text-base font-bold text-violet-300 mt-0.5">{profile.currentEloRating}</p>
           </div>
           <div className="bg-slate-900/60 border border-white/5 p-2 rounded-lg text-center flex flex-col justify-center items-center">
             <p className="text-[8px] text-slate-500 uppercase tracking-wider">Coins Balance</p>
             <div className="flex items-center space-x-1 mt-0.5">
-              <span className="text-base font-bold text-amber-400 font-mono">{profile.bankBalance.toLocaleString()}</span>
+              <span className="text-base font-bold text-amber-400 font-mono">{profile.currentBalance.toLocaleString()}</span>
               <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain" />
             </div>
           </div>

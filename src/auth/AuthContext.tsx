@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { signInWithPopup, signOut, setPersistence, inMemoryPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db } from '../firebase';
-import type { UserProfile, WalletLedgerEntry } from '../types';
+import type { UserProfile } from '../types';
 import { doc, getDoc, setDoc, runTransaction, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
 import { applyLazyHourlyRewardTx } from '../wallet/walletService';
 
@@ -85,14 +85,14 @@ export function sanitizeProfile(
     }
   }
 
-  let bankBalance = data?.bankBalance;
+  let bankBalance = data?.currentBalance !== undefined ? data.currentBalance : data?.bankBalance;
   if (typeof bankBalance !== 'number' || isNaN(bankBalance)) {
     const parsed = Number(bankBalance);
     bankBalance = (typeof bankBalance === 'string' && !isNaN(parsed)) ? parsed : 1000;
     hasChanges = true;
   }
 
-  let rating = data?.rating;
+  let rating = data?.currentEloRating !== undefined ? data.currentEloRating : data?.rating;
   if (typeof rating !== 'number' || isNaN(rating)) {
     const parsed = Number(rating);
     rating = (typeof rating === 'string' && !isNaN(parsed)) ? parsed : 0;
@@ -149,12 +149,42 @@ export function sanitizeProfile(
     }
   }
 
+  const wins = typeof data?.wins === 'number' && !isNaN(data.wins) ? data.wins : (typeof data?.totalWins === 'number' && !isNaN(data.totalWins) ? data.totalWins : 0);
+  const losses = typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : (typeof data?.totalLosses === 'number' && !isNaN(data.totalLosses) ? data.totalLosses : 0);
+  const draws = typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : (typeof data?.totalDraws === 'number' && !isNaN(data.totalDraws) ? data.totalDraws : 0);
+  const totalGamesPlayed = wins + losses + draws;
+  const winRateRatio = totalGamesPlayed > 0 ? wins / totalGamesPlayed : 0;
+
+  // Settings preferences map bootstrapping
+  let settings = data?.settings;
+  if (!settings || typeof settings !== 'object') {
+    let localSaved: any = {};
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('checkmate_sound_settings');
+        if (saved) localSaved = JSON.parse(saved);
+      } catch (e) {}
+    }
+    settings = {
+      musicEnabled: !(localSaved.muted ?? false),
+      musicVolume: localSaved.musicVolume ?? 0.5,
+      soundEffectsEnabled: localSaved.effectsEnabled ?? true,
+      legalMoveHintsEnabled: localSaved.showLegalMoves ?? true,
+      preMovesEnabled: localSaved.preMoveEnabled ?? true,
+      boardTheme: localSaved.boardTheme ?? '8_bit',
+      pieceStyle: localSaved.pieceTheme ?? 'neo'
+    };
+    hasChanges = true;
+  }
+
   const sanitized: UserProfile = {
     uid: targetUid,
     displayName,
     photoURL,
-    rating,
-    bankBalance,
+    currentEloRating: rating,
+    rating, // compatibility
+    currentBalance: bankBalance,
+    bankBalance, // compatibility
     createdAt,
     lastActiveAt,
     zeroBalanceAt,
@@ -163,24 +193,37 @@ export function sanitizeProfile(
     lastUsernameChangedAt: data?.lastUsernameChangedAt || null,
     totalCoinsEarned,
     gameplayCounts: data?.gameplayCounts || {},
-    wins: typeof data?.wins === 'number' && !isNaN(data.wins) ? data.wins : 0,
-    losses: typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : 0,
-    draws: typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : 0,
+    wins,
+    losses,
+    draws,
+    totalGamesPlayed,
+    totalWins: wins,
+    totalLosses: losses,
+    totalDraws: draws,
+    winRateRatio,
+    lastLoginAt: data?.lastLoginAt || now,
+    updatedAt: data?.updatedAt || now,
     country: country || '',
     lastCountryChangedAt: data?.lastCountryChangedAt || null,
+    settings
   };
 
   if (
     sanitized.displayName !== data?.displayName ||
     sanitized.photoURL !== data?.photoURL ||
+    sanitized.currentEloRating !== data?.currentEloRating ||
+    sanitized.currentBalance !== data?.currentBalance ||
     sanitized.lastUsernameChangedAt !== data?.lastUsernameChangedAt ||
     sanitized.lastHourlyRewardAt !== data?.lastHourlyRewardAt ||
     JSON.stringify(sanitized.gameplayCounts) !== JSON.stringify(data?.gameplayCounts) ||
-    sanitized.wins !== data?.wins ||
-    sanitized.losses !== data?.losses ||
-    sanitized.draws !== data?.draws ||
+    sanitized.totalGamesPlayed !== data?.totalGamesPlayed ||
+    sanitized.totalWins !== data?.totalWins ||
+    sanitized.totalLosses !== data?.totalLosses ||
+    sanitized.totalDraws !== data?.totalDraws ||
+    sanitized.winRateRatio !== data?.winRateRatio ||
     sanitized.country !== data?.country ||
-    sanitized.lastCountryChangedAt !== data?.lastCountryChangedAt
+    sanitized.lastCountryChangedAt !== data?.lastCountryChangedAt ||
+    JSON.stringify(sanitized.settings) !== JSON.stringify(data?.settings)
   ) {
     hasChanges = true;
   }
@@ -311,21 +354,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!docSnap.exists() || hasChanges || forceHasChanges) {
         await runTransaction(db, async (transaction) => {
           if (!docSnap.exists()) {
-            const ledgerEntry: Omit<WalletLedgerEntry, 'id'> = {
+            const ledgerEntry = {
               uid: firebaseUser.uid,
-              type: 'seed',
-              amount: 1000,
+              userId: firebaseUser.uid,
+              type: 'reward',
+              amount: 0,
+              coins: 1000,
+              currency: 'INR',
+              status: 'processed',
+              processedAt: now,
+              createdAt: now,
               matchId: null,
               balanceBefore: 0,
               balanceAfter: 1000,
-              createdAt: now,
             };
-            const newLedgerDocRef = doc(collection(db, 'walletLedger'));
+            const newLedgerDocRef = doc(collection(db, 'transactions'));
             transaction.set(newLedgerDocRef, ledgerEntry);
           }
           transaction.set(userDocRef, sanitized, { merge: true });
         });
       }
+
+      // Update global leaderboard record
+      const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', firebaseUser.uid);
+      await setDoc(leaderboardDocRef, {
+        uid: firebaseUser.uid,
+        displayName: sanitized.displayName,
+        photoURL: sanitized.photoURL,
+        eloRating: sanitized.currentEloRating,
+        coinsEarned: sanitized.totalCoinsEarned,
+        totalGamesPlayed: sanitized.totalGamesPlayed || 0,
+        winRateRatio: sanitized.winRateRatio || 0,
+        gameplayCounts: sanitized.gameplayCounts || {},
+        updatedAt: now
+      }, { merge: true });
 
       if (docSnap.exists()) {
         // Profile exists, apply hourly rewards lazily
@@ -336,18 +398,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (docSnapAfterInterest.exists()) {
           const profileData = docSnapAfterInterest.data() as UserProfile;
           if (profileData.rating === 1200) {
-            const ratingLedgerRef = collection(db, 'ratingLedger');
-            const q = query(ratingLedgerRef, where('uid', '==', firebaseUser.uid));
-            const ratingLedgerSnap = await getDocs(q);
-            if (ratingLedgerSnap.empty) {
-              await setDoc(userDocRef, { rating: 0 }, { merge: true });
+            const eloHistoryRef = collection(db, 'users', firebaseUser.uid, 'eloHistory');
+            const eloHistorySnap = await getDocs(eloHistoryRef);
+            if (eloHistorySnap.empty) {
+              await setDoc(userDocRef, { currentEloRating: 0, rating: 0 }, { merge: true });
+              // Sync leaderboard as well
+              await setDoc(leaderboardDocRef, { eloRating: 0 }, { merge: true });
             }
           }
         }
       }
       
       // Update last active timestamp
-      await setDoc(userDocRef, { lastActiveAt: now }, { merge: true });
+      await setDoc(userDocRef, { lastActiveAt: now, lastLoginAt: now }, { merge: true });
 
     } catch (error) {
       console.error('Error bootstrapping profile:', error);

@@ -17,13 +17,17 @@ export function calculateHourlyReward(
   const ledgerEntries: Omit<WalletLedgerEntry, 'id'>[] = [];
 
   // Ensure balance and timestamps are valid numbers
-  const baseBalance = typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000;
+  const baseBalance = typeof profile.currentBalance === 'number' && !isNaN(profile.currentBalance)
+    ? profile.currentBalance
+    : (typeof profile.bankBalance === 'number' && !isNaN(profile.bankBalance) ? profile.bankBalance : 1000);
+
   const lastHourlyRewardAt = typeof profile.lastHourlyRewardAt === 'number' && !isNaN(profile.lastHourlyRewardAt)
     ? profile.lastHourlyRewardAt
     : (profile.createdAt && !isNaN(profile.createdAt) ? profile.createdAt : nowMs);
 
   // Apply default fallbacks directly to the updatedProfile copy
-  updatedProfile.bankBalance = baseBalance;
+  updatedProfile.currentBalance = baseBalance;
+  updatedProfile.bankBalance = baseBalance; // compatibility
   updatedProfile.lastHourlyRewardAt = lastHourlyRewardAt;
   updatedProfile.zeroBalanceAt = null; // We remove zero-balance recovery since hourly reward covers it
 
@@ -50,18 +54,24 @@ export function calculateHourlyReward(
     }
 
     if (earnedThisSession > 0) {
-      updatedProfile.bankBalance = currentBalance;
+      updatedProfile.currentBalance = currentBalance;
+      updatedProfile.bankBalance = currentBalance; // compatibility
       updatedProfile.totalCoinsEarned = totalCoinsEarned;
 
       ledgerEntries.push({
         uid: profile.uid,
-        type: 'hourly_reward',
-        amount: earnedThisSession,
+        userId: profile.uid,
+        type: 'reward',
+        coins: earnedThisSession,
+        amount: 0,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: nowMs,
         matchId: null,
         balanceBefore: baseBalance,
         balanceAfter: currentBalance,
         createdAt: nowMs,
-      });
+      } as any);
     }
 
     // Advance the hourly reward timestamp by the number of hours processed
@@ -76,7 +86,7 @@ export function calculateHourlyReward(
  */
 export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile> {
   const userDocRef = doc(db, 'users', uid);
-  const ledgerColRef = collection(db, 'walletLedger');
+  const ledgerColRef = collection(db, 'transactions');
 
   return runTransaction(db, async (transaction) => {
     const userDoc = await transaction.get(userDocRef);
@@ -90,7 +100,7 @@ export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile>
     const { updatedProfile, ledgerEntries } = calculateHourlyReward(currentProfile, now);
 
     // If changes occurred, commit them
-    const balanceChanged = updatedProfile.bankBalance !== currentProfile.bankBalance;
+    const balanceChanged = updatedProfile.currentBalance !== currentProfile.currentBalance;
     const rewardTimestampChanged = updatedProfile.lastHourlyRewardAt !== currentProfile.lastHourlyRewardAt;
     const zeroBalanceChanged = updatedProfile.zeroBalanceAt !== currentProfile.zeroBalanceAt;
 
@@ -102,6 +112,21 @@ export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile>
         const newLedgerDocRef = doc(ledgerColRef);
         transaction.set(newLedgerDocRef, entry);
       }
+
+      // Sync leaderboard
+      const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', uid);
+      transaction.set(leaderboardDocRef, {
+        eloRating: updatedProfile.currentEloRating,
+        coinsEarned: updatedProfile.totalCoinsEarned,
+        displayName: updatedProfile.displayName,
+        photoURL: updatedProfile.photoURL,
+        totalGamesPlayed: (updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0),
+        winRateRatio: ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0)) > 0
+          ? (updatedProfile.wins || 0) / ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0))
+          : 0,
+        gameplayCounts: updatedProfile.gameplayCounts || {},
+        updatedAt: now
+      }, { merge: true });
     }
 
     return updatedProfile;

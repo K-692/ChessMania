@@ -30,7 +30,8 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
 
     const setupQueue = async () => {
       try {
-        const id = await joinQueue(user.uid, profile.rating, stake, mode);
+        const ratingVal = profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating;
+        const id = await joinQueue(user.uid, ratingVal, stake, mode);
         activeQueueId = id;
         setQueueId(id);
         setStatusText('Searching for opponent...');
@@ -92,10 +93,11 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
 
       setStatusText('Searching for opponent...');
 
+      const ratingVal = profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating;
       const matchId = await findMatch(
         queueId,
         user.uid,
-        profile.rating,
+        ratingVal,
         stake,
         mode,
         currentBand

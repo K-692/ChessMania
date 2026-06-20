@@ -32,8 +32,8 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
     setLoading(true);
     try {
       const q = query(
-        collection(db, 'walletLedger'),
-        where('uid', '==', user.uid),
+        collection(db, 'transactions'),
+        where('userId', '==', user.uid),
         orderBy('createdAt', 'desc'),
         limit(50)
       );
@@ -41,10 +41,14 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
       const querySnapshot = await getDocs(q);
       const entries: WalletLedgerEntry[] = [];
       querySnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
         entries.push({
           id: docSnap.id,
-          ...(docSnap.data() as Omit<WalletLedgerEntry, 'id'>),
-        });
+          ...data,
+          uid: data.uid || data.userId || user.uid,
+          userId: data.userId || data.uid || user.uid,
+          amount: typeof data.coins === 'number' ? data.coins : (data.amount || 0),
+        } as WalletLedgerEntry);
       });
       setLedger(entries);
     } catch (err) {
@@ -63,10 +67,16 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
       case 'seed': return 'Account Seed Credits';
       case 'interest': return 'Daily Yield Interest (1%)';
       case 'topup': return 'Zero-Balance Recovery Credit';
-      case 'hourly_reward': return 'Hourly Reward Credit';
-      case 'game_escrow': return 'Match Entry Stakes (Escrow)';
-      case 'game_payout': return 'Match Settlement Payout';
-      case 'purchase': return 'Coins Pack Purchase';
+      case 'hourly_reward':
+      case 'reward': return 'Hourly Reward Credit';
+      case 'game_escrow':
+      case 'stakeDebit': return 'Match Entry Stakes (Escrow)';
+      case 'game_payout':
+      case 'stakeCredit': return 'Match Settlement Payout';
+      case 'purchase':
+      case 'coinPack': return 'Coins Pack Purchase';
+      case 'refund': return 'Match Stakes Refunded';
+      case 'penalty': return 'Game Rule Penalty';
       default: return type;
     }
   };

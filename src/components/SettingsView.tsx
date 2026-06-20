@@ -3,7 +3,7 @@ import { Volume2, VolumeX, Music, ArrowLeft, Eye, Check, Palette, HelpCircle, Se
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -22,9 +22,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const { user } = useAuth();
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [queryText, setQueryText] = useState('');
+  const [category, setCategory] = useState('bug');
+  const [subject, setSubject] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState<boolean | null>(null);
   const [submitError, setSubmitError] = useState('');
+
+  const syncSettingsToFirestore = async (updated: Record<string, any>) => {
+    if (!user) return;
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      const settingsUpdates: Record<string, any> = {};
+      Object.entries(updated).forEach(([key, val]) => {
+        settingsUpdates[`settings.${key}`] = val;
+      });
+      await updateDoc(userDocRef, settingsUpdates);
+    } catch (e) {
+      console.warn("Failed to sync settings to Firestore:", e);
+    }
+  };
 
   useEffect(() => {
     // Sync external changes (e.g. if muted from landing page)
@@ -40,30 +56,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     const updated = { musicVolume, muted: newMuted };
     setSettings(prev => ({ ...prev, ...updated }));
     updateSoundSettings(updated);
+    syncSettingsToFirestore({
+      musicVolume,
+      musicEnabled: !newMuted
+    });
   };
 
   const handleToggleEffects = () => {
     const effectsEnabled = !settings.effectsEnabled;
     setSettings(prev => ({ ...prev, effectsEnabled }));
     updateSoundSettings({ effectsEnabled });
+    syncSettingsToFirestore({
+      soundEffectsEnabled: effectsEnabled
+    });
   };
 
   const handleToggleMute = () => {
     const muted = !settings.muted;
     setSettings(prev => ({ ...prev, muted }));
     updateSoundSettings({ muted });
+    syncSettingsToFirestore({
+      musicEnabled: !muted
+    });
   };
 
   const handleToggleLegalMoves = () => {
     const showLegalMoves = !settings.showLegalMoves;
     setSettings(prev => ({ ...prev, showLegalMoves }));
     updateSoundSettings({ showLegalMoves });
+    syncSettingsToFirestore({
+      legalMoveHintsEnabled: showLegalMoves
+    });
   };
 
   const handleTogglePreMove = () => {
     const preMoveEnabled = !(settings as any).preMoveEnabled;
     setSettings(prev => ({ ...prev, preMoveEnabled } as any));
     updateSoundSettings({ preMoveEnabled });
+    syncSettingsToFirestore({
+      preMovesEnabled: preMoveEnabled
+    });
   };
 
   return (
@@ -218,6 +250,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   onClick={() => {
                     updateSoundSettings({ boardTheme: key });
                     setSettings(s => ({ ...s, boardTheme: key }));
+                    syncSettingsToFirestore({ boardTheme: key });
                   }}
                   className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
                     isActive
@@ -263,6 +296,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   onClick={() => {
                     updateSoundSettings({ pieceTheme: key });
                     setSettings(s => ({ ...s, pieceTheme: key }));
+                    syncSettingsToFirestore({ pieceStyle: key });
                   }}
                   className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
                     isActive
@@ -307,6 +341,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
             <button
               onClick={() => {
                 setQueryText('');
+                setCategory('bug');
+                setSubject('');
                 setSubmitSuccess(null);
                 setSubmitError('');
                 setIsReportModalOpen(true);
@@ -366,12 +402,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   setIsSubmitting(true);
                   setSubmitError('');
                   try {
-                    // 1. Add support query log
-                    await addDoc(collection(db, 'supportQueries'), {
-                      uid: user.uid,
+                    // 1. Add support query log with fields matching model
+                    const queryCol = collection(db, 'supportQueries');
+                    const newQueryDocRef = doc(queryCol);
+                    const queryId = newQueryDocRef.id;
+
+                    await setDoc(newQueryDocRef, {
+                      queryId,
+                      userId: user.uid,
                       email: user.email || 'unknown@gmail.com',
-                      query: queryText.trim(),
-                      createdAt: Date.now()
+                      category,
+                      subject: subject.trim() || 'Support Query',
+                      description: queryText.trim(),
+                      status: 'open',
+                      priority: 'medium',
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                      resolvedAt: null
                     });
 
                     // 2. Fetch admin email from /config/support
@@ -392,7 +439,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     await addDoc(mailCol, {
                       to: user.email || 'unknown@gmail.com',
                       message: {
-                        subject: '[Check & Mate Support] Ticket Submitted Successfully',
+                        subject: `[Check & Mate Support] ${subject.trim() || 'Ticket'} Submitted Successfully`,
                         html: `
                           <div style="font-family: sans-serif; padding: 20px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
                             <h2 style="color: #6d28d9; margin-bottom: 20px;">Support Ticket Received</h2>
@@ -400,6 +447,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                             <p>Thank you for reaching out. We have logged your query and our team will get back to you shortly.</p>
                             <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
                             <p><strong>Your Submitted Ticket:</strong></p>
+                            <p><strong>Category:</strong> ${category}</p>
+                            <p><strong>Subject:</strong> ${subject.trim() || 'Support Query'}</p>
                             <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #6d28d9; font-style: italic; margin-bottom: 20px; white-space: pre-wrap;">
                               ${queryText.trim()}
                             </div>
@@ -413,7 +462,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     await addDoc(mailCol, {
                       to: adminEmail,
                       message: {
-                        subject: `[Check & Mate Admin] Support Query from ${user.displayName || 'Player'}`,
+                        subject: `[Check & Mate Admin] Support Query [${category}] from ${user.displayName || 'Player'}`,
                         html: `
                           <div style="font-family: sans-serif; padding: 20px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px;">
                             <h2 style="color: #ea580c; margin-bottom: 20px;">New Support Ticket Received</h2>
@@ -424,6 +473,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                               <li><strong>UID:</strong> ${user.uid}</li>
                             </ul>
                             <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                            <p><strong>Ticket details:</strong></p>
+                            <p><strong>Category:</strong> ${category}</p>
+                            <p><strong>Subject:</strong> ${subject.trim() || 'Support Query'}</p>
                             <p><strong>Query:</strong></p>
                             <div style="background-color: #f8fafc; padding: 15px; border-left: 4px solid #ea580c; font-style: italic; margin-bottom: 20px; white-space: pre-wrap;">
                               ${queryText.trim()}
@@ -457,6 +509,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   <p className="text-[10px] text-slate-500">
                     Query will be registered under your Google Account email.
                   </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2 text-left">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                      Category
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-amber-500/50 transition-all font-sans cursor-pointer"
+                    >
+                      <option value="bug" className="bg-slate-950">Bug / Technical Issue</option>
+                      <option value="payment" className="bg-slate-950">Payment / Coins Purchase</option>
+                      <option value="account" className="bg-slate-950">Account Access</option>
+                      <option value="abusiveBehavior" className="bg-slate-950">Report Abusive Behavior</option>
+                      <option value="other" className="bg-slate-950">Other Queries</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2 text-left">
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                      Subject
+                    </label>
+                    <input
+                      type="text"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      required
+                      placeholder="e.g. Cannot purchase coins"
+                      className="w-full bg-slate-900/60 border border-white/10 focus:border-amber-500/50 rounded-xl px-4 py-3 text-sm text-white outline-none focus:ring-1 focus:ring-amber-500/50 transition-all font-sans"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">

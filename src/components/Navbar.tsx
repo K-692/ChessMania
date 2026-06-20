@@ -45,9 +45,8 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
     let cCount = 0;
 
     const qFriendships = query(
-      collection(db, 'friendships'),
-      where('receiverUid', '==', user.uid),
-      where('status', '==', 'pending')
+      collection(db, 'users', user.uid, 'friends'),
+      where('status', '==', 'pending_received')
     );
     const unsubFriendships = onSnapshot(qFriendships, (snap) => {
       fCount = snap.size;
@@ -58,8 +57,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
     let isChallengesInitial = true;
     const qChallenges = query(
-      collection(db, 'challenges'),
-      where('challengedUid', '==', user.uid),
+      collection(db, 'users', user.uid, 'friendlyChallenges'),
       where('status', '==', 'pending')
     );
     const unsubChallenges = onSnapshot(qChallenges, (snap) => {
@@ -178,7 +176,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 pl-3 pr-2 py-1.5 rounded-lg">
                     <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain shrink-0" />
                     <span className="text-amber-300 font-semibold text-sm mr-1 whitespace-nowrap">
-                      {profile ? profile.bankBalance.toLocaleString() : '---'}
+                      {profile ? (profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance).toLocaleString() : '---'}
                     </span>
                     {onAddFunds && (
                       <button
@@ -195,7 +193,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 px-3 py-1.5 rounded-lg">
                     <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-5 h-5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
                     <span className="text-violet-300 font-semibold text-sm">
-                      {profile ? profile.rating : '---'}
+                      {profile ? (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) : '---'}
                     </span>
                     <span className="text-slate-500 text-xs">Elo</span>
                   </div>
@@ -216,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   <div className="hidden md:block text-left">
                     <p className="text-sm font-medium text-slate-200 leading-none flex items-center gap-1.5 flex-wrap">
                       <span>{profile?.displayName || user.displayName}</span>
-                      {profile && profile.rating >= 2500 && (
+                      {profile && (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
                         <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950/40 px-1 py-0.2 rounded text-[8px] uppercase select-none font-bold" title="Grandmaster (Rating 2500+)">
                           GM
                         </span>
@@ -237,7 +235,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                       {(() => {
                         const bestAch = getBestAchievement(profile?.gameplayCounts);
                         const label = bestAch ? bestAch.badge.split(' ').slice(1).join(' ') : 'Active User';
-                        if (profile && profile.rating >= 2500) {
+                        if (profile && (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500) {
                           return `Grandmaster • ${label}`;
                         }
                         return label;
@@ -284,7 +282,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               <div className="flex items-center space-x-1.5 bg-slate-900/60 border border-white/5 pl-2.5 pr-2 py-1.5 rounded-lg shrink-0">
                 <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4.5 h-4.5 object-contain shrink-0" />
                 <span className="text-amber-300 font-bold text-xs whitespace-nowrap">
-                  {profile ? profile.bankBalance.toLocaleString() : '---'}
+                  {profile ? (profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance).toLocaleString() : '---'}
                 </span>
                 {onAddFunds && (
                   <button
@@ -301,7 +299,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               <div className="flex items-center space-x-1 bg-slate-900/60 border border-white/5 px-2.5 py-1.5 rounded-lg shrink-0">
                 <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-4.5 h-4.5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
                 <span className="text-violet-300 font-bold text-xs font-mono">
-                  {profile ? profile.rating : '---'}
+                  {profile ? (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) : '---'}
                 </span>
               </div>
 

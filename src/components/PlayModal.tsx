@@ -156,16 +156,18 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceThem
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [allInChoice, setAllInChoice] = useState<string>('10 | 5');
   const [practiceColor, setPracticeColor] = useState<'white' | 'black' | 'random'>('white');
-  const userElo = profile?.rating || 800;
+  const userElo = (profile?.currentEloRating !== undefined ? profile.currentEloRating : profile?.rating) || 800;
   const [practiceElo, setPracticeElo] = useState<number>(userElo);
   const carouselRef = useRef<HTMLDivElement>(null);
 
   // Sync user ELO on profile load
   useEffect(() => {
-    if (profile?.rating) {
+    if (profile?.currentEloRating !== undefined) {
+      setPracticeElo(profile.currentEloRating);
+    } else if (profile?.rating) {
       setPracticeElo(profile.rating);
     }
-  }, [profile?.rating]);
+  }, [profile?.currentEloRating, profile?.rating]);
 
   const knightImgSrc = `/pieces/${pieceTheme || 'classic'}/wn.png`;
 
@@ -187,7 +189,7 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceThem
 
   if (!isOpen) return null;
 
-  const userBalance = profile?.bankBalance || 0;
+  const userBalance = (profile?.currentBalance !== undefined ? profile.currentBalance : profile?.bankBalance) || 0;
   const selectedMode = GAME_MODES_INFO[selectedIndex];
 
   const selectedStake = selectedMode.entryPrice === 'all_in' ? userBalance : (selectedMode.entryPrice as number);

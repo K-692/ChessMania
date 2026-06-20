@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { doc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart } from 'lucide-react';
-import type { RatingLedgerEntry } from '../types';
 
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
 
@@ -111,36 +110,33 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
     if (!user || !profile) return;
     const fetchRatingHistory = async () => {
       try {
-        const ratingLedgerRef = collection(db, 'ratingLedger');
-        const q = query(ratingLedgerRef, where('uid', '==', user.uid));
-        const snap = await getDocs(q);
+        const eloHistoryRef = collection(db, 'users', user.uid, 'eloHistory');
+        const snap = await getDocs(eloHistoryRef);
 
-        const entries = snap.docs.map(docSnap => docSnap.data() as RatingLedgerEntry);
+        const entries = snap.docs.map(docSnap => docSnap.data() as any);
         entries.sort((a, b) => a.createdAt - b.createdAt);
 
-        let current = profile.rating;
         const history: { date: string; elo: number }[] = [];
+        const ratingVal = profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating;
 
+        // Base entry
         history.push({
-          date: 'Now',
-          elo: current
+          date: new Date(profile.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          elo: 0 // Start Elo
         });
 
-        for (let i = entries.length - 1; i >= 0; i--) {
-          current = Math.max(0, current - entries[i].delta);
-          const dateStr = new Date(entries[i].createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        entries.forEach(entry => {
+          const dateStr = new Date(entry.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
           history.push({
             date: dateStr,
-            elo: current
+            elo: entry.afterRating
           });
-        }
+        });
 
-        history.reverse();
-
-        if (history.length === 0) {
+        if (entries.length > 0 && history[history.length - 1].elo !== ratingVal) {
           history.push({
-            date: new Date(profile.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-            elo: profile.rating
+            date: 'Now',
+            elo: ratingVal
           });
         }
 
@@ -153,7 +149,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
     };
 
     fetchRatingHistory();
-  }, [user, profile?.rating, profile?.createdAt]);
+  }, [user, profile?.currentEloRating, profile?.rating, profile?.createdAt]);
 
   const handleOpenEditCountry = () => {
     setCountryInput(profile?.country || '');
@@ -246,7 +242,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
               className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover ring-4 ring-white/10 shadow-2xl relative z-10"
             />
             <div className="absolute -bottom-2 -right-2 flex flex-col gap-1 items-end z-20">
-              {profile.rating >= 2500 && (
+              {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
                 <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950 px-2 py-0.5 rounded text-[10px] font-bold shadow-md">
                   GM
                 </span>
@@ -264,7 +260,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
             <div className="space-y-1">
               <h2 className="text-3xl font-extrabold tracking-wide text-white flex flex-wrap items-center justify-center md:justify-start gap-3">
                 <span>{profile.displayName}</span>
-                {profile.rating >= 2500 && (
+                {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
                   <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950/40 px-2.5 py-0.5 rounded-lg text-xs font-bold select-none animate-pulse" title="Grandmaster (Rating 2500+)">
                     GM
                   </span>
@@ -283,7 +279,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
                 <span className="text-slate-600 hidden sm:inline">•</span>
                 <span className="flex items-center gap-1.5">
                   <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>Elo: <strong className="text-amber-300 font-mono">{profile.rating}</strong></span>
+                  <span>Elo: <strong className="text-amber-300 font-mono">{profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating}</strong></span>
                 </span>
                 <span className="text-slate-600 hidden sm:inline">•</span>
                 <span className="flex items-center gap-1.5 bg-slate-900/40 px-2 py-0.5 rounded-lg border border-white/5 text-xs text-slate-300">
@@ -321,7 +317,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
           </div>
           <div>
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Chess Rating</span>
-            <span className="text-2xl font-black font-mono text-violet-300">{profile.rating} Elo</span>
+            <span className="text-2xl font-black font-mono text-violet-300">{profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating} Elo</span>
           </div>
         </div>
 
@@ -333,7 +329,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
           <div>
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Total Coins Earned</span>
             <span className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1.5 whitespace-nowrap">
-              <span>{(profile.totalCoinsEarned ?? profile.bankBalance).toLocaleString()}</span>
+              <span>{(profile.totalCoinsEarned ?? (profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance)).toLocaleString()}</span>
               <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
             </span>
           </div>
@@ -577,12 +573,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
 
         {/* GM — Special Elo-Based Achievement Card */}
         <div className={`relative glass p-5 rounded-xl border transition-all duration-300 overflow-hidden ${
-          profile.rating >= 2500
+          (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
             ? 'border-amber-500/50 bg-gradient-to-r from-amber-950/20 via-yellow-950/10 to-amber-950/20 shadow-lg shadow-amber-500/10'
             : 'border-white/5 opacity-50'
         }`}>
           {/* Gold shimmer effect on unlock */}
-          {profile.rating >= 2500 && (
+          {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
             <div className="absolute inset-0 pointer-events-none">
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/5 to-transparent animate-[shimmer_3s_ease-in-out_infinite]" />
             </div>
@@ -591,11 +587,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
             <div className="flex items-center gap-4">
               {/* GM badge preview */}
               <div className={`flex items-center justify-center w-14 h-14 rounded-xl border text-2xl font-serif font-black tracking-widest select-none ${
-                profile.rating >= 2500
+                (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
                   ? 'border-amber-400/50 bg-amber-950/40 bg-gradient-to-br from-amber-400/10 to-yellow-500/5 shadow-[0_0_20px_rgba(251,191,36,0.3)]'
                   : 'border-white/5 bg-white/3'
               }`}>
-                {profile.rating >= 2500 ? (
+                {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 ? (
                   <span className="bg-gradient-to-b from-amber-300 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.9)] animate-pulse">
                     GM
                   </span>
@@ -607,7 +603,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
               <div className="space-y-0.5 text-left">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-bold text-slate-200">Grandmaster</span>
-                  {profile.rating >= 2500 ? (
+                  {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 ? (
                     <span className="bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded text-[9px] font-bold text-amber-400 tracking-wider uppercase">
                       UNLOCKED
                     </span>
@@ -618,24 +614,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
                   )}
                 </div>
                 <p className="text-xs text-slate-400 font-light max-w-md">
-                  {profile.rating >= 2500
+                  {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
                     ? 'You have reached the pinnacle of chess mastery. The GM title is displayed alongside your name everywhere.'
-                    : `Achieve a rating of 2500 Elo to unlock the Grandmaster title. Currently at ${profile.rating} Elo (${Math.max(0, 2500 - profile.rating)} to go).`}
+                    : `Achieve a rating of 2500 Elo to unlock the Grandmaster title. Currently at ${profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating} Elo (${Math.max(0, 2500 - (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating))} to go).`}
                 </p>
               </div>
             </div>
 
             {/* Elo progress bar to 2500 */}
             <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0 min-w-[100px]">
-              <span className="text-[10px] text-slate-500 font-mono font-semibold">{Math.min(profile.rating, 2500)} / 2500 Elo</span>
+              <span className="text-[10px] text-slate-500 font-mono font-semibold">{Math.min(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating, 2500)} / 2500 Elo</span>
               <div className="w-24 bg-slate-950 rounded-full h-1.5 overflow-hidden border border-white/5">
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${
-                    profile.rating >= 2500
+                    (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
                       ? 'bg-gradient-to-r from-amber-500 to-yellow-300 shadow-[0_0_6px_rgba(251,191,36,0.7)]'
                       : 'bg-violet-600'
                   }`}
-                  style={{ width: `${Math.min(100, (profile.rating / 2500) * 100)}%` }}
+                  style={{ width: `${Math.min(100, ((profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) / 2500) * 100)}%` }}
                 />
               </div>
             </div>

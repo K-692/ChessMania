@@ -1,6 +1,6 @@
 import { db } from '../firebase';
 import { doc, runTransaction, collection, getDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
-import type { Match, UserProfile, WalletLedgerEntry, RatingLedgerEntry, GameMode } from '../types';
+import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
 export function getIncrementForMode(mode: GameMode): number {
@@ -87,6 +87,16 @@ export async function makeMove(
       clocks: updatedClocks,
       lastMoveAt: now,
     });
+
+    const nextMoveIndex = matchData.moves.length;
+    const moveDocRef = doc(collection(db, 'matches', matchId, 'moves'), String(nextMoveIndex));
+    transaction.set(moveDocRef, {
+      san: sanMove,
+      fen: newFen,
+      playedBy: playerUid,
+      playedAt: now,
+      index: nextMoveIndex
+    });
   });
 }
 
@@ -148,8 +158,7 @@ export async function submitGameAction(
  */
 export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
   const matchDocRef = doc(db, 'matches', matchId);
-  const ledgerCol = collection(db, 'walletLedger');
-  const ratingLedgerCol = collection(db, 'ratingLedger');
+  const ledgerCol = collection(db, 'transactions');
 
   // Query friendship document before transaction (use single-field queries to avoid composite index requirement)
   const matchSnapOuter = await getDoc(matchDocRef);
@@ -225,6 +234,11 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     const p1Profile = p1Snap.data() as UserProfile;
     const p2Profile = p2Snap.data() as UserProfile;
 
+    const p1Rating = p1Profile.currentEloRating !== undefined ? p1Profile.currentEloRating : p1Profile.rating;
+    const p2Rating = p2Profile.currentEloRating !== undefined ? p2Profile.currentEloRating : p2Profile.rating;
+    const p1Balance = p1Profile.currentBalance !== undefined ? p1Profile.currentBalance : p1Profile.bankBalance;
+    const p2Balance = p2Profile.currentBalance !== undefined ? p2Profile.currentBalance : p2Profile.bankBalance;
+
     // Calculate Elo changes
     // Determine actual score for p1 and p2
     let p1Score = 0.5;
@@ -235,11 +249,11 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
       p2Score = matchData.winnerUid === p2Uid ? 1 : 0;
     }
 
-    const p1Elo = calculateElo(p1Profile.rating, p2Profile.rating, p1Score);
-    const p2Elo = calculateElo(p2Profile.rating, p1Profile.rating, p2Score);
+    const p1Elo = calculateElo(p1Rating, p2Rating, p1Score);
+    const p2Elo = calculateElo(p2Rating, p1Rating, p2Score);
 
-    const newP1Rating = matchData.stake === 0 ? p1Profile.rating : Math.max(100, p1Profile.rating + p1Elo.delta);
-    const newP2Rating = matchData.stake === 0 ? p2Profile.rating : Math.max(100, p2Profile.rating + p2Elo.delta);
+    const newP1Rating = matchData.stake === 0 ? p1Rating : Math.max(100, p1Rating + p1Elo.delta);
+    const newP2Rating = matchData.stake === 0 ? p2Rating : Math.max(100, p2Rating + p2Elo.delta);
 
     // Calculate payouts (escrow returns/winnings)
     let p1Payout = 0;
@@ -276,109 +290,170 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
       }
     }
 
-    const newP1Balance = Math.round((p1Profile.bankBalance + p1Payout) * 100) / 100;
-    const newP2Balance = Math.round((p2Profile.bankBalance + p2Payout) * 100) / 100;
+    const newP1Balance = Math.round((p1Balance + p1Payout) * 100) / 100;
+    const newP2Balance = Math.round((p2Balance + p2Payout) * 100) / 100;
 
-    const newP1TotalCoins = Math.round(((p1Profile.totalCoinsEarned || p1Profile.bankBalance) + p1Earned) * 100) / 100;
-    const newP2TotalCoins = Math.round(((p2Profile.totalCoinsEarned || p2Profile.bankBalance) + p2Earned) * 100) / 100;
+    const newP1TotalCoins = Math.round(((p1Profile.totalCoinsEarned || p1Balance) + p1Earned) * 100) / 100;
+    const newP2TotalCoins = Math.round(((p2Profile.totalCoinsEarned || p2Balance) + p2Earned) * 100) / 100;
 
     // Increment game counts and win/loss/draw stats
     const p1Counts = p1Profile.gameplayCounts || {};
     const newP1Counts = { ...p1Counts, [matchData.mode]: (p1Counts[matchData.mode] || 0) + 1 };
-    let p1Wins = p1Profile.wins || 0;
-    let p1Losses = p1Profile.losses || 0;
-    let p1Draws = p1Profile.draws || 0;
+    let p1Wins = p1Profile.totalWins !== undefined ? p1Profile.totalWins : (p1Profile.wins || 0);
+    let p1Losses = p1Profile.totalLosses !== undefined ? p1Profile.totalLosses : (p1Profile.losses || 0);
+    let p1Draws = p1Profile.totalDraws !== undefined ? p1Profile.totalDraws : (p1Profile.draws || 0);
     if (isDraw) p1Draws++;
     else if (matchData.winnerUid === p1Uid) p1Wins++;
     else p1Losses++;
+    const p1TotalGamesPlayed = p1Wins + p1Losses + p1Draws;
+    const p1WinRateRatio = p1TotalGamesPlayed > 0 ? p1Wins / p1TotalGamesPlayed : 0;
 
     const p2Counts = p2Profile.gameplayCounts || {};
     const newP2Counts = { ...p2Counts, [matchData.mode]: (p2Counts[matchData.mode] || 0) + 1 };
-    let p2Wins = p2Profile.wins || 0;
-    let p2Losses = p2Profile.losses || 0;
-    let p2Draws = p2Profile.draws || 0;
+    let p2Wins = p2Profile.totalWins !== undefined ? p2Profile.totalWins : (p2Profile.wins || 0);
+    let p2Losses = p2Profile.totalLosses !== undefined ? p2Profile.totalLosses : (p2Profile.losses || 0);
+    let p2Draws = p2Profile.totalDraws !== undefined ? p2Profile.totalDraws : (p2Profile.draws || 0);
     if (isDraw) p2Draws++;
     else if (matchData.winnerUid === p2Uid) p2Wins++;
     else p2Losses++;
+    const p2TotalGamesPlayed = p2Wins + p2Losses + p2Draws;
+    const p2WinRateRatio = p2TotalGamesPlayed > 0 ? p2Wins / p2TotalGamesPlayed : 0;
 
     // Update profiles
     transaction.update(p1UserRef, {
-      rating: newP1Rating,
-      bankBalance: newP1Balance,
+      currentEloRating: newP1Rating,
+      rating: newP1Rating, // compatibility
+      currentBalance: newP1Balance,
+      bankBalance: newP1Balance, // compatibility
       zeroBalanceAt: newP1Balance <= 0 ? now : null,
       totalCoinsEarned: newP1TotalCoins,
       gameplayCounts: newP1Counts,
       wins: p1Wins,
       losses: p1Losses,
       draws: p1Draws,
+      totalWins: p1Wins,
+      totalLosses: p1Losses,
+      totalDraws: p1Draws,
+      totalGamesPlayed: p1TotalGamesPlayed,
+      winRateRatio: p1WinRateRatio,
+      updatedAt: now
     });
 
     transaction.update(p2UserRef, {
-      rating: newP2Rating,
-      bankBalance: newP2Balance,
+      currentEloRating: newP2Rating,
+      rating: newP2Rating, // compatibility
+      currentBalance: newP2Balance,
+      bankBalance: newP2Balance, // compatibility
       zeroBalanceAt: newP2Balance <= 0 ? now : null,
       totalCoinsEarned: newP2TotalCoins,
       gameplayCounts: newP2Counts,
       wins: p2Wins,
       losses: p2Losses,
       draws: p2Draws,
+      totalWins: p2Wins,
+      totalLosses: p2Losses,
+      totalDraws: p2Draws,
+      totalGamesPlayed: p2TotalGamesPlayed,
+      winRateRatio: p2WinRateRatio,
+      updatedAt: now
     });
 
-    // Write wallet ledger records
+    // Write payout transaction records (transactions collection)
     if (p1Payout > 0 || matchData.stake === 0) {
       const p1LedgerRef = doc(ledgerCol);
       transaction.set(p1LedgerRef, {
         uid: p1Uid,
-        type: 'game_payout',
-        amount: p1Payout,
+        userId: p1Uid,
+        type: isDraw ? 'refund' : 'stakeCredit',
+        amount: 0,
+        coins: p1Payout,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: matchData.id,
-        balanceBefore: p1Profile.bankBalance,
+        balanceBefore: p1Balance,
         balanceAfter: newP1Balance,
         createdAt: now,
         opponentUid: p2Uid,
-      } as WalletLedgerEntry);
+      });
     }
 
     if (p2Payout > 0 || matchData.stake === 0) {
       const p2LedgerRef = doc(ledgerCol);
       transaction.set(p2LedgerRef, {
         uid: p2Uid,
-        type: 'game_payout',
-        amount: p2Payout,
+        userId: p2Uid,
+        type: isDraw ? 'refund' : 'stakeCredit',
+        amount: 0,
+        coins: p2Payout,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: matchData.id,
-        balanceBefore: p2Profile.bankBalance,
+        balanceBefore: p2Balance,
         balanceAfter: newP2Balance,
         createdAt: now,
         opponentUid: p1Uid,
-      } as WalletLedgerEntry);
+      });
     }
 
-    // Write rating ledger records
+    // Write Elo history subcollection records (users/{uid}/eloHistory)
     if (matchData.stake > 0 || matchData.stake === 0) {
-      const p1RatingLedgerRef = doc(ratingLedgerCol);
+      const p1RatingLedgerRef = doc(collection(db, 'users', p1Uid, 'eloHistory'));
       transaction.set(p1RatingLedgerRef, {
-        uid: p1Uid,
-        matchId: matchData.id,
+        beforeRating: p1Rating,
+        afterRating: newP1Rating,
         delta: matchData.stake === 0 ? 0 : p1Elo.delta,
         expectedScore: p1Elo.expectedScore,
         actualScore: p1Score,
         kFactor: 20,
         createdAt: now,
         opponentUid: p2Uid,
-      } as RatingLedgerEntry);
-
-      const p2RatingLedgerRef = doc(ratingLedgerCol);
-      transaction.set(p2RatingLedgerRef, {
-        uid: p2Uid,
         matchId: matchData.id,
+        mode: matchData.mode
+      });
+
+      const p2RatingLedgerRef = doc(collection(db, 'users', p2Uid, 'eloHistory'));
+      transaction.set(p2RatingLedgerRef, {
+        beforeRating: p2Rating,
+        afterRating: newP2Rating,
         delta: matchData.stake === 0 ? 0 : p2Elo.delta,
         expectedScore: p2Elo.expectedScore,
         actualScore: p2Score,
         kFactor: 20,
         createdAt: now,
         opponentUid: p1Uid,
-      } as RatingLedgerEntry);
+        matchId: matchData.id,
+        mode: matchData.mode
+      });
     }
+
+    // Sync leaderboards
+    const p1LeaderboardRef = doc(db, 'leaderboards', 'global', 'players', p1Uid);
+    transaction.set(p1LeaderboardRef, {
+      uid: p1Uid,
+      displayName: p1Profile.displayName,
+      photoURL: p1Profile.photoURL,
+      eloRating: newP1Rating,
+      coinsEarned: newP1TotalCoins,
+      totalGamesPlayed: p1TotalGamesPlayed,
+      winRateRatio: p1WinRateRatio,
+      gameplayCounts: newP1Counts,
+      updatedAt: now
+    }, { merge: true });
+
+    const p2LeaderboardRef = doc(db, 'leaderboards', 'global', 'players', p2Uid);
+    transaction.set(p2LeaderboardRef, {
+      uid: p2Uid,
+      displayName: p2Profile.displayName,
+      photoURL: p2Profile.photoURL,
+      eloRating: newP2Rating,
+      coinsEarned: newP2TotalCoins,
+      totalGamesPlayed: p2TotalGamesPlayed,
+      winRateRatio: p2WinRateRatio,
+      gameplayCounts: newP2Counts,
+      updatedAt: now
+    }, { merge: true });
 
     // Update friendship H2H statistics if friendship exists
     if (friendshipDocRef) {
@@ -424,7 +499,7 @@ export async function acceptFriendlyChallenge(
   const challengeDocRef = doc(db, 'challenges', challengeId);
   const challengerUserRef = doc(db, 'users', challengerUid);
   const challengedUserRef = doc(db, 'users', challengedUid);
-  const ledgerCol = collection(db, 'walletLedger');
+  const ledgerCol = collection(db, 'transactions');
   const matchesCol = collection(db, 'matches');
   const newMatchDocRef = doc(matchesCol);
   const mId = newMatchDocRef.id;
@@ -450,57 +525,72 @@ export async function acceptFriendlyChallenge(
     const challenger = challengerSnap.data() as UserProfile;
     const challenged = challengedSnap.data() as UserProfile;
 
+    const challengerBalance = challenger.currentBalance !== undefined ? challenger.currentBalance : challenger.bankBalance;
+    const challengedBalance = challenged.currentBalance !== undefined ? challenged.currentBalance : challenged.bankBalance;
+
     // Check balances
-    const challengerStake = mode === 'all_in' ? challenger.bankBalance : stake;
-    const challengedStake = mode === 'all_in' ? challenged.bankBalance : stake;
+    const challengerStake = mode === 'all_in' ? challengerBalance : stake;
+    const challengedStake = mode === 'all_in' ? challengedBalance : stake;
 
     const isFriendly = stake === 0;
 
     if (!isFriendly) {
-      if (challenger.bankBalance < challengerStake || challengerStake <= 0) {
+      if (challengerBalance < challengerStake || challengerStake <= 0) {
         transaction.update(challengeDocRef, { status: 'declined' });
         return { error: `Challenger "${challenger.displayName}" has insufficient coins.` };
       }
-      if (challenged.bankBalance < challengedStake || challengedStake <= 0) {
+      if (challengedBalance < challengedStake || challengedStake <= 0) {
         transaction.update(challengeDocRef, { status: 'declined' });
         return { error: `You have insufficient coins to play this match.` };
       }
 
-      const updatedChallengerBalance = Math.round((challenger.bankBalance - challengerStake) * 100) / 100;
-      const updatedChallengedBalance = Math.round((challenged.bankBalance - challengedStake) * 100) / 100;
+      const updatedChallengerBalance = Math.round((challengerBalance - challengerStake) * 100) / 100;
+      const updatedChallengedBalance = Math.round((challengedBalance - challengedStake) * 100) / 100;
 
       // Commit profile balances
       transaction.update(challengerUserRef, {
-        bankBalance: updatedChallengerBalance,
+        currentBalance: updatedChallengerBalance,
+        bankBalance: updatedChallengerBalance, // compatibility
         zeroBalanceAt: updatedChallengerBalance <= 0 ? now : null,
       });
       transaction.update(challengedUserRef, {
-        bankBalance: updatedChallengedBalance,
+        currentBalance: updatedChallengedBalance,
+        bankBalance: updatedChallengedBalance, // compatibility
         zeroBalanceAt: updatedChallengedBalance <= 0 ? now : null,
       });
 
-      // Write ledger entries
+      // Write transaction entries
       const challengerLedgerRef = doc(ledgerCol);
       transaction.set(challengerLedgerRef, {
         uid: challengerUid,
-        type: 'game_escrow',
-        amount: -challengerStake,
+        userId: challengerUid,
+        type: 'stakeDebit',
+        amount: 0,
+        coins: -challengerStake,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: mId,
-        balanceBefore: challenger.bankBalance,
+        balanceBefore: challengerBalance,
         balanceAfter: updatedChallengerBalance,
         createdAt: now,
-      } as WalletLedgerEntry);
+      });
 
       const challengedLedgerRef = doc(ledgerCol);
       transaction.set(challengedLedgerRef, {
         uid: challengedUid,
-        type: 'game_escrow',
-        amount: -challengedStake,
+        userId: challengedUid,
+        type: 'stakeDebit',
+        amount: 0,
+        coins: -challengedStake,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: mId,
-        balanceBefore: challenged.bankBalance,
+        balanceBefore: challengedBalance,
         balanceAfter: updatedChallengedBalance,
         createdAt: now,
-      } as WalletLedgerEntry);
+      });
     }
 
     // Setup match room
@@ -557,6 +647,23 @@ export async function acceptFriendlyChallenge(
       matchId: mId,
       acceptedAt: now
     });
+
+    // Mirror to subcollections users/{uid}/friendlyChallenges/{challengeId}
+    const challengerFC = doc(db, 'users', challengerUid, 'friendlyChallenges', challengeId);
+    const challengedFC = doc(db, 'users', challengedUid, 'friendlyChallenges', challengeId);
+    const mirrorChallenge = {
+      challengeId,
+      challengerUid,
+      challengedUid,
+      mode,
+      stake,
+      status: 'accepted',
+      matchId: mId,
+      createdAt: challengeData.createdAt || now,
+      acceptedAt: now
+    };
+    transaction.set(challengerFC, mirrorChallenge, { merge: true });
+    transaction.set(challengedFC, mirrorChallenge, { merge: true });
 
     return { matchId: mId };
   }).then((res) => {

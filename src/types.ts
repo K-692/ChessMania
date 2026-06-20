@@ -2,10 +2,12 @@ export interface UserProfile {
   uid: string;
   displayName: string;
   photoURL: string;
-  rating: number;
-  bankBalance: number;
-  createdAt: number; // UTC timestamp
-  lastActiveAt: number; // UTC timestamp
+  currentEloRating: number; // New Elo rating field
+  rating: number;           // Backward compatibility rating
+  currentBalance: number;   // New Balance field
+  bankBalance: number;      // Backward compatibility balance
+  createdAt: number;        // UTC timestamp
+  lastActiveAt: number;     // UTC timestamp
   zeroBalanceAt: number | null; // UTC timestamp when balance hit zero
   lastInterestAppliedAt: number; // UTC timestamp of last lazy interest accrual
   lastHourlyRewardAt?: number; // UTC timestamp of last lazy hourly reward credit
@@ -17,6 +19,26 @@ export interface UserProfile {
   draws?: number;
   country?: string;
   lastCountryChangedAt?: number | null;
+  
+  // Derived/Remodeled stats
+  totalGamesPlayed?: number;
+  totalWins?: number;
+  totalLosses?: number;
+  totalDraws?: number;
+  winRateRatio?: number;
+  lastLoginAt?: number;
+  updatedAt?: number;
+
+  // Embedded settings preference map
+  settings?: {
+    musicEnabled: boolean;
+    musicVolume: number;
+    soundEffectsEnabled: boolean;
+    legalMoveHintsEnabled: boolean;
+    preMovesEnabled: boolean;
+    boardTheme: string;
+    pieceStyle: string;
+  };
 }
 
 export type GameMode =
@@ -39,10 +61,12 @@ export interface MatchQueueEntry {
   rating: number;
   stake: number;
   mode: GameMode;
-  createdAt: number;
-  status: 'waiting' | 'matched' | 'cancelled';
+  queuedAt: number;    // New queued time field
+  createdAt: number;   // Backward compatibility
+  status: 'waiting' | 'matched' | 'cancelled' | 'expired';
   matchId?: string;
   timeControl?: string; // Chosen time control for All In
+  matchedAt?: number | null; // Match matching time
 }
 
 export type MatchStatus = 'active' | 'checkmate' | 'stalemate' | 'draw' | 'resigned' | 'timeout' | 'terminated';
@@ -77,13 +101,16 @@ export interface Match {
   heartbeats?: Record<string, number>; // Live client heartbeats (UID -> timestamp)
 }
 
-export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'hourly_reward' | 'game_escrow' | 'game_payout' | 'purchase';
+export type WalletTransactionType = 'seed' | 'interest' | 'topup' | 'hourly_reward' | 'game_escrow' | 'game_payout' | 'purchase' | 'coinPack' | 'reward' | 'penalty' | 'stakeDebit' | 'stakeCredit' | 'refund';
 
 export interface WalletLedgerEntry {
   id?: string;
+  transactionId?: string;
   uid: string;
+  userId?: string;     // Align with Transaction Model
   type: WalletTransactionType;
-  amount: number;
+  amount: number;      // Represents either coin delta (old) or fiat amount (new) depending on context
+  coins?: number;      // Coin quantity affected (new model)
   matchId: string | null;
   balanceBefore: number;
   balanceAfter: number;
@@ -92,6 +119,11 @@ export interface WalletLedgerEntry {
   pricePaidINR?: number; // Fiat price paid in base INR
   currency?: string; // Currency used for purchase (INR, USD, etc.)
   opponentUid?: string;
+  orderId?: string | null;
+  paymentId?: string | null;
+  packId?: string | null;
+  status?: 'created' | 'pending' | 'paid' | 'failed' | 'refunded' | 'processed';
+  processedAt?: number | null;
 }
 
 export interface RatingLedgerEntry {

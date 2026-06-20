@@ -10,7 +10,7 @@ import {
   setDoc,
   deleteDoc
 } from 'firebase/firestore';
-import type { UserProfile, MatchQueueEntry, Match, WalletLedgerEntry, GameMode } from '../types';
+import type { UserProfile, MatchQueueEntry, Match, GameMode } from '../types';
 
 export const STANDARD_TIME_CONTROLS: Record<GameMode, string> = {
   beginner: '15 min',
@@ -67,7 +67,8 @@ export async function joinQueue(
     rating,
     stake,
     mode,
-    createdAt: Date.now(),
+    queuedAt: Date.now(),
+    createdAt: Date.now(), // compatibility
     status: 'waiting',
     ...(timeControl ? { timeControl } : {})
   };
@@ -141,15 +142,17 @@ export async function findMatch(
 
     // Sort to prioritize closest stake (except in all_in), then oldest queue entry
     eligibleCandidates.sort((a, b) => {
+      const aTime = a.queuedAt !== undefined ? a.queuedAt : a.createdAt;
+      const bTime = b.queuedAt !== undefined ? b.queuedAt : b.createdAt;
       if (mode === 'all_in') {
-        return a.createdAt - b.createdAt;
+        return aTime - bTime;
       }
       const aStakeDiff = Math.abs(a.stake - myStake);
       const bStakeDiff = Math.abs(b.stake - myStake);
       if (aStakeDiff !== bStakeDiff) {
         return aStakeDiff - bStakeDiff;
       }
-      return a.createdAt - b.createdAt;
+      return aTime - bTime;
     });
 
     const opponent = eligibleCandidates[0];
@@ -181,20 +184,23 @@ export async function findMatch(
         throw new Error('One of the queue entries has already been paired');
       }
 
-      // Check balance constraints
-      const myEscrow = mode === 'all_in' ? myUser.bankBalance : finalStake;
-      const oppEscrow = mode === 'all_in' ? oppUser.bankBalance : finalStake;
+      const myBalance = myUser.currentBalance !== undefined ? myUser.currentBalance : myUser.bankBalance;
+      const oppBalance = oppUser.currentBalance !== undefined ? oppUser.currentBalance : oppUser.bankBalance;
 
-      if (myUser.bankBalance < myEscrow || myEscrow <= 0) {
+      // Check balance constraints
+      const myEscrow = mode === 'all_in' ? myBalance : finalStake;
+      const oppEscrow = mode === 'all_in' ? oppBalance : finalStake;
+
+      if (myBalance < myEscrow || myEscrow <= 0) {
         throw new Error('Insufficient coins to cover the minimum stake');
       }
-      if (oppUser.bankBalance < oppEscrow || oppEscrow <= 0) {
+      if (oppBalance < oppEscrow || oppEscrow <= 0) {
         throw new Error('Opponent has insufficient coins to cover the minimum stake');
       }
 
       const now = Date.now();
-      const updatedMyBalance = Math.round((myUser.bankBalance - myEscrow) * 100) / 100;
-      const updatedOppBalance = Math.round((oppUser.bankBalance - oppEscrow) * 100) / 100;
+      const updatedMyBalance = Math.round((myBalance - myEscrow) * 100) / 100;
+      const updatedOppBalance = Math.round((oppBalance - oppEscrow) * 100) / 100;
 
       // Seed match ID
       const matchesCol = collection(db, 'matches');
@@ -203,36 +209,48 @@ export async function findMatch(
 
       // Commit profile balances
       transaction.update(myUserRef, {
-        bankBalance: updatedMyBalance,
+        currentBalance: updatedMyBalance,
+        bankBalance: updatedMyBalance, // compatibility
         zeroBalanceAt: updatedMyBalance <= 0 ? now : null,
       });
       transaction.update(oppUserRef, {
-        bankBalance: updatedOppBalance,
+        currentBalance: updatedOppBalance,
+        bankBalance: updatedOppBalance, // compatibility
         zeroBalanceAt: updatedOppBalance <= 0 ? now : null,
       });
 
-      // Write ledger entries
-      const ledgerCol = collection(db, 'walletLedger');
+      // Write transaction entries
+      const transactionCol = collection(db, 'transactions');
       
-      const myLedgerRef = doc(ledgerCol);
-      const myLedger: Omit<WalletLedgerEntry, 'id'> = {
+      const myLedgerRef = doc(transactionCol);
+      const myLedger = {
         uid: myUid,
-        type: 'game_escrow',
-        amount: -myEscrow,
+        userId: myUid,
+        type: 'stakeDebit',
+        amount: 0,
+        coins: -myEscrow,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: mId,
-        balanceBefore: myUser.bankBalance,
+        balanceBefore: myBalance,
         balanceAfter: updatedMyBalance,
         createdAt: now,
       };
       transaction.set(myLedgerRef, myLedger);
 
-      const oppLedgerRef = doc(ledgerCol);
-      const oppLedger: Omit<WalletLedgerEntry, 'id'> = {
+      const oppLedgerRef = doc(transactionCol);
+      const oppLedger = {
         uid: opponent.uid,
-        type: 'game_escrow',
-        amount: -oppEscrow,
+        userId: opponent.uid,
+        type: 'stakeDebit',
+        amount: 0,
+        coins: -oppEscrow,
+        currency: 'INR',
+        status: 'processed',
+        processedAt: now,
         matchId: mId,
-        balanceBefore: oppUser.bankBalance,
+        balanceBefore: oppBalance,
         balanceAfter: updatedOppBalance,
         createdAt: now,
       };
@@ -296,10 +314,12 @@ export async function findMatch(
       transaction.update(myQueueRef, {
         status: 'matched',
         matchId: mId,
+        matchedAt: now
       });
       transaction.update(oppQueueRef, {
         status: 'matched',
         matchId: mId,
+        matchedAt: now
       });
 
       return mId;

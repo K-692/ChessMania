@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDoc, getDocs, doc, setDoc, addDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
@@ -64,174 +64,143 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
   useEffect(() => {
     if (!user) return;
 
-    // Listen to all accepted friendships
-    const qFriendships = query(
-      collection(db, 'friendships'),
-      where('status', '==', 'accepted')
-    );
-
-    const unsubFriendships = onSnapshot(qFriendships, async (snap) => {
+    // Listen to all subcollection friends: users/{uid}/friends
+    const qFriends = collection(db, 'users', user.uid, 'friends');
+    const unsubFriends = onSnapshot(qFriends, async (snap) => {
+      const listFriendships: Friendship[] = [];
+      const listIncoming: Friendship[] = [];
+      const listOutgoing: Friendship[] = [];
       const profileIds: string[] = [];
-      const list: Friendship[] = [];
 
       snap.forEach((docSnap) => {
-        const data = { id: docSnap.id, ...docSnap.data() } as Friendship;
-        if (data.requesterUid === user.uid || data.receiverUid === user.uid) {
-          list.push(data);
-          if (data.requesterUid === user.uid) {
-            profileIds.push(data.receiverUid);
-          } else {
-            profileIds.push(data.requesterUid);
-          }
+        const friendUid = docSnap.id;
+        const data = docSnap.data();
+        if (data.status === 'accepted') {
+          listFriendships.push({
+            id: friendUid,
+            requesterUid: user.uid,
+            receiverUid: friendUid,
+            status: 'accepted',
+            createdAt: data.friendSince || Date.now(),
+            stats: data.stats
+          });
+          profileIds.push(friendUid);
+        } else if (data.status === 'pending_received') {
+          listIncoming.push({
+            id: friendUid,
+            requesterUid: friendUid,
+            receiverUid: user.uid,
+            status: 'pending',
+            createdAt: data.createdAt || Date.now()
+          });
+        } else if (data.status === 'pending_sent') {
+          listOutgoing.push({
+            id: friendUid,
+            requesterUid: user.uid,
+            receiverUid: friendUid,
+            status: 'pending',
+            createdAt: data.createdAt || Date.now()
+          });
         }
       });
 
-      setFriendships(list);
+      setFriendships(listFriendships);
+      setIncomingRequests(listIncoming);
+      setOutgoingRequests(listOutgoing);
 
-      if (profileIds.length > 0) {
-        const uProfiles: UserProfile[] = [];
-        for (const fId of profileIds) {
-          try {
-            const docSnap = await getDoc(doc(db, 'users', fId));
-            if (docSnap.exists()) {
-              uProfiles.push({ uid: docSnap.id, ...docSnap.data() } as UserProfile);
-            }
-          } catch (err) {
-            console.warn("Failed to fetch friend profile:", err);
-          }
-        }
-        setFriendsProfiles(uProfiles);
-      } else {
-        setFriendsProfiles([]);
-      }
-    });
-
-    // Listen to incoming requests
-    const qIncoming = query(
-      collection(db, 'friendships'),
-      where('receiverUid', '==', user.uid),
-      where('status', '==', 'pending')
-    );
-    const unsubIncoming = onSnapshot(qIncoming, async (snap) => {
-      const list: Friendship[] = [];
-      const reqProfiles: Record<string, UserProfile> = { ...challengerProfiles };
-
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as Friendship;
-        data.id = docSnap.id;
-        list.push(data);
-
-        if (!reqProfiles[data.requesterUid]) {
-          try {
-            const uDoc = await getDoc(doc(db, 'users', data.requesterUid));
-            if (uDoc.exists()) {
-              reqProfiles[data.requesterUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-            }
-          } catch (err) {
-            console.warn("Failed to fetch requester profile:", err);
-          }
-        }
-      }
-      setIncomingRequests(list);
-      setChallengerProfiles(reqProfiles);
-    });
-
-    // Listen to outgoing requests
-    const qOutgoing = query(
-      collection(db, 'friendships'),
-      where('requesterUid', '==', user.uid),
-      where('status', '==', 'pending')
-    );
-    const unsubOutgoing = onSnapshot(qOutgoing, async (snap) => {
-      const list: Friendship[] = [];
+      // Fetch profiles for the friend list and requests
+      const allNeededUids = [...profileIds, ...listIncoming.map(r => r.requesterUid), ...listOutgoing.map(r => r.receiverUid)];
       const reqProfiles = { ...challengerProfiles };
+      let profilesChanged = false;
 
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as Friendship;
-        data.id = docSnap.id;
-        list.push(data);
-
-        if (!reqProfiles[data.receiverUid]) {
+      for (const uid of allNeededUids) {
+        if (!reqProfiles[uid]) {
           try {
-            const uDoc = await getDoc(doc(db, 'users', data.receiverUid));
+            const uDoc = await getDoc(doc(db, 'users', uid));
             if (uDoc.exists()) {
-              reqProfiles[data.receiverUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+              reqProfiles[uid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+              profilesChanged = true;
             }
           } catch (err) {
-            console.warn("Failed to fetch receiver profile:", err);
+            console.warn("Failed to fetch user profile for social view:", err);
           }
         }
       }
-      setOutgoingRequests(list);
-      setChallengerProfiles(reqProfiles);
+
+      if (profilesChanged) {
+        setChallengerProfiles(reqProfiles);
+      }
+
+      const uProfiles: UserProfile[] = [];
+      for (const fId of profileIds) {
+        if (reqProfiles[fId]) {
+          uProfiles.push(reqProfiles[fId]);
+        } else {
+          try {
+            const uDoc = await getDoc(doc(db, 'users', fId));
+            if (uDoc.exists()) {
+              const p = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+              uProfiles.push(p);
+              reqProfiles[fId] = p;
+            }
+          } catch (e) {}
+        }
+      }
+      setFriendsProfiles(uProfiles);
     });
 
-    // Listen to received friendly challenges
-    const qRecChallenges = query(
-      collection(db, 'challenges'),
-      where('challengedUid', '==', user.uid),
+    // Listen to friendly challenges mirrored under the user profile
+    const qChallenges = query(
+      collection(db, 'users', user.uid, 'friendlyChallenges'),
       where('status', '==', 'pending')
     );
-    const unsubRecChallenges = onSnapshot(qRecChallenges, async (snap) => {
-      const list: FriendlyChallenge[] = [];
+    const unsubChallenges = onSnapshot(qChallenges, async (snap) => {
+      const received: FriendlyChallenge[] = [];
+      const sent: FriendlyChallenge[] = [];
       const reqProfiles = { ...challengerProfiles };
+      let profilesChanged = false;
 
       for (const docSnap of snap.docs) {
         const data = docSnap.data() as FriendlyChallenge;
         data.id = docSnap.id;
-        list.push(data);
 
-        if (!reqProfiles[data.challengerUid]) {
-          try {
-            const uDoc = await getDoc(doc(db, 'users', data.challengerUid));
-            if (uDoc.exists()) {
-              reqProfiles[data.challengerUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-            }
-          } catch (err) {
-            console.warn("Failed to fetch challenger profile:", err);
+        if (data.challengerUid === user.uid) {
+          sent.push(data);
+          const targetUid = data.challengedUid;
+          if (!reqProfiles[targetUid]) {
+            try {
+              const uDoc = await getDoc(doc(db, 'users', targetUid));
+              if (uDoc.exists()) {
+                reqProfiles[targetUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+                profilesChanged = true;
+              }
+            } catch (e) {}
+          }
+        } else {
+          received.push(data);
+          const targetUid = data.challengerUid;
+          if (!reqProfiles[targetUid]) {
+            try {
+              const uDoc = await getDoc(doc(db, 'users', targetUid));
+              if (uDoc.exists()) {
+                reqProfiles[targetUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+                profilesChanged = true;
+              }
+            } catch (e) {}
           }
         }
       }
-      setReceivedChallenges(list);
-      setChallengerProfiles(reqProfiles);
-    });
 
-    // Listen to sent friendly challenges
-    const qSentChallenges = query(
-      collection(db, 'challenges'),
-      where('challengerUid', '==', user.uid),
-      where('status', '==', 'pending')
-    );
-    const unsubSentChallenges = onSnapshot(qSentChallenges, async (snap) => {
-      const list: FriendlyChallenge[] = [];
-      const reqProfiles = { ...challengerProfiles };
-
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as FriendlyChallenge;
-        data.id = docSnap.id;
-        list.push(data);
-
-        if (!reqProfiles[data.challengedUid]) {
-          try {
-            const uDoc = await getDoc(doc(db, 'users', data.challengedUid));
-            if (uDoc.exists()) {
-              reqProfiles[data.challengedUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-            }
-          } catch (err) {
-            console.warn("Failed to fetch challenged profile:", err);
-          }
-        }
+      setReceivedChallenges(received);
+      setSentChallenges(sent);
+      if (profilesChanged) {
+        setChallengerProfiles(reqProfiles);
       }
-      setSentChallenges(list);
-      setChallengerProfiles(reqProfiles);
     });
 
     return () => {
-      unsubFriendships();
-      unsubIncoming();
-      unsubOutgoing();
-      unsubRecChallenges();
-      unsubSentChallenges();
+      unsubFriends();
+      unsubChallenges();
     };
   }, [user]);
 
@@ -274,30 +243,33 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         return;
       }
 
-      const qExist1 = query(
-        collection(db, 'friendships'),
-        where('requesterUid', '==', user.uid),
-        where('receiverUid', '==', targetUser.uid)
-      );
-      const qExist2 = query(
-        collection(db, 'friendships'),
-        where('requesterUid', '==', targetUser.uid),
-        where('receiverUid', '==', user.uid)
-      );
-
-      const [snap1, snap2] = await Promise.all([getDocs(qExist1), getDocs(qExist2)]);
-      if (!snap1.empty || !snap2.empty) {
+      // Check subcollection users/{uid}/friends/{friendUid}
+      const friendDocRef = doc(db, 'users', user.uid, 'friends', targetUser.uid);
+      const friendSnap = await getDoc(friendDocRef);
+      if (friendSnap.exists()) {
         setRequestError('Friend request or friendship already active or pending');
         setIsSendingRequest(false);
         return;
       }
 
-      await addDoc(collection(db, 'friendships'), {
-        requesterUid: user.uid,
-        receiverUid: targetUser.uid,
-        status: 'pending',
-        createdAt: Date.now()
-      } as Friendship);
+      const docA = doc(db, 'users', user.uid, 'friends', targetUser.uid);
+      const docB = doc(db, 'users', targetUser.uid, 'friends', user.uid);
+      const now = Date.now();
+
+      await Promise.all([
+        setDoc(docA, {
+          status: 'pending_sent',
+          createdAt: now,
+          displayName: targetUser.displayName,
+          photoURL: targetUser.photoURL
+        }),
+        setDoc(docB, {
+          status: 'pending_received',
+          createdAt: now,
+          displayName: profile.displayName,
+          photoURL: profile.photoURL
+        })
+      ]);
 
       setRequestSuccess(`Friend request sent to ${targetUser.displayName}!`);
       setSearchUsername('');
@@ -308,17 +280,44 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
     }
   };
 
-  const handleAcceptRequest = async (reqId: string) => {
+  const handleAcceptRequest = async (friendUid: string) => {
+    if (!user || !profile) return;
     try {
-      await setDoc(doc(db, 'friendships', reqId), { status: 'accepted' }, { merge: true });
+      const docA = doc(db, 'users', user.uid, 'friends', friendUid);
+      const docB = doc(db, 'users', friendUid, 'friends', user.uid);
+      const now = Date.now();
+
+      const friendSnap = await getDoc(doc(db, 'users', friendUid));
+      const friendData = friendSnap.exists() ? friendSnap.data() : {};
+
+      await Promise.all([
+        setDoc(docA, {
+          status: 'accepted',
+          friendSince: now,
+          displayName: friendData.displayName || 'Chess Player',
+          photoURL: friendData.photoURL || ''
+        }, { merge: true }),
+        setDoc(docB, {
+          status: 'accepted',
+          friendSince: now,
+          displayName: profile.displayName,
+          photoURL: profile.photoURL
+        }, { merge: true })
+      ]);
     } catch (err) {
       console.error('Failed to accept request:', err);
     }
   };
 
-  const handleDeclineRequest = async (reqId: string) => {
+  const handleDeclineRequest = async (friendUid: string) => {
+    if (!user) return;
     try {
-      await deleteDoc(doc(db, 'friendships', reqId));
+      const docA = doc(db, 'users', user.uid, 'friends', friendUid);
+      const docB = doc(db, 'users', friendUid, 'friends', user.uid);
+      await Promise.all([
+        deleteDoc(docA),
+        deleteDoc(docB)
+      ]);
     } catch (err) {
       console.error('Failed to decline request:', err);
     }
@@ -328,10 +327,11 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
     if (!user || !profile || !activeChallengeFriend) return;
 
     const modeConfig = CHALLENGE_MODES[selectedModeIdx];
-    const stake = challengeType === 'friendly' ? 0 : (modeConfig.price === 'all_in' ? profile.bankBalance : (modeConfig.price as number));
+    const balance = profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance;
+    const stake = challengeType === 'friendly' ? 0 : (modeConfig.price === 'all_in' ? balance : (modeConfig.price as number));
 
     if (challengeType === 'arena') {
-      if (profile.bankBalance < stake || stake <= 0) {
+      if (balance < stake || stake <= 0) {
         setChallengeError(`You have insufficient coins (${formatCoins(stake)} needed).`);
         return;
       }
@@ -341,7 +341,12 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
     setChallengeError('');
 
     try {
-      await addDoc(collection(db, 'challenges'), {
+      const challengeCol = collection(db, 'challenges');
+      const newChallengeDocRef = doc(challengeCol);
+      const challengeId = newChallengeDocRef.id;
+
+      const challengeObj = {
+        challengeId,
         challengerUid: user.uid,
         challengedUid: activeChallengeFriend.uid,
         mode: modeConfig.id,
@@ -350,7 +355,17 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         matchId: null,
         createdAt: Date.now(),
         ...(challengeType === 'friendly' ? { colorChoice: selectedColor } : {})
-      } as FriendlyChallenge);
+      };
+
+      await setDoc(newChallengeDocRef, challengeObj);
+
+      const challengerFCDocRef = doc(db, 'users', user.uid, 'friendlyChallenges', challengeId);
+      const challengedFCDocRef = doc(db, 'users', activeChallengeFriend.uid, 'friendlyChallenges', challengeId);
+
+      await Promise.all([
+        setDoc(challengerFCDocRef, challengeObj),
+        setDoc(challengedFCDocRef, challengeObj)
+      ]);
 
       setActiveChallengeFriend(null);
     } catch (err: any) {
@@ -380,9 +395,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
     }
   };
 
-  const handleDeclineChallenge = async (chId: string) => {
+  const handleDeclineChallenge = async (ch: FriendlyChallenge) => {
     try {
-      await setDoc(doc(db, 'challenges', chId), { status: 'declined' }, { merge: true });
+      const batchUpdates = [
+        setDoc(doc(db, 'challenges', ch.id!), { status: 'declined' }, { merge: true }),
+        setDoc(doc(db, 'users', ch.challengerUid, 'friendlyChallenges', ch.id!), { status: 'declined' }, { merge: true }),
+        setDoc(doc(db, 'users', ch.challengedUid, 'friendlyChallenges', ch.id!), { status: 'declined' }, { merge: true })
+      ];
+      await Promise.all(batchUpdates);
     } catch (err) {
       console.error('Failed to decline challenge:', err);
     }
@@ -468,7 +488,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                         {isAcceptingChallenge === ch.id ? 'Starting…' : 'Accept & Play'}
                       </button>
                       <button
-                        onClick={() => handleDeclineChallenge(ch.id!)}
+                        onClick={() => handleDeclineChallenge(ch)}
                         disabled={isAcceptingChallenge === ch.id}
                         className="bg-red-500/10 hover:bg-red-600 hover:text-white text-red-400 border border-red-500/20 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
                       >
@@ -677,7 +697,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                         </span>
                       </div>
                       <button
-                        onClick={() => handleDeclineChallenge(ch.id!)}
+                        onClick={() => handleDeclineChallenge(ch)}
                         className="p-1 hover:bg-white/5 rounded text-slate-500 hover:text-red-400 transition-all cursor-pointer"
                         title="Cancel Invite"
                       >
@@ -919,7 +939,6 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
           return (
             <FriendChatModal
               friend={openChatFriend}
-              friendship={openChatFriendship}
               onClose={() => setOpenChatFriend(null)}
             />
           );
@@ -932,28 +951,32 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
 
 interface FriendChatModalProps {
   friend: UserProfile;
-  friendship: Friendship;
   onClose: () => void;
 }
 
-const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, onClose }) => {
+const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClose }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<{ id: string; senderUid: string; text: string; createdAt: number }[]>([]);
   const [input, setInput] = useState('');
   const chatEndRef = React.useRef<HTMLDivElement>(null);
 
-  // Clean up messages older than 7 days on load
+  const getThreadId = (uid1: string, uid2: string) => {
+    return [uid1, uid2].sort().join('_');
+  };
+
+  // Clean up messages older than 24 hours on load
   useEffect(() => {
-    if (!friendship.id) return;
+    if (!user) return;
     const cleanup = async () => {
       try {
-        const q = collection(db, 'friendships', friendship.id!, 'messages');
+        const threadId = getThreadId(user.uid, friend.uid);
+        const q = collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages');
         const snap = await getDocs(q);
-        const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
         snap.docs.forEach((docSnap) => {
           const data = docSnap.data();
           if (data.createdAt < cutoff) {
-            deleteDoc(doc(db, 'friendships', friendship.id!, 'messages', docSnap.id)).catch(console.warn);
+            deleteDoc(doc(db, 'users', user.uid, 'chatThreads', threadId, 'messages', docSnap.id)).catch(console.warn);
           }
         });
       } catch (err) {
@@ -961,19 +984,20 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
       }
     };
     cleanup();
-  }, [friendship.id]);
+  }, [user, friend.uid]);
 
   // Subscribe to messages
   useEffect(() => {
-    if (!friendship.id) return;
+    if (!user) return;
     let isInitial = true;
+    const threadId = getThreadId(user.uid, friend.uid);
     const q = query(
-      collection(db, 'friendships', friendship.id!, 'messages'),
+      collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
       orderBy('createdAt', 'asc')
     );
     const unsubscribe = onSnapshot(q, (snap) => {
       const msgs: any[] = [];
-      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       snap.forEach((docSnap) => {
         const data = docSnap.data();
         if (data.createdAt >= cutoff) {
@@ -999,7 +1023,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
       isInitial = false;
     });
     return () => unsubscribe();
-  }, [friendship.id, user?.uid]);
+  }, [user, friend.uid]);
 
   // Auto-scroll
   useEffect(() => {
@@ -1008,15 +1032,26 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || !user || !friendship.id) return;
+    if (!input.trim() || !user) return;
     const text = input.trim();
     setInput('');
     try {
-      await addDoc(collection(db, 'friendships', friendship.id!, 'messages'), {
+      const threadId = getThreadId(user.uid, friend.uid);
+      const msgColA = collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages');
+      const msgColB = collection(db, 'users', friend.uid, 'chatThreads', threadId, 'messages');
+      
+      const newMsgId = doc(msgColA).id;
+      const msgData = {
+        id: newMsgId,
         senderUid: user.uid,
         text,
-        createdAt: Date.now(),
-      });
+        createdAt: Date.now()
+      };
+
+      await Promise.all([
+        setDoc(doc(msgColA, newMsgId), msgData),
+        setDoc(doc(msgColB, newMsgId), msgData)
+      ]);
     } catch (err) {
       console.error("Failed to send message:", err);
     }
@@ -1031,7 +1066,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, friendship, o
             <img src={friend.photoURL} alt={friend.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10" />
             <div>
               <h3 className="text-sm font-bold text-slate-200">{friend.displayName}</h3>
-              <p className="text-[10px] text-slate-500">Messages saved for 1 week</p>
+              <p className="text-[10px] text-slate-500">Messages auto-deleted after 24 hours</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer">
