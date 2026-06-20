@@ -7,7 +7,7 @@ import { ChessGame } from './components/ChessGame';
 import { LedgerHistory } from './components/LedgerHistory';
 import { Leaderboard } from './components/Leaderboard';
 import { ProfileView } from './components/ProfileView';
-import { SocialView } from './components/SocialView';
+import { SocialView, FriendChatModal } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
@@ -17,7 +17,7 @@ import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
-import { getSoundSettings } from './utils/sound';
+import { getSoundSettings, playNotifySound } from './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
 import { createPracticeMatch } from './game/gameService';
 
@@ -36,6 +36,11 @@ const AppContent: React.FC = () => {
   }, []);
 
   const knightImgSrc = `/pieces/${settings.pieceTheme || 'classic'}/wn.png`;
+
+  // Chat notification states
+  const [openChatFriend, setOpenChatFriend] = useState<UserProfile | null>(null);
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [friendsUids, setFriendsUids] = useState<string[]>([]);
 
   // Play modal state
   const [isPlayModalOpen, setIsPlayModalOpen] = useState(false);
@@ -337,6 +342,108 @@ const AppContent: React.FC = () => {
     }
   };
 
+  // Listen to accepted friends to subscribe to their chats
+  useEffect(() => {
+    if (!user) {
+      setFriendsUids([]);
+      return;
+    }
+    const q = collection(db, 'users', user.uid, 'friends');
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const uids: string[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.status === 'accepted') {
+          uids.push(docSnap.id);
+        }
+      });
+      setFriendsUids(uids);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // Subscribe to each friend's chat thread messages
+  useEffect(() => {
+    if (!user || friendsUids.length === 0) {
+      setUnreadCounts({});
+      return;
+    }
+
+    const unsubscribers: (() => void)[] = [];
+    
+    friendsUids.forEach((friendUid) => {
+      const threadId = [user.uid, friendUid].sort().join('_');
+      const q = query(
+        collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
+        orderBy('createdAt', 'asc')
+      );
+
+      let isInitial = true;
+
+      const unsub = onSnapshot(q, (snap) => {
+        const isCurrentChatOpen = openChatFriend?.uid === friendUid;
+        if (isCurrentChatOpen) {
+          localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+        }
+        const lastRead = parseInt(localStorage.getItem(`lastRead_${threadId}`) || '0');
+        let unread = 0;
+        let hasNewMessage = false;
+
+        snap.forEach((docSnap) => {
+          const msg = docSnap.data();
+          if (msg.senderUid !== user.uid && msg.createdAt > lastRead) {
+            unread++;
+          }
+        });
+
+        // Check if a new message was added after initial load
+        if (!isInitial) {
+          snap.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const msg = change.doc.data();
+              if (msg.senderUid !== user.uid && msg.createdAt > lastRead) {
+                hasNewMessage = true;
+              }
+            }
+          });
+        }
+
+        setUnreadCounts((prev) => ({
+          ...prev,
+          [friendUid]: unread
+        }));
+
+        if (hasNewMessage && view !== 'game' && !isCurrentChatOpen) {
+          const currentSettings = getSoundSettings();
+          if (!currentSettings.muted) {
+            playNotifySound();
+          }
+        }
+
+        isInitial = false;
+      }, (err) => {
+        console.warn(`Error listening to messages for friend ${friendUid}:`, err);
+      });
+
+      unsubscribers.push(unsub);
+    });
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [user, friendsUids, openChatFriend, view]);
+
+  // Automatically clear unread counts when opening a chat
+  useEffect(() => {
+    if (!user || !openChatFriend) return;
+    const threadId = [user.uid, openChatFriend.uid].sort().join('_');
+    localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+    setUnreadCounts((prev) => ({
+      ...prev,
+      [openChatFriend.uid]: 0
+    }));
+  }, [user, openChatFriend]);
+
   // 2. Fetch User's matches (for resuming or match logs)
   const fetchRecentMatches = async () => {
     if (!user) return;
@@ -613,6 +720,9 @@ const AppContent: React.FC = () => {
     );
   }
 
+  // Calculate total unread chats
+  const totalUnreadChats = Object.values(unreadCounts).reduce((sum, val) => sum + val, 0);
+
   // Router for Authenticated Application Views
   return (
     <div className="min-h-screen bg-transparent flex flex-col">
@@ -624,6 +734,7 @@ const AppContent: React.FC = () => {
         currentView={view}
         isGameActive={view === 'game'}
         onAddFunds={() => setIsAddFundsOpen(true)}
+        unreadChatsCount={totalUnreadChats}
       />
 
       <main className="flex-grow">
@@ -650,6 +761,8 @@ const AppContent: React.FC = () => {
               setView('game');
               setActiveMatchId(matchId);
             }}
+            setOpenChatFriend={setOpenChatFriend}
+            unreadCounts={unreadCounts}
           />
         )}
 
@@ -1175,6 +1288,13 @@ const AppContent: React.FC = () => {
         <ProfilePopup 
           profile={selectedProfile} 
           onClose={() => setSelectedProfile(null)} 
+        />
+      )}
+
+      {openChatFriend && (
+        <FriendChatModal
+          friend={openChatFriend}
+          onClose={() => setOpenChatFriend(null)}
         />
       )}
     </div>

@@ -609,10 +609,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       });
       setGameMessages(msgs);
 
-      if (activeRightTab !== 'chat') {
-        setUnreadGameMsgs((prev) => prev + 1);
-      }
-
       if (!isInitial) {
         let hasNewFromOther = false;
         snap.docChanges().forEach((change) => {
@@ -625,6 +621,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         });
         if (hasNewFromOther) {
           playNotifySound();
+          if (activeRightTab !== 'chat') {
+            setUnreadGameMsgs((prev) => prev + 1);
+          }
         }
       }
       isInitial = false;
@@ -1185,9 +1184,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       </div>
 
       {/* Right Column: Actions, Players, Clocks, Info, Moves */}
-      <div className="flex-grow flex flex-col p-4 lg:p-6 bg-slate-950/20 border-t lg:border-t-0 lg:border-l border-white/5 lg:h-full lg:overflow-hidden justify-between space-y-3">
-          {/* Header Action Menu */}
-          <div className="flex items-center justify-between border-b border-white/5 pb-3">
+      <div className="flex-grow flex flex-col p-4 lg:p-5 bg-slate-950/20 border-t lg:border-t-0 lg:border-l border-white/5 lg:h-full lg:overflow-hidden space-y-2.5">
+          {/* Header Action Menu & Game Info */}
+          <div className="flex items-center justify-between border-b border-white/5 pb-2.5 shrink-0">
             <button
               onClick={handleExit}
               className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-xs font-semibold cursor-pointer"
@@ -1195,6 +1194,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               <ArrowLeft className="w-4 h-4" />
               <span>Exit Match</span>
             </button>
+
+            {/* Mode & Prize capsule */}
+            <div className="flex items-center space-x-1.5 px-3 py-1 bg-slate-900/60 border border-white/5 rounded-full text-[11px] font-medium text-slate-300">
+              <span className="capitalize">{match.mode.replace('_', ' ')}</span>
+              {match.mode !== 'practice' && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <div className="flex items-center space-x-1 text-amber-400 font-bold">
+                    <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain" />
+                    <span>
+                      {formatCoins(
+                        match.mode === 'all_in' && match.allInStakes
+                          ? Object.values(match.allInStakes).reduce((sum, val) => sum + val, 0)
+                          : match.stake * 2
+                      )}
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
 
             <button
               onClick={() => setShowSettingsModal(true)}
@@ -1205,31 +1224,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </button>
           </div>
 
-          {/* Prize and Mode Info */}
-          <div className="grid grid-cols-2 gap-4 bg-slate-900/60 p-3 rounded-xl border border-white/5 text-left">
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Total Prize Pool</p>
-              <p className="text-base font-bold text-amber-400 flex items-center space-x-1.5 mt-0.5">
-                <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4.5 h-4.5 object-contain" />
-                <span>
-                  {formatCoins(
-                    match.mode === 'all_in' && match.allInStakes
-                      ? Object.values(match.allInStakes).reduce((sum, val) => sum + val, 0)
-                      : match.stake * 2
-                  )}
-                </span>
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Game Mode</p>
-              <p className="text-xs font-bold text-slate-300 capitalize mt-1.5">
-                {match.mode.replace('_', ' ')}
-              </p>
-            </div>
-          </div>
-
           {/* Opponent Profile and Clock */}
-          <div className="flex items-center justify-between glass px-4 py-2.5 rounded-lg border border-white/5 bg-slate-900/10">
+          <div className="flex items-center justify-between glass px-3 py-2 rounded-lg border border-white/5 bg-slate-900/10 shrink-0">
             <div className="flex items-center space-x-3 text-left">
               <div 
                 className="relative cursor-pointer hover:opacity-85 transition-all"
@@ -1239,7 +1235,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 <img
                   src={oppProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
                   alt={oppProfile?.displayName || 'Opponent'}
-                  className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
+                  className="w-8 h-8 rounded-full object-cover ring-2 ring-slate-800"
                 />
                 <span className={`absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#121318] ${
                   (isOpponentDisconnected && match.mode !== 'practice') ? 'bg-red-500' : 'bg-emerald-500'
@@ -1250,7 +1246,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <span>{oppProfile?.displayName || 'Opponent'} {isWhite ? '(Black)' : '(White)'}</span>
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
-                  <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
+                  <span className="text-[10px] text-slate-500 flex items-center space-x-0.5 animate-fade-in">
                     <Award className="w-2.5 h-2.5 text-violet-500" />
                     <span>Elo {oppProfile?.currentEloRating !== undefined ? oppProfile.currentEloRating : (oppProfile?.rating || '---')}</span>
                   </span>
@@ -1284,8 +1280,182 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             </div>
           </div>
 
+          {/* Disconnection Warning Message */}
+          {match.status === 'active' && match.mode !== 'practice' && isOpponentDisconnected && (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg flex items-center justify-between text-amber-300 animate-pulse text-xs text-left shrink-0">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
+                <span>Reconnecting your opponent...</span>
+              </div>
+              <span className="font-mono bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20">
+                {reconnectCountdown}s
+              </span>
+            </div>
+          )}
+
+          {/* Middle Section: Tab Switcher & Content Panel (Flex container that expands to fill remaining space) */}
+          <div className="flex-grow flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-900/10 border border-white/5 rounded-xl">
+            {/* Tabs for Moves and Chat */}
+            {match.mode !== 'practice' && (
+              <div className="flex border-b border-white/5 shrink-0 bg-slate-950/20">
+                <button
+                  onClick={() => setActiveRightTab('moves')}
+                  className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer ${
+                    activeRightTab === 'moves'
+                      ? 'border-violet-500 text-white'
+                      : 'border-transparent text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  Moves Log
+                </button>
+                <button
+                  onClick={() => setActiveRightTab('chat')}
+                  className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer relative ${
+                    activeRightTab === 'chat'
+                      ? 'border-violet-500 text-white'
+                      : 'border-transparent text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  <span>Live Chat</span>
+                  {unreadGameMsgs > 0 && (
+                    <span className="absolute top-1 right-4 w-2 h-2 bg-red-500 rounded-full" />
+                  )}
+                </button>
+              </div>
+            )}
+
+            {/* Content Container (scrolls only inside the lists) */}
+            <div className="flex-grow flex flex-col min-h-0 overflow-hidden relative">
+              {(match.mode === 'practice' ? 'moves' : activeRightTab) === 'moves' ? (
+                /* Moves List Log */
+                <div className="p-3 flex-grow flex flex-col min-h-0 overflow-hidden animate-fade-in">
+                  <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
+                    {match.moves.length === 0 ? (
+                      <p className="text-slate-600 text-xs italic">No moves played yet.</p>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                        {match.moves.reduce((acc: React.ReactNode[], move, idx) => {
+                          if (idx % 2 === 0) {
+                            const moveNumber = Math.floor(idx / 2) + 1;
+                            acc.push(
+                              <div key={idx} className="flex justify-between border-b border-white/5 py-0.5 animate-fade-in">
+                                <span className="text-slate-500 w-5">{moveNumber}.</span>
+                                <span className="text-slate-300 font-medium text-right flex-grow">{move}</span>
+                              </div>
+                            );
+                          } else {
+                            acc.push(
+                              <div key={idx} className="flex justify-end border-b border-white/5 py-0.5 animate-fade-in">
+                                <span className="text-slate-400 font-medium">{move}</span>
+                              </div>
+                            );
+                          }
+                          return acc;
+                        }, [])}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* Live Chat Panel */
+                <div className="p-3 flex-grow flex flex-col min-h-0 overflow-hidden justify-between animate-fade-in">
+                  <div className="overflow-y-auto pr-2 text-left space-y-2 flex-grow scrollbar-thin text-xs">
+                    {gameMessages.length === 0 ? (
+                      <p className="text-slate-600 text-xs italic">No messages yet. Send a friendly greeting!</p>
+                    ) : (
+                      gameMessages.map((msg) => {
+                        const isMe = msg.senderUid === user?.uid;
+                        const senderName = isMe ? 'You' : (oppProfile?.displayName || 'Opponent');
+                        return (
+                          <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} animate-fade-in`}>
+                            <span className="text-[9px] text-slate-500">{senderName}</span>
+                            <div className={`mt-0.5 px-2.5 py-1.5 rounded-lg max-w-[85%] break-words ${
+                              isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
+                            }`}>
+                              {msg.text}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+                  
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!gameMsgInput.trim() || !user) return;
+                      const text = gameMsgInput.trim();
+                      setGameMsgInput('');
+                      try {
+                        await addDoc(collection(db, 'matches', matchId, 'messages'), {
+                          senderUid: user.uid,
+                          text,
+                          createdAt: Date.now()
+                        });
+                      } catch (err) {
+                        console.warn("Failed to send game message:", err);
+                      }
+                    }}
+                    className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5 shrink-0"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Send a message..."
+                      value={gameMsgInput}
+                      onChange={(e) => setGameMsgInput(e.target.value)}
+                      className="flex-grow bg-slate-950/60 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+                    />
+                    <button
+                      type="submit"
+                      className="bg-violet-600 hover:bg-violet-500 text-white p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Action Panel (Offer Draw / Resign) */}
+          {match.status === 'active' && (
+            <div className="bg-slate-900/10 p-2.5 rounded-xl border border-white/5 space-y-2 shrink-0">
+              <div className="grid grid-cols-2 gap-2">
+                {match.mode !== 'practice' && (
+                  <button
+                    onClick={handleDrawAction}
+                    className={`flex flex-col items-center justify-center py-2 px-3 rounded-lg border transition-all ${
+                      hasOpponentDrawOffer
+                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 font-bold'
+                        : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400 hover:text-white'
+                    } text-xs font-semibold cursor-pointer`}
+                  >
+                    <span>{hasOpponentDrawOffer ? 'Accept Draw' : 'Offer Draw'}</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={handleResign}
+                  className={`flex flex-col items-center justify-center py-2 px-3 rounded-lg border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer ${
+                    match.mode === 'practice' ? 'col-span-2' : ''
+                  }`}
+                >
+                  <span>Resign Game</span>
+                </button>
+              </div>
+
+              {hasOpponentDrawOffer && (
+                <div className="flex items-center space-x-2 text-emerald-400 text-[10px] bg-emerald-950/20 border border-emerald-900/30 p-2 rounded-lg text-left">
+                  <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0 animate-bounce" />
+                  <span>Opponent offered a draw. Accept draw or make a move to decline.</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Player Profile and Clock */}
-          <div className="flex items-center justify-between glass px-4 py-2.5 rounded-lg border border-white/5 bg-slate-900/10">
+          <div className="flex items-center justify-between glass px-3 py-2 rounded-lg border border-white/5 bg-slate-900/10 shrink-0">
             <div className="flex items-center space-x-3 text-left">
               <div 
                 className="relative cursor-pointer hover:opacity-85 transition-all"
@@ -1295,7 +1465,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 <img
                   src={myProfile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
                   alt={myProfile?.displayName || 'Player'}
-                  className="w-9 h-9 rounded-full object-cover ring-2 ring-slate-800"
+                  className="w-8 h-8 rounded-full object-cover ring-2 ring-slate-800"
                 />
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border border-[#121318] bg-emerald-500" />
               </div>
@@ -1304,7 +1474,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <span>{myProfile?.displayName || 'You'} {isWhite ? '(White)' : '(Black)'}</span>
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
-                  <span className="text-[10px] text-slate-500 flex items-center space-x-0.5">
+                  <span className="text-[10px] text-slate-500 flex items-center space-x-0.5 animate-fade-in">
                     <Award className="w-2.5 h-2.5 text-violet-500" />
                     <span>Elo {myProfile?.currentEloRating !== undefined ? myProfile.currentEloRating : (myProfile?.rating || '---')}</span>
                   </span>
@@ -1337,174 +1507,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               <span>{match.mode === 'practice' ? '∞' : formatClock(myClock)}</span>
             </div>
           </div>
-
-          {/* Disconnection Warning Message */}
-          {match.status === 'active' && match.mode !== 'practice' && isOpponentDisconnected && (
-            <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl flex items-center justify-between text-amber-300 animate-pulse text-xs text-left">
-              <div className="flex items-center space-x-2">
-                <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
-                <span>Reconnecting your opponent...</span>
-              </div>
-              <span className="font-mono bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20">
-                {reconnectCountdown}s
-              </span>
-            </div>
-          )}
-
-          {/* Action Panel */}
-          {match.status === 'active' ? (
-            <div className="glass p-4 rounded-xl border border-white/5 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                {match.mode !== 'practice' && (
-                  <button
-                    onClick={handleDrawAction}
-                    className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all ${
-                      hasOpponentDrawOffer
-                        ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300 font-bold'
-                        : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400 hover:text-white'
-                    } text-xs font-semibold cursor-pointer`}
-                  >
-                    <span>{hasOpponentDrawOffer ? 'Accept Draw' : 'Offer Draw'}</span>
-                  </button>
-                )}
-
-                <button
-                  onClick={handleResign}
-                  className={`flex flex-col items-center justify-center p-2 rounded-xl border border-white/5 bg-slate-950/40 hover:bg-red-500/10 text-slate-400 hover:text-red-400 text-xs font-semibold transition-all cursor-pointer ${
-                    match.mode === 'practice' ? 'col-span-2' : ''
-                  }`}
-                >
-                  <span>Resign Game</span>
-                </button>
-              </div>
-
-              {hasOpponentDrawOffer && (
-                <div className="flex items-center space-x-2 text-emerald-400 text-[10px] bg-emerald-950/20 border border-emerald-900/30 p-2 rounded-lg text-left">
-                  <ShieldAlert className="w-3.5 h-3.5 flex-shrink-0 animate-bounce" />
-                  <span>Opponent offered a draw. Accept draw or make a move to decline.</span>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          {/* Tabs for Moves and Chat */}
-          {match.mode !== 'practice' && (
-            <div className="flex border-b border-white/5 shrink-0">
-              <button
-                onClick={() => setActiveRightTab('moves')}
-                className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer ${
-                  activeRightTab === 'moves'
-                    ? 'border-violet-500 text-white'
-                    : 'border-transparent text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                Moves Log
-              </button>
-              <button
-                onClick={() => setActiveRightTab('chat')}
-                className={`flex-grow py-2 text-center text-xs font-bold transition-all border-b-2 cursor-pointer relative ${
-                  activeRightTab === 'chat'
-                    ? 'border-violet-500 text-white'
-                    : 'border-transparent text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                <span>Live Chat</span>
-                {unreadGameMsgs > 0 && (
-                  <span className="absolute top-1 right-4 w-2 h-2 bg-red-500 rounded-full animate-ping" />
-                )}
-              </button>
-            </div>
-          )}
-
-          {(match.mode === 'practice' ? 'moves' : activeRightTab) === 'moves' ? (
-            /* Moves List Log */
-            <div className="glass p-3 rounded-xl border border-white/5 flex-grow flex flex-col h-0 min-h-[120px] lg:min-h-0 animate-fade-in">
-              <div className="overflow-y-auto pr-2 text-left space-y-1 font-mono text-[10px] flex-grow scrollbar-thin">
-                {match.moves.length === 0 ? (
-                  <p className="text-slate-600 text-xs italic">No moves played yet.</p>
-                ) : (
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                    {match.moves.reduce((acc: React.ReactNode[], move, idx) => {
-                      if (idx % 2 === 0) {
-                        const moveNumber = Math.floor(idx / 2) + 1;
-                        acc.push(
-                          <div key={idx} className="flex justify-between border-b border-white/5 py-0.5">
-                            <span className="text-slate-500 w-5">{moveNumber}.</span>
-                            <span className="text-slate-300 font-medium text-right flex-grow">{move}</span>
-                          </div>
-                        );
-                      } else {
-                        acc.push(
-                          <div key={idx} className="flex justify-end border-b border-white/5 py-0.5">
-                            <span className="text-slate-400 font-medium">{move}</span>
-                          </div>
-                        );
-                      }
-                      return acc;
-                    }, [])}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Live Chat Panel */
-            <div className="glass p-3 rounded-xl border border-white/5 flex-grow flex flex-col h-0 min-h-[120px] lg:min-h-0 justify-between animate-fade-in">
-              <div className="overflow-y-auto pr-2 text-left space-y-2 flex-grow scrollbar-thin text-xs">
-                {gameMessages.length === 0 ? (
-                  <p className="text-slate-600 text-xs italic">No messages yet. Send a friendly greeting!</p>
-                ) : (
-                  gameMessages.map((msg) => {
-                    const isMe = msg.senderUid === user?.uid;
-                    const senderName = isMe ? 'You' : (oppProfile?.displayName || 'Opponent');
-                    return (
-                      <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                        <span className="text-[9px] text-slate-500">{senderName}</span>
-                        <div className={`mt-0.5 px-2.5 py-1.5 rounded-lg max-w-[85%] break-words ${
-                          isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
-                        }`}>
-                          {msg.text}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                <div ref={chatEndRef} />
-              </div>
-              
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  if (!gameMsgInput.trim() || !user) return;
-                  const text = gameMsgInput.trim();
-                  setGameMsgInput('');
-                  try {
-                    await addDoc(collection(db, 'matches', matchId, 'messages'), {
-                      senderUid: user.uid,
-                      text,
-                      createdAt: Date.now()
-                    });
-                  } catch (err) {
-                    console.warn("Failed to send game message:", err);
-                  }
-                }}
-                className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5 shrink-0"
-              >
-                <input
-                  type="text"
-                  placeholder="Send a message..."
-                  value={gameMsgInput}
-                  onChange={(e) => setGameMsgInput(e.target.value)}
-                  className="flex-grow bg-slate-950/60 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
-                />
-                <button
-                  type="submit"
-                  className="bg-violet-600 hover:bg-violet-500 text-white p-1.5 rounded-lg transition-all cursor-pointer"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              </form>
-            </div>
-          )}
         </div>
 
       {/* ── Pawn Promotion Choice Modal ── */}

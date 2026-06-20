@@ -122,7 +122,7 @@ export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile>
         photoURL: updatedProfile.photoURL,
         totalGamesPlayed: (updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0),
         winRateRatio: ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0)) > 0
-          ? (updatedProfile.wins || 0) / ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0))
+          ? Math.round(((updatedProfile.wins || 0) / ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0))) * 100)
           : 0,
         gameplayCounts: updatedProfile.gameplayCounts || {},
         updatedAt: now

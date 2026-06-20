@@ -13,6 +13,8 @@ import { ProfilePopup } from './ProfilePopup';
 interface SocialViewProps {
   onBack: () => void;
   onStartGame: (matchId: string) => void;
+  setOpenChatFriend: (friend: UserProfile | null) => void;
+  unreadCounts: Record<string, number>;
 }
 
 const CHALLENGE_MODES = [
@@ -29,7 +31,7 @@ const CHALLENGE_MODES = [
   { id: 'all_in' as GameMode, label: 'All In ‼️', price: 'all_in', tc: '10 | 5' }
 ];
 
-export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) => {
+export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, setOpenChatFriend, unreadCounts }) => {
   const { user, profile } = useAuth();
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
@@ -50,7 +52,6 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
 
   // Active Challenge Modal State
   const [activeChallengeFriend, setActiveChallengeFriend] = useState<UserProfile | null>(null);
-  const [openChatFriend, setOpenChatFriend] = useState<UserProfile | null>(null);
   const [challengeType, setChallengeType] = useState<'friendly' | 'arena'>('friendly');
   const [selectedColor, setSelectedColor] = useState<'white' | 'black' | 'random'>('random');
   const [selectedModeIdx, setSelectedModeIdx] = useState(0);
@@ -619,10 +620,15 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
                         {/* Chat Button */}
                         <button
                           onClick={() => setOpenChatFriend(fProfile)}
-                          className="flex items-center justify-center bg-slate-900/60 hover:bg-violet-600 hover:text-white text-slate-400 hover:scale-105 border border-white/5 w-8 h-8 rounded-lg transition-all cursor-pointer"
+                          className="relative flex items-center justify-center bg-slate-900/60 hover:bg-violet-600 hover:text-white text-slate-400 hover:scale-105 border border-white/5 w-8 h-8 rounded-lg transition-all cursor-pointer"
                           title="Chat with Friend"
                         >
                           <MessageSquare className="w-4 h-4" />
+                          {unreadCounts[fProfile.uid] > 0 && (
+                            <span className="absolute -top-1.5 -right-1.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-1 ring-slate-950 animate-pulse">
+                              {unreadCounts[fProfile.uid]}
+                            </span>
+                          )}
                         </button>
 
                         {/* Inline Challenge Button */}
@@ -928,33 +934,16 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame }) =
         />
       )}
 
-      {/* Friend Chat Modal Overlay */}
-      {(() => {
-        const openChatFriendship = openChatFriend && friendships.find(
-          (f) =>
-            (f.requesterUid === user?.uid && f.receiverUid === openChatFriend.uid) ||
-            (f.requesterUid === openChatFriend.uid && f.receiverUid === user?.uid)
-        );
-        if (openChatFriend && openChatFriendship) {
-          return (
-            <FriendChatModal
-              friend={openChatFriend}
-              onClose={() => setOpenChatFriend(null)}
-            />
-          );
-        }
-        return null;
-      })()}
     </div>
   );
 };
 
-interface FriendChatModalProps {
+export interface FriendChatModalProps {
   friend: UserProfile;
   onClose: () => void;
 }
 
-const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClose }) => {
+export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClose }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<{ id: string; senderUid: string; text: string; createdAt: number }[]>([]);
   const [input, setInput] = useState('');
@@ -1058,7 +1047,7 @@ const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClose }) =>
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
+    <div className="fixed top-[77px] bottom-0 left-0 right-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
       <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl h-[500px]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-slate-900/40">

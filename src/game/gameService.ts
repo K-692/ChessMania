@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, runTransaction, collection, getDoc, getDocs, query, where, setDoc } from 'firebase/firestore';
+import { doc, runTransaction, collection, setDoc } from 'firebase/firestore';
 import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -160,34 +160,6 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
   const matchDocRef = doc(db, 'matches', matchId);
   const ledgerCol = collection(db, 'transactions');
 
-  // Query friendship document before transaction (use single-field queries to avoid composite index requirement)
-  const matchSnapOuter = await getDoc(matchDocRef);
-  let friendshipDocRef: any = null;
-  if (matchSnapOuter.exists()) {
-    const matchData = matchSnapOuter.data() as Match;
-    const p1Uid = matchData.players[0];
-    const p2Uid = matchData.players[1];
-    if (p1Uid && p2Uid) {
-      const friendshipsRef = collection(db, 'friendships');
-      // Query by requesterUid only, then filter client-side for receiverUid and status
-      const q1 = query(friendshipsRef, where('requesterUid', '==', p1Uid));
-      const q2 = query(friendshipsRef, where('requesterUid', '==', p2Uid));
-      const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-
-      // Find the doc where p1 requested p2 and it's accepted
-      const doc1 = snap1.docs.find(d => d.data().receiverUid === p2Uid && d.data().status === 'accepted');
-      if (doc1) {
-        friendshipDocRef = doc(db, 'friendships', doc1.id);
-      } else {
-        // Find the doc where p2 requested p1 and it's accepted
-        const doc2 = snap2.docs.find(d => d.data().receiverUid === p1Uid && d.data().status === 'accepted');
-        if (doc2) {
-          friendshipDocRef = doc(db, 'friendships', doc2.id);
-        }
-      }
-    }
-  }
-
   await runTransaction(db, async (transaction) => {
     const matchSnap = await transaction.get(matchDocRef);
     if (!matchSnap.exists()) return;
@@ -306,7 +278,7 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     else if (matchData.winnerUid === p1Uid) p1Wins++;
     else p1Losses++;
     const p1TotalGamesPlayed = p1Wins + p1Losses + p1Draws;
-    const p1WinRateRatio = p1TotalGamesPlayed > 0 ? p1Wins / p1TotalGamesPlayed : 0;
+    const p1WinRateRatio = p1TotalGamesPlayed > 0 ? Math.round((p1Wins / p1TotalGamesPlayed) * 100) : 0;
 
     const p2Counts = p2Profile.gameplayCounts || {};
     const newP2Counts = { ...p2Counts, [matchData.mode]: (p2Counts[matchData.mode] || 0) + 1 };
@@ -317,7 +289,7 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
     else if (matchData.winnerUid === p2Uid) p2Wins++;
     else p2Losses++;
     const p2TotalGamesPlayed = p2Wins + p2Losses + p2Draws;
-    const p2WinRateRatio = p2TotalGamesPlayed > 0 ? p2Wins / p2TotalGamesPlayed : 0;
+    const p2WinRateRatio = p2TotalGamesPlayed > 0 ? Math.round((p2Wins / p2TotalGamesPlayed) * 100) : 0;
 
     // Update profiles
     transaction.update(p1UserRef, {
@@ -455,26 +427,46 @@ export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
       updatedAt: now
     }, { merge: true });
 
-    // Update friendship H2H statistics if friendship exists
-    if (friendshipDocRef) {
-      const friendshipSnap = await transaction.get(friendshipDocRef);
-      if (friendshipSnap.exists()) {
-        const stats = (friendshipSnap.data() as any).stats || {};
-        if (!stats[p1Uid]) stats[p1Uid] = { wins: 0, losses: 0, draws: 0 };
-        if (!stats[p2Uid]) stats[p2Uid] = { wins: 0, losses: 0, draws: 0 };
+    // Update friendship H2H statistics in both users' friends subcollections if they exist
+    const p1FriendDocRef = doc(db, 'users', p1Uid, 'friends', p2Uid);
+    const p2FriendDocRef = doc(db, 'users', p2Uid, 'friends', p1Uid);
 
-        if (isDraw) {
-          stats[p1Uid].draws += 1;
-          stats[p2Uid].draws += 1;
-        } else if (matchData.winnerUid === p1Uid) {
-          stats[p1Uid].wins += 1;
-          stats[p2Uid].losses += 1;
-        } else if (matchData.winnerUid === p2Uid) {
-          stats[p2Uid].wins += 1;
-          stats[p1Uid].losses += 1;
-        }
+    const [p1FriendSnap, p2FriendSnap] = await Promise.all([
+      transaction.get(p1FriendDocRef),
+      transaction.get(p2FriendDocRef)
+    ]);
 
-        transaction.update(friendshipDocRef, { stats });
+    let stats: Record<string, { wins: number; losses: number; draws: number }> = {};
+    let statsFound = false;
+
+    if (p1FriendSnap.exists()) {
+      stats = p1FriendSnap.data().stats || {};
+      statsFound = true;
+    } else if (p2FriendSnap.exists()) {
+      stats = p2FriendSnap.data().stats || {};
+      statsFound = true;
+    }
+
+    if (p1FriendSnap.exists() || p2FriendSnap.exists() || statsFound) {
+      if (!stats[p1Uid]) stats[p1Uid] = { wins: 0, losses: 0, draws: 0 };
+      if (!stats[p2Uid]) stats[p2Uid] = { wins: 0, losses: 0, draws: 0 };
+
+      if (isDraw) {
+        stats[p1Uid].draws += 1;
+        stats[p2Uid].draws += 1;
+      } else if (matchData.winnerUid === p1Uid) {
+        stats[p1Uid].wins += 1;
+        stats[p2Uid].losses += 1;
+      } else if (matchData.winnerUid === p2Uid) {
+        stats[p2Uid].wins += 1;
+        stats[p1Uid].losses += 1;
+      }
+
+      if (p1FriendSnap.exists()) {
+        transaction.update(p1FriendDocRef, { stats });
+      }
+      if (p2FriendSnap.exists()) {
+        transaction.update(p2FriendDocRef, { stats });
       }
     }
 

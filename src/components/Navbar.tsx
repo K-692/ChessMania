@@ -12,14 +12,18 @@ interface NavbarProps {
   currentView: string;
   isGameActive?: boolean;
   onAddFunds?: () => void;
+  unreadChatsCount?: number;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameActive = false, onAddFunds }) => {
+export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameActive = false, onAddFunds, unreadChatsCount = 0 }) => {
   const { user, profile, login, logout, loading } = useAuth();
   const [muted, setMuted] = useState(() => getSoundSettings().muted);
   const [pieceTheme, setPieceTheme] = useState(() => getSoundSettings().pieceTheme || 'classic');
-  const [pendingCount, setPendingCount] = useState(0);
+  const [fCount, setFCount] = useState(0);
+  const [cCount, setCCount] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const pendingCount = fCount + cCount + unreadChatsCount;
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -37,20 +41,17 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
   useEffect(() => {
     if (!user) {
-      setPendingCount(0);
+      setFCount(0);
+      setCCount(0);
       return;
     }
-
-    let fCount = 0;
-    let cCount = 0;
 
     const qFriendships = query(
       collection(db, 'users', user.uid, 'friends'),
       where('status', '==', 'pending_received')
     );
     const unsubFriendships = onSnapshot(qFriendships, (snap) => {
-      fCount = snap.size;
-      setPendingCount(fCount + cCount);
+      setFCount(snap.size);
     }, (err) => {
       console.warn("Error listening to pending friendships in Navbar:", err);
     });
@@ -61,8 +62,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
       where('status', '==', 'pending')
     );
     const unsubChallenges = onSnapshot(qChallenges, (snap) => {
-      cCount = snap.size;
-      setPendingCount(fCount + cCount);
+      setCCount(snap.size);
       if (!isChallengesInitial) {
         let hasNew = false;
         snap.docChanges().forEach((change) => {

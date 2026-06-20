@@ -147,7 +147,7 @@ export function sanitizeProfile(
   const losses = typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : (typeof data?.totalLosses === 'number' && !isNaN(data.totalLosses) ? data.totalLosses : 0);
   const draws = typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : (typeof data?.totalDraws === 'number' && !isNaN(data.totalDraws) ? data.totalDraws : 0);
   const totalGamesPlayed = wins + losses + draws;
-  const winRateRatio = totalGamesPlayed > 0 ? wins / totalGamesPlayed : 0;
+  const winRateRatio = totalGamesPlayed > 0 ? Math.round((wins / totalGamesPlayed) * 100) : 0;
 
   // Settings preferences map bootstrapping
   let settings = data?.settings;
