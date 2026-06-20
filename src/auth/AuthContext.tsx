@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { signInWithPopup, signOut, setPersistence, inMemoryPersistence, type User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db } from '../firebase';
 import type { UserProfile } from '../types';
-import { doc, getDoc, setDoc, runTransaction, collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { applyLazyHourlyRewardTx } from '../wallet/walletService';
 
 interface AuthContextType {
@@ -11,6 +11,13 @@ interface AuthContextType {
   loading: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  updateCachedProfile: (updates: Partial<UserProfile>) => void;
+  addCachedTransaction: (tx: any) => void;
+  addCachedEloHistory: (elo: any) => void;
+  addCachedMatch: (match: any) => void;
+  addCachedFriendUpdate: (friendUid: string, stats: any) => void;
+  writeBackToFirestore: (userId: string) => Promise<void>;
+  refetchProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -224,16 +231,179 @@ export function sanitizeProfile(
   return { sanitized, hasChanges };
 }
 
+interface CacheData {
+  profileUpdates: Partial<UserProfile>;
+  transactions: any[];
+  eloHistory: any[];
+  matches: any[];
+  friendsUpdates?: { friendUid: string; stats: any }[];
+}
+
+function getUnsavedCache(): CacheData {
+  try {
+    const data = localStorage.getItem('checkmate_unsaved_cache');
+    if (data) {
+      const parsed = JSON.parse(data);
+      if (!parsed.friendsUpdates) parsed.friendsUpdates = [];
+      return parsed;
+    }
+  } catch (e) {}
+  return { profileUpdates: {}, transactions: [], eloHistory: [], matches: [], friendsUpdates: [] };
+}
+
+function saveUnsavedCache(cache: CacheData) {
+  try {
+    localStorage.setItem('checkmate_unsaved_cache', JSON.stringify(cache));
+  } catch (e) {}
+}
+
+function clearUnsavedCache() {
+  try {
+    localStorage.removeItem('checkmate_unsaved_cache');
+  } catch (e) {}
+}
+
+export const writeBackToFirestore = async (userId: string) => {
+  const cache = getUnsavedCache();
+  const friendsUpdates = cache.friendsUpdates || [];
+  if (
+    Object.keys(cache.profileUpdates).length === 0 &&
+    cache.transactions.length === 0 &&
+    cache.eloHistory.length === 0 &&
+    cache.matches.length === 0 &&
+    friendsUpdates.length === 0
+  ) {
+    return;
+  }
+
+  console.log('Writing back session cache to Firestore in a batch...', cache);
+  const batch = writeBatch(db);
+
+  // 1. Profile updates
+  if (Object.keys(cache.profileUpdates).length > 0) {
+    const userDocRef = doc(db, 'users', userId);
+    batch.update(userDocRef, cache.profileUpdates);
+
+    // Update global leaderboard
+    const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', userId);
+    const lbUpdates: any = {};
+    if (cache.profileUpdates.displayName !== undefined) lbUpdates.displayName = cache.profileUpdates.displayName;
+    if (cache.profileUpdates.photoURL !== undefined) lbUpdates.photoURL = cache.profileUpdates.photoURL;
+    if (cache.profileUpdates.currentEloRating !== undefined) lbUpdates.eloRating = cache.profileUpdates.currentEloRating;
+    if (cache.profileUpdates.totalCoinsEarned !== undefined) lbUpdates.coinsEarned = cache.profileUpdates.totalCoinsEarned;
+    if (cache.profileUpdates.totalGamesPlayed !== undefined) lbUpdates.totalGamesPlayed = cache.profileUpdates.totalGamesPlayed;
+    if (cache.profileUpdates.winRateRatio !== undefined) lbUpdates.winRateRatio = cache.profileUpdates.winRateRatio;
+    if (cache.profileUpdates.gameplayCounts !== undefined) lbUpdates.gameplayCounts = cache.profileUpdates.gameplayCounts;
+    lbUpdates.updatedAt = Date.now();
+
+    batch.set(leaderboardDocRef, lbUpdates, { merge: true });
+  }
+
+  // 2. Transactions
+  cache.transactions.forEach((tx) => {
+    const txRef = doc(collection(db, 'transactions'));
+    batch.set(txRef, tx);
+  });
+
+  // 3. Elo History
+  cache.eloHistory.forEach((elo) => {
+    const eloRef = doc(collection(db, 'users', userId, 'eloHistory'));
+    batch.set(eloRef, elo);
+  });
+
+  // 4. Matches (like finished practice matches)
+  cache.matches.forEach((m) => {
+    const matchRef = doc(db, 'matches', m.id);
+    batch.set(matchRef, m, { merge: true });
+  });
+
+  // 5. Friends H2H updates
+  friendsUpdates.forEach((f: any) => {
+    const friendDocRef = doc(db, 'users', userId, 'friends', f.friendUid);
+    batch.set(friendDocRef, { stats: f.stats }, { merge: true });
+  });
+
+  try {
+    await batch.commit();
+    clearUnsavedCache();
+    console.log('Session cache successfully committed.');
+  } catch (err) {
+    console.error('Failed to commit session cache:', err);
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Expose cache update helpers to components
+  const updateCachedProfile = (updates: Partial<UserProfile>) => {
+    setProfile((prev) => {
+      if (!prev) return null;
+      const next = { ...prev, ...updates };
+
+      const cache = getUnsavedCache();
+      cache.profileUpdates = { ...cache.profileUpdates, ...updates };
+      saveUnsavedCache(cache);
+
+      return next;
+    });
+  };
+
+  const addCachedTransaction = (tx: any) => {
+    const cache = getUnsavedCache();
+    cache.transactions.push(tx);
+    saveUnsavedCache(cache);
+  };
+
+  const addCachedEloHistory = (elo: any) => {
+    const cache = getUnsavedCache();
+    cache.eloHistory.push(elo);
+    saveUnsavedCache(cache);
+  };
+
+  const addCachedMatch = (match: any) => {
+    const cache = getUnsavedCache();
+    cache.matches = cache.matches.filter((m) => m.id !== match.id);
+    cache.matches.push(match);
+    saveUnsavedCache(cache);
+  };
+
+  const addCachedFriendUpdate = (friendUid: string, stats: any) => {
+    const cache = getUnsavedCache();
+    if (!cache.friendsUpdates) {
+      cache.friendsUpdates = [];
+    }
+    cache.friendsUpdates = cache.friendsUpdates.filter((f) => f.friendUid !== friendUid);
+    cache.friendsUpdates.push({ friendUid, stats });
+    saveUnsavedCache(cache);
+  };
+
+  const refetchProfile = async () => {
+    if (!auth.currentUser) return;
+    const userDocRef = doc(db, 'users', auth.currentUser.uid);
+    const docSnap = await getDoc(userDocRef);
+    if (docSnap.exists()) {
+      const rawData = docSnap.data();
+      const { sanitized } = sanitizeProfile(
+        rawData,
+        auth.currentUser.uid,
+        auth.currentUser.displayName || undefined,
+        auth.currentUser.photoURL || undefined
+      );
+      const unsaved = getUnsavedCache();
+      const mergedProfile = { ...sanitized, ...unsaved.profileUpdates };
+      setProfile(mergedProfile);
+    }
+  };
+
   // Sign in with Google
   const login = async () => {
     try {
       setLoading(true);
-      await setPersistence(auth, inMemoryPersistence);
+      sessionStorage.setItem('checkmate_is_logging_in', 'true');
+      await setPersistence(auth, browserSessionPersistence);
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error('Login error:', error);
@@ -252,11 +422,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       if (auth.currentUser) {
-        const userDocRef = doc(db, 'users', auth.currentUser.uid);
-        await setDoc(userDocRef, { lastActiveAt: 0 }, { merge: true });
+        await writeBackToFirestore(auth.currentUser.uid);
       }
       await signOut(auth);
       setProfile(null);
+      clearUnsavedCache();
     } catch (error) {
       console.error('Logout error:', error);
       setLoading(false);
@@ -266,10 +436,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Bootstrap user profile document
   const bootstrapProfile = async (firebaseUser: FirebaseUser) => {
-    // Wait 500ms to ensure Firestore client is fully authenticated and synchronized
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    // Ensure key Firestore configurations exist
     try {
       const supportConfigRef = doc(db, 'config', 'support');
       const supportSnap = await getDoc(supportConfigRef);
@@ -315,7 +483,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let forceHasChanges = false;
 
       if (!docSnap.exists()) {
-        // First time sign-in: generate a unique, alphanumeric username based on Google name
         const actualName = firebaseUser.displayName || 'Player';
         let alphanumericName = actualName.replace(/[^a-zA-Z0-9]/g, '');
         if (alphanumericName.length < 3) {
@@ -378,7 +545,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }
 
-      // Update global leaderboard record
       const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', firebaseUser.uid);
       await setDoc(leaderboardDocRef, {
         uid: firebaseUser.uid,
@@ -393,7 +559,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }, { merge: true });
 
       if (docSnap.exists() && profileData) {
-        // Profile exists, apply hourly rewards lazily if at least 1 hour has elapsed
         const lastReward = profileData.lastHourlyRewardAt;
         const timeDiff = Date.now() - (lastReward || 0);
 
@@ -401,7 +566,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await applyLazyHourlyRewardTx(firebaseUser.uid);
         }
 
-        // Correct legacy profile rating from 1200 to 0 if they haven't played any games
         const docSnapAfterInterest = await getDoc(userDocRef);
         if (docSnapAfterInterest.exists()) {
           const profileData = docSnapAfterInterest.data() as UserProfile;
@@ -410,15 +574,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const eloHistorySnap = await getDocs(eloHistoryRef);
             if (eloHistorySnap.empty) {
               await setDoc(userDocRef, { currentEloRating: 0, rating: 0 }, { merge: true });
-              // Sync leaderboard as well
               await setDoc(leaderboardDocRef, { eloRating: 0 }, { merge: true });
             }
           }
         }
       }
       
-      // Update last active timestamp
-      await setDoc(userDocRef, { lastActiveAt: now, lastLoginAt: now }, { merge: true });
+      await setDoc(userDocRef, { lastLoginAt: now }, { merge: true });
+      localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, now.toString());
+      setProfile(sanitized);
 
     } catch (error) {
       console.error('Error bootstrapping profile:', error);
@@ -427,37 +591,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
-      setUser(firebaseUser);
-
       if (firebaseUser) {
-        await bootstrapProfile(firebaseUser);
+        const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
+        const timeSinceLastActivity = Date.now() - lastActivity;
 
-        // Listen for realtime updates to the user profile
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const unsubscribeProfile = onSnapshot(userDocRef, async (docSnap) => {
-          if (docSnap.exists()) {
-            const rawData = docSnap.data();
-            const { sanitized, hasChanges } = sanitizeProfile(
-              rawData,
-              firebaseUser.uid,
-              firebaseUser.displayName || undefined,
-              firebaseUser.photoURL || undefined
-            );
-            setProfile(sanitized);
-            if (hasChanges) {
-              console.log('Self-healing: fixing invalid profile values in Firestore:', rawData);
-              try {
-                await setDoc(userDocRef, sanitized, { merge: true });
-              } catch (e) {
-                console.error('Self-healing update failed:', e);
-              }
-            }
-          }
+        if (lastActivity > 0 && timeSinceLastActivity > 10 * 1000) {
+          console.log('Detected inactivity over 10 seconds on startup. Logging out...');
+          await writeBackToFirestore(firebaseUser.uid);
+          await signOut(auth);
+          setUser(null);
+          setProfile(null);
           setLoading(false);
-        });
+          return;
+        }
 
-        return () => unsubscribeProfile();
+        setUser(firebaseUser);
+
+        // Commit any cached changes from previous tab/session first
+        await writeBackToFirestore(firebaseUser.uid);
+
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const docSnap = await getDoc(userDocRef);
+        if (docSnap.exists()) {
+          const rawData = docSnap.data();
+
+          // New device detection check
+          const localLoginTime = parseInt(localStorage.getItem(`checkmate_session_login_time_${firebaseUser.uid}`) || '0');
+          const serverLoginTime = rawData.lastLoginAt || 0;
+          if (localLoginTime > 0 && serverLoginTime > localLoginTime + 2000) {
+            console.log('Detected newer login on another device. Logging out...');
+            await signOut(auth);
+            setUser(null);
+            setProfile(null);
+            setLoading(false);
+            alert('You have been logged out because a new sign-in was detected on another device.');
+            return;
+          }
+
+          if (localLoginTime === 0) {
+            localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, serverLoginTime.toString());
+          }
+
+          // Handle if user is logging in now vs refreshing
+          const isLoggingIn = sessionStorage.getItem('checkmate_is_logging_in') === 'true';
+          sessionStorage.removeItem('checkmate_is_logging_in');
+          const now = Date.now();
+
+          if (isLoggingIn) {
+            await setDoc(userDocRef, { lastLoginAt: now }, { merge: true });
+            localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, now.toString());
+            rawData.lastLoginAt = now;
+          }
+
+          const { sanitized, hasChanges } = sanitizeProfile(
+            rawData,
+            firebaseUser.uid,
+            firebaseUser.displayName || undefined,
+            firebaseUser.photoURL || undefined
+          );
+          
+          // Apply unsaved profile modifications to the loaded profile state
+          const unsaved = getUnsavedCache();
+          const mergedProfile = { ...sanitized, ...unsaved.profileUpdates };
+          setProfile(mergedProfile);
+
+          if (hasChanges && isLoggingIn) {
+            await setDoc(userDocRef, sanitized, { merge: true });
+          }
+        } else {
+          await bootstrapProfile(firebaseUser);
+        }
+        setLoading(false);
       } else {
+        setUser(null);
         setProfile(null);
         setLoading(false);
       }
@@ -466,7 +672,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribeAuth();
   }, []);
 
-  // Inactivity auto-logout after 10 mins (600,000 ms) and online reconnection logout
+  // Inactivity auto-logout after 10 seconds and online reconnection logout
   useEffect(() => {
     if (!user) return;
 
@@ -474,15 +680,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const resetTimer = () => {
       if (timeoutId) clearTimeout(timeoutId);
+      localStorage.setItem('checkmate_last_activity', Date.now().toString());
+
       timeoutId = setTimeout(async () => {
-        console.log('Inactivity timeout reached (10 minutes). Logging out...');
+        console.log('Inactivity timeout reached (10 seconds). Logging out...');
         try {
           await logout();
-          alert('You have been logged out due to 10 minutes of inactivity.');
+          alert('You have been logged out due to 10 seconds of inactivity.');
         } catch (e) {
           console.warn('Failed to logout on inactivity timeout:', e);
         }
-      }, 10 * 60 * 1000); // 10 minutes
+      }, 10 * 1000); // 10 seconds
     };
 
     const activityEvents = [
@@ -517,7 +725,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        loading,
+        login,
+        logout,
+        updateCachedProfile,
+        addCachedTransaction,
+        addCachedEloHistory,
+        addCachedMatch,
+        addCachedFriendUpdate,
+        writeBackToFirestore,
+        refetchProfile
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

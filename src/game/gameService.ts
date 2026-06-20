@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, runTransaction, collection, setDoc } from 'firebase/firestore';
+import { doc, runTransaction, collection, getDoc } from 'firebase/firestore';
 import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -156,326 +156,204 @@ export async function submitGameAction(
  * Guarantees idempotency by checking and switching match.status from active/resigned/timeout/etc.
  * to settled, or using a settled flag. Let's add 'settled' to the transaction checks.
  */
-export async function settleMatchPayoutAndElo(matchId: string): Promise<void> {
+export async function settleMatchPayoutAndElo(
+  matchId: string,
+  currentUserId: string,
+  currentUserProfile: UserProfile,
+  addCachedFriendUpdate?: (friendUid: string, stats: any) => void
+): Promise<{
+  profileUpdates?: Partial<UserProfile>;
+  transactionRecord?: any;
+  eloHistoryRecord?: any;
+  practice?: boolean;
+} | null> {
   const matchDocRef = doc(db, 'matches', matchId);
-  const ledgerCol = collection(db, 'transactions');
+  const now = Date.now();
 
+  let matchData: any = null;
+
+  // Atomically mark match as settled
   await runTransaction(db, async (transaction) => {
     const matchSnap = await transaction.get(matchDocRef);
     if (!matchSnap.exists()) return;
 
-    const matchData = matchSnap.data() as Match;
+    const data = matchSnap.data() as Match;
 
-    // Guard: Only settle if match state indicates game has ended but is not yet settled
-    // We can use a custom field on match like "settled: true" to ensure idempotency.
-    if ((matchData as any).settled === true) {
-      console.log('Match already settled');
+    // Guard: Only settle if ended and not yet settled
+    if ((data as any).settled === true) {
       return;
     }
 
-    const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
-    const hasWinner = !!matchData.winnerUid;
+    const isDraw = data.status === 'draw' || data.status === 'stalemate';
+    const hasWinner = !!data.winnerUid;
 
     if (!isDraw && !hasWinner) {
-      // Game is still active; don't settle yet
       return;
     }
 
-    const now = Date.now();
-
-    if (matchData.mode === 'practice') {
-      transaction.update(matchDocRef, {
-        settled: true,
-        finishedAt: now,
-      });
-      return;
-    }
-    const p1Uid = matchData.players[0];
-    const p2Uid = matchData.players[1];
-
-    const p1UserRef = doc(db, 'users', p1Uid);
-    const p2UserRef = doc(db, 'users', p2Uid);
-
-    const p1Snap = await transaction.get(p1UserRef);
-    const p2Snap = await transaction.get(p2UserRef);
-
-    if (!p1Snap.exists() || !p2Snap.exists()) {
-      throw new Error('One of the player profiles was not found');
-    }
-
-    const p1Profile = p1Snap.data() as UserProfile;
-    const p2Profile = p2Snap.data() as UserProfile;
-
-    const p1Rating = p1Profile.currentEloRating !== undefined ? p1Profile.currentEloRating : p1Profile.rating;
-    const p2Rating = p2Profile.currentEloRating !== undefined ? p2Profile.currentEloRating : p2Profile.rating;
-    const p1Balance = p1Profile.currentBalance !== undefined ? p1Profile.currentBalance : p1Profile.bankBalance;
-    const p2Balance = p2Profile.currentBalance !== undefined ? p2Profile.currentBalance : p2Profile.bankBalance;
-
-    // Calculate Elo changes
-    // Determine actual score for p1 and p2
-    let p1Score = 0.5;
-    let p2Score = 0.5;
-
-    if (hasWinner) {
-      p1Score = matchData.winnerUid === p1Uid ? 1 : 0;
-      p2Score = matchData.winnerUid === p2Uid ? 1 : 0;
-    }
-
-    const p1Elo = calculateElo(p1Rating, p2Rating, p1Score);
-    const p2Elo = calculateElo(p2Rating, p1Rating, p2Score);
-
-    const newP1Rating = matchData.stake === 0 ? p1Rating : Math.max(100, p1Rating + p1Elo.delta);
-    const newP2Rating = matchData.stake === 0 ? p2Rating : Math.max(100, p2Rating + p2Elo.delta);
-
-    // Calculate payouts (escrow returns/winnings)
-    let p1Payout = 0;
-    let p2Payout = 0;
-    let p1Earned = 0;
-    let p2Earned = 0;
-
-    if (matchData.mode === 'all_in' && matchData.allInStakes) {
-      const p1StakeVal = matchData.allInStakes[p1Uid] || 0;
-      const p2StakeVal = matchData.allInStakes[p2Uid] || 0;
-      const totalPool = p1StakeVal + p2StakeVal;
-
-      if (isDraw) {
-        p1Payout = p1StakeVal;
-        p2Payout = p2StakeVal;
-      } else if (matchData.winnerUid === p1Uid) {
-        p1Payout = totalPool;
-        p1Earned = p2StakeVal; // Net coins won
-      } else {
-        p2Payout = totalPool;
-        p2Earned = p1StakeVal; // Net coins won
-      }
-    } else {
-      // Standard match payout
-      if (isDraw) {
-        p1Payout = matchData.stake;
-        p2Payout = matchData.stake;
-      } else if (matchData.winnerUid === p1Uid) {
-        p1Payout = matchData.stake * 2;
-        p1Earned = matchData.stake;
-      } else {
-        p2Payout = matchData.stake * 2;
-        p2Earned = matchData.stake;
-      }
-    }
-
-    const newP1Balance = Math.round((p1Balance + p1Payout) * 100) / 100;
-    const newP2Balance = Math.round((p2Balance + p2Payout) * 100) / 100;
-
-    const newP1TotalCoins = Math.round(((p1Profile.totalCoinsEarned || p1Balance) + p1Earned) * 100) / 100;
-    const newP2TotalCoins = Math.round(((p2Profile.totalCoinsEarned || p2Balance) + p2Earned) * 100) / 100;
-
-    // Increment game counts and win/loss/draw stats
-    const p1Counts = p1Profile.gameplayCounts || {};
-    const newP1Counts = { ...p1Counts, [matchData.mode]: (p1Counts[matchData.mode] || 0) + 1 };
-    let p1Wins = p1Profile.totalWins !== undefined ? p1Profile.totalWins : (p1Profile.wins || 0);
-    let p1Losses = p1Profile.totalLosses !== undefined ? p1Profile.totalLosses : (p1Profile.losses || 0);
-    let p1Draws = p1Profile.totalDraws !== undefined ? p1Profile.totalDraws : (p1Profile.draws || 0);
-    if (isDraw) p1Draws++;
-    else if (matchData.winnerUid === p1Uid) p1Wins++;
-    else p1Losses++;
-    const p1TotalGamesPlayed = p1Wins + p1Losses + p1Draws;
-    const p1WinRateRatio = p1TotalGamesPlayed > 0 ? Math.round((p1Wins / p1TotalGamesPlayed) * 100) : 0;
-
-    const p2Counts = p2Profile.gameplayCounts || {};
-    const newP2Counts = { ...p2Counts, [matchData.mode]: (p2Counts[matchData.mode] || 0) + 1 };
-    let p2Wins = p2Profile.totalWins !== undefined ? p2Profile.totalWins : (p2Profile.wins || 0);
-    let p2Losses = p2Profile.totalLosses !== undefined ? p2Profile.totalLosses : (p2Profile.losses || 0);
-    let p2Draws = p2Profile.totalDraws !== undefined ? p2Profile.totalDraws : (p2Profile.draws || 0);
-    if (isDraw) p2Draws++;
-    else if (matchData.winnerUid === p2Uid) p2Wins++;
-    else p2Losses++;
-    const p2TotalGamesPlayed = p2Wins + p2Losses + p2Draws;
-    const p2WinRateRatio = p2TotalGamesPlayed > 0 ? Math.round((p2Wins / p2TotalGamesPlayed) * 100) : 0;
-
-    // Update profiles
-    transaction.update(p1UserRef, {
-      currentEloRating: newP1Rating,
-      rating: newP1Rating, // compatibility
-      currentBalance: newP1Balance,
-      bankBalance: newP1Balance, // compatibility
-      zeroBalanceAt: newP1Balance <= 0 ? now : null,
-      totalCoinsEarned: newP1TotalCoins,
-      gameplayCounts: newP1Counts,
-      wins: p1Wins,
-      losses: p1Losses,
-      draws: p1Draws,
-      totalWins: p1Wins,
-      totalLosses: p1Losses,
-      totalDraws: p1Draws,
-      totalGamesPlayed: p1TotalGamesPlayed,
-      winRateRatio: p1WinRateRatio,
-      updatedAt: now
-    });
-
-    transaction.update(p2UserRef, {
-      currentEloRating: newP2Rating,
-      rating: newP2Rating, // compatibility
-      currentBalance: newP2Balance,
-      bankBalance: newP2Balance, // compatibility
-      zeroBalanceAt: newP2Balance <= 0 ? now : null,
-      totalCoinsEarned: newP2TotalCoins,
-      gameplayCounts: newP2Counts,
-      wins: p2Wins,
-      losses: p2Losses,
-      draws: p2Draws,
-      totalWins: p2Wins,
-      totalLosses: p2Losses,
-      totalDraws: p2Draws,
-      totalGamesPlayed: p2TotalGamesPlayed,
-      winRateRatio: p2WinRateRatio,
-      updatedAt: now
-    });
-
-    // Write payout transaction records (transactions collection)
-    if (p1Payout > 0 || matchData.stake === 0) {
-      const p1LedgerRef = doc(ledgerCol);
-      transaction.set(p1LedgerRef, {
-        uid: p1Uid,
-        userId: p1Uid,
-        type: isDraw ? 'refund' : 'stakeCredit',
-        amount: 0,
-        coins: p1Payout,
-        currency: 'INR',
-        status: 'processed',
-        processedAt: now,
-        matchId: matchData.id,
-        balanceBefore: p1Balance,
-        balanceAfter: newP1Balance,
-        createdAt: now,
-        opponentUid: p2Uid,
-      });
-    }
-
-    if (p2Payout > 0 || matchData.stake === 0) {
-      const p2LedgerRef = doc(ledgerCol);
-      transaction.set(p2LedgerRef, {
-        uid: p2Uid,
-        userId: p2Uid,
-        type: isDraw ? 'refund' : 'stakeCredit',
-        amount: 0,
-        coins: p2Payout,
-        currency: 'INR',
-        status: 'processed',
-        processedAt: now,
-        matchId: matchData.id,
-        balanceBefore: p2Balance,
-        balanceAfter: newP2Balance,
-        createdAt: now,
-        opponentUid: p1Uid,
-      });
-    }
-
-    // Write Elo history subcollection records (users/{uid}/eloHistory)
-    if (matchData.stake > 0 || matchData.stake === 0) {
-      const p1RatingLedgerRef = doc(collection(db, 'users', p1Uid, 'eloHistory'));
-      transaction.set(p1RatingLedgerRef, {
-        beforeRating: p1Rating,
-        afterRating: newP1Rating,
-        delta: matchData.stake === 0 ? 0 : p1Elo.delta,
-        expectedScore: p1Elo.expectedScore,
-        actualScore: p1Score,
-        kFactor: 20,
-        createdAt: now,
-        opponentUid: p2Uid,
-        matchId: matchData.id,
-        mode: matchData.mode
-      });
-
-      const p2RatingLedgerRef = doc(collection(db, 'users', p2Uid, 'eloHistory'));
-      transaction.set(p2RatingLedgerRef, {
-        beforeRating: p2Rating,
-        afterRating: newP2Rating,
-        delta: matchData.stake === 0 ? 0 : p2Elo.delta,
-        expectedScore: p2Elo.expectedScore,
-        actualScore: p2Score,
-        kFactor: 20,
-        createdAt: now,
-        opponentUid: p1Uid,
-        matchId: matchData.id,
-        mode: matchData.mode
-      });
-    }
-
-    // Sync leaderboards
-    const p1LeaderboardRef = doc(db, 'leaderboards', 'global', 'players', p1Uid);
-    transaction.set(p1LeaderboardRef, {
-      uid: p1Uid,
-      displayName: p1Profile.displayName,
-      photoURL: p1Profile.photoURL,
-      eloRating: newP1Rating,
-      coinsEarned: newP1TotalCoins,
-      totalGamesPlayed: p1TotalGamesPlayed,
-      winRateRatio: p1WinRateRatio,
-      gameplayCounts: newP1Counts,
-      updatedAt: now
-    }, { merge: true });
-
-    const p2LeaderboardRef = doc(db, 'leaderboards', 'global', 'players', p2Uid);
-    transaction.set(p2LeaderboardRef, {
-      uid: p2Uid,
-      displayName: p2Profile.displayName,
-      photoURL: p2Profile.photoURL,
-      eloRating: newP2Rating,
-      coinsEarned: newP2TotalCoins,
-      totalGamesPlayed: p2TotalGamesPlayed,
-      winRateRatio: p2WinRateRatio,
-      gameplayCounts: newP2Counts,
-      updatedAt: now
-    }, { merge: true });
-
-    // Update friendship H2H statistics in both users' friends subcollections if they exist
-    const p1FriendDocRef = doc(db, 'users', p1Uid, 'friends', p2Uid);
-    const p2FriendDocRef = doc(db, 'users', p2Uid, 'friends', p1Uid);
-
-    const [p1FriendSnap, p2FriendSnap] = await Promise.all([
-      transaction.get(p1FriendDocRef),
-      transaction.get(p2FriendDocRef)
-    ]);
-
-    let stats: Record<string, { wins: number; losses: number; draws: number }> = {};
-    let statsFound = false;
-
-    if (p1FriendSnap.exists()) {
-      stats = p1FriendSnap.data().stats || {};
-      statsFound = true;
-    } else if (p2FriendSnap.exists()) {
-      stats = p2FriendSnap.data().stats || {};
-      statsFound = true;
-    }
-
-    if (p1FriendSnap.exists() || p2FriendSnap.exists() || statsFound) {
-      if (!stats[p1Uid]) stats[p1Uid] = { wins: 0, losses: 0, draws: 0 };
-      if (!stats[p2Uid]) stats[p2Uid] = { wins: 0, losses: 0, draws: 0 };
-
-      if (isDraw) {
-        stats[p1Uid].draws += 1;
-        stats[p2Uid].draws += 1;
-      } else if (matchData.winnerUid === p1Uid) {
-        stats[p1Uid].wins += 1;
-        stats[p2Uid].losses += 1;
-      } else if (matchData.winnerUid === p2Uid) {
-        stats[p2Uid].wins += 1;
-        stats[p1Uid].losses += 1;
-      }
-
-      if (p1FriendSnap.exists()) {
-        transaction.update(p1FriendDocRef, { stats });
-      }
-      if (p2FriendSnap.exists()) {
-        transaction.update(p2FriendDocRef, { stats });
-      }
-    }
-
-    // Mark match as settled to guarantee idempotency on retries
+    matchData = data;
     transaction.update(matchDocRef, {
       settled: true,
       finishedAt: now,
     });
   });
+
+  if (!matchData) return null;
+
+  if (matchData.mode === 'practice') {
+    return { practice: true };
+  }
+
+  const myUid = currentUserId;
+  if (!matchData.players.includes(myUid)) return null;
+
+  const opponentUid = myUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
+
+  // Fetch opponent profile from Firestore to get their Elo rating
+  const opponentDocRef = doc(db, 'users', opponentUid);
+  const opponentSnap = await getDoc(opponentDocRef);
+  if (!opponentSnap.exists()) {
+    throw new Error('Opponent profile was not found');
+  }
+  const opponentProfile = opponentSnap.data() as UserProfile;
+
+  const myRating = currentUserProfile.currentEloRating !== undefined ? currentUserProfile.currentEloRating : (currentUserProfile.rating || 0);
+  const opponentRating = opponentProfile.currentEloRating !== undefined ? opponentProfile.currentEloRating : (opponentProfile.rating || 0);
+  const myBalance = currentUserProfile.currentBalance !== undefined ? currentUserProfile.currentBalance : (currentUserProfile.bankBalance || 0);
+
+  const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
+  let myScore = 0.5;
+  if (!isDraw) {
+    myScore = matchData.winnerUid === myUid ? 1 : 0;
+  }
+
+  const { delta, expectedScore } = calculateElo(myRating, opponentRating, myScore);
+  const newRating = matchData.stake === 0 ? myRating : Math.max(100, myRating + delta);
+
+  // Calculate payouts
+  let myPayout = 0;
+  let myEarned = 0;
+
+  if (matchData.mode === 'all_in' && matchData.allInStakes) {
+    const myStakeVal = matchData.allInStakes[myUid] || 0;
+    const oppStakeVal = matchData.allInStakes[opponentUid] || 0;
+    const totalPool = myStakeVal + oppStakeVal;
+
+    if (isDraw) {
+      myPayout = myStakeVal;
+    } else if (matchData.winnerUid === myUid) {
+      myPayout = totalPool;
+      myEarned = oppStakeVal;
+    }
+  } else {
+    if (isDraw) {
+      myPayout = matchData.stake;
+    } else if (matchData.winnerUid === myUid) {
+      myPayout = matchData.stake * 2;
+      myEarned = matchData.stake;
+    }
+  }
+
+  const newBalance = Math.round((myBalance + myPayout) * 100) / 100;
+  const newTotalCoins = Math.round(((currentUserProfile.totalCoinsEarned || myBalance) + myEarned) * 100) / 100;
+
+  // Increments
+  const myCounts = currentUserProfile.gameplayCounts || {};
+  const newMyCounts = { ...myCounts, [matchData.mode]: (myCounts[matchData.mode] || 0) + 1 };
+
+  let myWins = currentUserProfile.totalWins !== undefined ? currentUserProfile.totalWins : (currentUserProfile.wins || 0);
+  let myLosses = currentUserProfile.totalLosses !== undefined ? currentUserProfile.totalLosses : (currentUserProfile.losses || 0);
+  let myDraws = currentUserProfile.totalDraws !== undefined ? currentUserProfile.totalDraws : (currentUserProfile.draws || 0);
+
+  if (isDraw) myDraws++;
+  else if (matchData.winnerUid === myUid) myWins++;
+  else myLosses++;
+
+  const myTotalGamesPlayed = myWins + myLosses + myDraws;
+  const myWinRateRatio = myTotalGamesPlayed > 0 ? Math.round((myWins / myTotalGamesPlayed) * 100) : 0;
+
+  const profileUpdates: Partial<UserProfile> = {
+    currentEloRating: newRating,
+    rating: newRating,
+    currentBalance: newBalance,
+    bankBalance: newBalance,
+    zeroBalanceAt: newBalance <= 0 ? now : null,
+    totalCoinsEarned: newTotalCoins,
+    gameplayCounts: newMyCounts,
+    wins: myWins,
+    losses: myLosses,
+    draws: myDraws,
+    totalWins: myWins,
+    totalLosses: myLosses,
+    totalDraws: myDraws,
+    totalGamesPlayed: myTotalGamesPlayed,
+    winRateRatio: myWinRateRatio,
+    updatedAt: now
+  };
+
+  let transactionRecord = null;
+  if (myPayout > 0 || matchData.stake === 0) {
+    transactionRecord = {
+      uid: myUid,
+      userId: myUid,
+      type: isDraw ? 'refund' : 'stakeCredit',
+      amount: 0,
+      coins: myPayout,
+      currency: 'INR',
+      status: 'processed',
+      processedAt: now,
+      matchId: matchData.id,
+      balanceBefore: myBalance,
+      balanceAfter: newBalance,
+      createdAt: now,
+      opponentUid: opponentUid,
+    };
+  }
+
+  let eloHistoryRecord = null;
+  if (matchData.stake > 0 || matchData.stake === 0) {
+    eloHistoryRecord = {
+      beforeRating: myRating,
+      afterRating: newRating,
+      delta: matchData.stake === 0 ? 0 : delta,
+      expectedScore,
+      actualScore: myScore,
+      kFactor: 20,
+      createdAt: now,
+      opponentUid: opponentUid,
+      matchId: matchData.id,
+      mode: matchData.mode
+    };
+  }
+
+  // Handle H2H Friend Stats Update
+  if (addCachedFriendUpdate) {
+    const friendDocRef = doc(db, 'users', myUid, 'friends', opponentUid);
+    const friendSnap = await getDoc(friendDocRef);
+    if (friendSnap.exists()) {
+      const stats = friendSnap.data().stats || {};
+      if (!stats[myUid]) stats[myUid] = { wins: 0, losses: 0, draws: 0 };
+      if (!stats[opponentUid]) stats[opponentUid] = { wins: 0, losses: 0, draws: 0 };
+
+      if (isDraw) {
+        stats[myUid].draws += 1;
+        stats[opponentUid].draws += 1;
+      } else if (matchData.winnerUid === myUid) {
+        stats[myUid].wins += 1;
+        stats[opponentUid].losses += 1;
+      } else {
+        stats[myUid].losses += 1;
+        stats[opponentUid].wins += 1;
+      }
+      addCachedFriendUpdate(opponentUid, stats);
+    }
+  }
+
+  return {
+    profileUpdates,
+    transactionRecord,
+    eloHistoryRecord
+  };
 }
 
 /**
@@ -668,13 +546,13 @@ export async function acceptFriendlyChallenge(
 }
 
 /**
- * Seeding a practice match against a bot engine.
+ * Seeding a practice match against a bot engine locally.
  */
-export async function createPracticeMatch(
+export function createPracticeMatchObject(
   userUid: string,
   botElo: number,
   userColor: 'white' | 'black' | 'random'
-): Promise<string> {
+): Match {
   const matchesCol = collection(db, 'matches');
   const newMatchDocRef = doc(matchesCol);
   const mId = newMatchDocRef.id;
@@ -695,7 +573,7 @@ export async function createPracticeMatch(
   const initialClockTime = 10 * 60 * 1000; // 10 minutes default
   const matchTimeControl = '10 | 5';
 
-  const newMatch: Match = {
+  return {
     id: mId,
     players: [userUid, botUid],
     playerPair: [userUid, botUid].sort().join('_'),
@@ -717,7 +595,4 @@ export async function createPracticeMatch(
     lastMoveAt: now,
     timeControl: matchTimeControl,
   };
-
-  await setDoc(newMatchDocRef, newMatch);
-  return mId;
 }

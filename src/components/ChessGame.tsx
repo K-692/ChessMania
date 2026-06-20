@@ -27,7 +27,7 @@ const PIECE_THEMES = [
 ];
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [whiteProfile, setWhiteProfile] = useState<UserProfile | null>(null);
   const [blackProfile, setBlackProfile] = useState<UserProfile | null>(null);
@@ -44,6 +44,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
+
+  const syncSettings = (updatedLocal: Partial<typeof settings>, updatedProfile: Record<string, any>) => {
+    updateSoundSettings(updatedLocal);
+    setSettings(prev => ({ ...prev, ...updatedLocal }));
+    if (profile) {
+      updateCachedProfile({
+        settings: {
+          ...profile.settings,
+          ...updatedProfile
+        }
+      });
+    }
+  };
 
   // Pre-move and illegal move visual states
   const [preMoves, setPreMoves] = useState<{ from: string; to: string; promotion?: string }[]>([]);
@@ -155,7 +168,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               bankBalance: 0,
               currentBalance: 0,
               createdAt: Date.now(),
-              lastActiveAt: Date.now(),
+              lastLoginAt: Date.now(),
               zeroBalanceAt: null
             });
           } else {
@@ -175,7 +188,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               bankBalance: 0,
               currentBalance: 0,
               createdAt: Date.now(),
-              lastActiveAt: Date.now(),
+              lastLoginAt: Date.now(),
               zeroBalanceAt: null
             });
           } else {
@@ -396,12 +409,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           ? user?.uid === matchData.winnerUid 
           : user?.uid === matchData.whiteUid;
 
+        const runSettlement = () => {
+          if (!user || !profile) return;
+          settleMatchPayoutAndElo(matchId, user.uid, profile, addCachedFriendUpdate)
+            .then((res) => {
+              if (res) {
+                if (res.profileUpdates) {
+                  updateCachedProfile(res.profileUpdates);
+                }
+                if (res.transactionRecord) {
+                  addCachedTransaction(res.transactionRecord);
+                }
+                if (res.eloHistoryRecord) {
+                  addCachedEloHistory(res.eloHistoryRecord);
+                }
+              }
+            })
+            .catch((err) => console.error('Match settlement failed:', err));
+        };
+
         if (shouldSettle) {
-          settleMatchPayoutAndElo(matchId).catch(err => console.error('Settlement transaction failed:', err));
+          runSettlement();
         } else {
-          setTimeout(() => {
-            settleMatchPayoutAndElo(matchId).catch(err => console.error('Backup settlement transaction failed:', err));
-          }, 1500);
+          setTimeout(runSettlement, 1500);
         }
       }
     });
@@ -1602,7 +1632,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   onChange={(e) => {
                     const musicVolume = parseFloat(e.target.value);
                     const nextMuted = musicVolume === 0 ? true : settings.muted;
-                    updateSoundSettings({ musicVolume, muted: nextMuted });
+                    syncSettings(
+                      { musicVolume, muted: nextMuted },
+                      { musicVolume, musicEnabled: !nextMuted }
+                    );
                   }}
                   className="w-full accent-violet-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
                 />
@@ -1610,16 +1643,18 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
               {/* SFX, Legal Moves and Pre-moves row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Master Sound checkbox */}
+                {/* Theme Music Toggle */}
                 <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-white/5">
-                  <span className="text-xs font-semibold text-slate-200">Master Sound (On/Off)</span>
+                  <span className="text-xs font-semibold text-slate-200">Theme Music (On/Off)</span>
                   <input
                     type="checkbox"
                     checked={!settings.muted}
                     onChange={() => {
                       const nextMuted = !settings.muted;
-                      updateSoundSettings({ muted: nextMuted });
-                      setSettings(s => ({ ...s, muted: nextMuted }));
+                      syncSettings(
+                        { muted: nextMuted },
+                        { musicEnabled: !nextMuted }
+                      );
                     }}
                     className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                   />
@@ -1631,7 +1666,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <input
                     type="checkbox"
                     checked={settings.effectsEnabled}
-                    onChange={() => updateSoundSettings({ effectsEnabled: !settings.effectsEnabled })}
+                    onChange={() => {
+                      const nextEffects = !settings.effectsEnabled;
+                      syncSettings(
+                        { effectsEnabled: nextEffects },
+                        { soundEffectsEnabled: nextEffects }
+                      );
+                    }}
                     className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                   />
                 </div>
@@ -1642,7 +1683,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <input
                     type="checkbox"
                     checked={!!settings.showLegalMoves}
-                    onChange={() => updateSoundSettings({ showLegalMoves: !settings.showLegalMoves })}
+                    onChange={() => {
+                      const nextShow = !settings.showLegalMoves;
+                      syncSettings(
+                        { showLegalMoves: nextShow },
+                        { legalMoveHintsEnabled: nextShow }
+                      );
+                    }}
                     className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                   />
                 </div>
@@ -1653,7 +1700,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <input
                     type="checkbox"
                     checked={!!(settings as any).preMoveEnabled}
-                    onChange={() => updateSoundSettings({ preMoveEnabled: !(settings as any).preMoveEnabled })}
+                    onChange={() => {
+                      const nextPre = !(settings as any).preMoveEnabled;
+                      syncSettings(
+                        { preMoveEnabled: nextPre },
+                        { preMovesEnabled: nextPre }
+                      );
+                    }}
                     className="w-4 h-4 accent-violet-600 rounded border-white/5 bg-slate-900 cursor-pointer"
                   />
                 </div>
@@ -1670,8 +1723,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                       <button
                         key={key}
                         onClick={() => {
-                          updateSoundSettings({ boardTheme: key });
-                          setSettings(s => ({ ...s, boardTheme: key }));
+                          syncSettings(
+                            { boardTheme: key },
+                            { boardTheme: key }
+                          );
                         }}
                         className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-left relative overflow-hidden ${
                           isActive
@@ -1706,8 +1761,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                       <button
                         key={key}
                         onClick={() => {
-                          updateSoundSettings({ pieceTheme: key });
-                          setSettings(s => ({ ...s, pieceTheme: key }));
+                          syncSettings(
+                            { pieceTheme: key },
+                            { pieceStyle: key }
+                          );
                         }}
                         className={`flex items-center justify-between p-2 rounded-lg border transition-all cursor-pointer text-left relative overflow-hidden ${
                           isActive

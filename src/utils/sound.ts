@@ -58,7 +58,7 @@ function adjustThemeVolume() {
 
 // Professional Wood Click synthesizer
 export function playWoodClickSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {
@@ -124,7 +124,7 @@ if (typeof window !== 'undefined') {
   window.addEventListener('touchstart', initAudio);
 
   window.addEventListener('click', (e) => {
-    if (settings.muted || !settings.effectsEnabled) return;
+    if (!settings.effectsEnabled) return;
     const target = e.target as HTMLElement;
     if (!target) return;
     
@@ -140,7 +140,7 @@ if (typeof window !== 'undefined') {
  * Play a realistic wooden thud when a chess piece is placed on the board using /sound/move-self.mp3.
  */
 export function playMoveSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const audio = new Audio('/sound/move-self.mp3');
     audio.play().catch(e => console.warn('Failed to play move sound:', e));
@@ -153,7 +153,7 @@ export function playMoveSound() {
  * Play a harder wooden knock when a chess piece captures another using /sound/capture.mp3.
  */
 export function playCaptureSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const audio = new Audio('/sound/capture.mp3');
     audio.play().catch(e => console.warn('Failed to play capture sound:', e));
@@ -166,7 +166,7 @@ export function playCaptureSound() {
  * Play a notification chime when a new message or challenge is received using /sound/notify.mp3.
  */
 export function playNotifySound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const audio = new Audio('/sound/notify.mp3');
     audio.play().catch(e => console.warn('Failed to play notify sound:', e));
@@ -179,7 +179,7 @@ export function playNotifySound() {
  * Play a double chime warning when the King is in check.
  */
 export function playCheckSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     const now = ctx.currentTime;
@@ -211,7 +211,7 @@ export function playCheckSound() {
  * Play a double chime chord when a queue pairing succeeds.
  */
 export function playMatchFoundSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     const now = ctx.currentTime;
@@ -244,7 +244,7 @@ export function playMatchFoundSound() {
  * Play an ascending major arpeggio upon winning a match.
  */
 export function playWinSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     const now = ctx.currentTime;
@@ -278,7 +278,7 @@ export function playWinSound() {
  * Play a descending minor arpeggio upon losing a match.
  */
 export function playLoseSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     const now = ctx.currentTime;
@@ -311,7 +311,7 @@ export function playLoseSound() {
  * Play a discordant buzzer sound for illegal moves.
  */
 export function playIllegalMoveSound() {
-  if (settings.muted || !settings.effectsEnabled) return;
+  if (!settings.effectsEnabled) return;
   try {
     const ctx = getAudioContext();
     if (ctx.state === 'suspended') {

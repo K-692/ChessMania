@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { doc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart } from 'lucide-react';
 
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
@@ -95,7 +95,7 @@ const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }>
 };
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, updateCachedProfile } = useAuth();
   const [isEditCountryOpen, setIsEditCountryOpen] = useState(false);
   const [countryInput, setCountryInput] = useState('');
   const [savingCountry, setSavingCountry] = useState(false);
@@ -175,8 +175,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
     setCountryError('');
 
     try {
-      const userDocRef = doc(db, 'users', user.uid);
-      await updateDoc(userDocRef, {
+      updateCachedProfile({
         country: trimmed,
         lastCountryChangedAt: Date.now()
       });

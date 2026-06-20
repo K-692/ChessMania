@@ -7,7 +7,7 @@ export interface UserProfile {
   currentBalance: number;   // New Balance field
   bankBalance: number;      // Backward compatibility balance
   createdAt: number;        // UTC timestamp
-  lastActiveAt: number;     // UTC timestamp
+  lastActiveAt?: number;     // UTC timestamp
   zeroBalanceAt: number | null; // UTC timestamp when balance hit zero
   lastHourlyRewardAt?: number; // UTC timestamp of last lazy hourly reward credit
   lastUsernameChangedAt?: number | null; // UTC timestamp when username was last updated
@@ -30,13 +30,13 @@ export interface UserProfile {
 
   // Embedded settings preference map
   settings?: {
-    musicEnabled: boolean;
-    musicVolume: number;
-    soundEffectsEnabled: boolean;
-    legalMoveHintsEnabled: boolean;
-    preMovesEnabled: boolean;
-    boardTheme: string;
-    pieceStyle: string;
+    musicEnabled?: boolean;
+    musicVolume?: number;
+    soundEffectsEnabled?: boolean;
+    legalMoveHintsEnabled?: boolean;
+    preMovesEnabled?: boolean;
+    boardTheme?: string;
+    pieceStyle?: string;
   };
 }
 

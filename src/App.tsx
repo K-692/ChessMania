@@ -19,11 +19,11 @@ import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
 import { getSoundSettings, playNotifySound } from './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
-import { createPracticeMatch } from './game/gameService';
+import { createPracticeMatchObject } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, login, loading } = useAuth();
+  const { user, profile, login, loading, updateCachedProfile, addCachedMatch } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
   
   // Settings sync state for dynamic piece style Knight image
@@ -193,11 +193,10 @@ const AppContent: React.FC = () => {
         return;
       }
 
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, {
+      updateCachedProfile({
         displayName: trimmed,
         lastUsernameChangedAt: Date.now()
-      }, { merge: true });
+      });
       setIsEditNameOpen(false);
     } catch (err: any) {
       setNameError(err.message || 'Failed to update username');
@@ -205,32 +204,13 @@ const AppContent: React.FC = () => {
       setIsSavingName(false);
     }
   };
-
-  // 1a. Real-time client presence tracking (updates lastActiveAt in Firestore)
-  useEffect(() => {
-    if (!user?.uid) return;
-    const userDocRef = doc(db, 'users', user.uid);
-
-    const updateActiveStatus = async () => {
-      try {
-        await setDoc(userDocRef, { lastActiveAt: Date.now() }, { merge: true });
-      } catch (err) {
-        console.warn("Failed to update active status:", err);
-      }
-    };
-
-    updateActiveStatus();
-    const interval = setInterval(updateActiveStatus, 30 * 1000); // every 30 seconds
-    return () => clearInterval(interval);
-  }, [user?.uid]);
-
-  // 1b. Real-time sliding active players query listener (active in last 65 seconds)
+  // 1b. Real-time sliding active players query listener (logged in in last 5 minutes)
   useEffect(() => {
     const updateListener = () => {
-      const activeThreshold = Date.now() - 65 * 1000;
+      const activeThreshold = Date.now() - 5 * 60 * 1000;
       const q = query(
         collection(db, 'users'),
-        where('lastActiveAt', '>=', activeThreshold)
+        where('lastLoginAt', '>=', activeThreshold)
       );
 
       const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -516,7 +496,7 @@ const AppContent: React.FC = () => {
             bankBalance: 0,
             currentBalance: 0,
             createdAt: Date.now(),
-            lastActiveAt: Date.now(),
+            lastLoginAt: Date.now(),
             zeroBalanceAt: null
           };
           continue;
@@ -710,17 +690,6 @@ const AppContent: React.FC = () => {
                     alt="Premium Chess King"
                     className="w-full h-auto rounded-xl shadow-2xl object-cover aspect-square"
                   />
-                  
-                  {/* Floating Active Players tag overlay - bottom right */}
-                  <div className="absolute bottom-6 right-6 glass px-3.5 py-2 rounded-xl border border-white/10 backdrop-blur-md flex items-center space-x-2.5 shadow-xl z-20">
-                    <span className="flex h-2 w-2 relative">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                    <span className="text-xs font-semibold text-slate-200">
-                      Active Players: <span className="text-emerald-400 font-mono font-bold">{onlineCount}</span>
-                    </span>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1140,8 +1109,9 @@ const AppContent: React.FC = () => {
           onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
             if (mode === 'practice' && practiceConfig && user) {
               try {
-                const mId = await createPracticeMatch(user.uid, practiceConfig.elo, practiceConfig.color);
-                handleMatchFound(mId);
+                const newMatch = createPracticeMatchObject(user.uid, practiceConfig.elo, practiceConfig.color);
+                addCachedMatch(newMatch);
+                handleMatchFound(newMatch.id);
               } catch (err) {
                 console.error("Failed to start practice match:", err);
               }

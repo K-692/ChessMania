@@ -52,7 +52,7 @@ const convertPrice = (priceINR: number, currency: CurrencyCode): number => {
 };
 
 export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose }) => {
-  const { user, profile } = useAuth();
+  const { user, profile, refetchProfile } = useAuth();
   const [selectedPack, setSelectedPack] = useState<CoinPack>(COIN_PACKS[1]); // default to 1,000 coins
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>('INR');
   const [dailySpend, setDailySpend] = useState<number>(0);
@@ -237,6 +237,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
             const verifyResult = await verifyResponse.json();
             if (verifyResult.status === 'success') {
               setSuccessTxId(paymentId);
+              await refetchProfile();
               setCheckoutStep('success');
             } else {
               throw new Error('Payment verification returned an unsuccessful status.');

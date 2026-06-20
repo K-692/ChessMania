@@ -460,7 +460,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     }
   };
 
-  const isOnline = (lastActive: number) => Date.now() - lastActive < 5 * 60 * 1000;
+  const isOnline = (lastLogin: number) => Date.now() - (lastLogin || 0) < 5 * 60 * 1000;
 
   // Pending sent challenge IDs (to avoid showing challenge button while one is pending)
   const pendingSentChallengeUids = new Set(sentChallenges.map((c) => c.challengedUid));
@@ -611,7 +611,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
               <div className="divide-y divide-white/5 max-h-[480px] overflow-y-auto pr-2 scrollbar-thin">
                 {friendsProfiles.map((fProfile) => {
                   const bestAch = getBestAchievement(fProfile.gameplayCounts);
-                  const online = isOnline(fProfile.lastActiveAt);
+                  const online = isOnline(fProfile.lastLoginAt || 0);
                   const hasPendingChallenge = pendingSentChallengeUids.has(fProfile.uid);
 
                   const record = h2hRecords[fProfile.uid] || { wins: 0, losses: 0, draws: 0 };

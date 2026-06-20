@@ -156,17 +156,14 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceThem
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [allInChoice, setAllInChoice] = useState<string>('10 | 5');
   const [practiceColor, setPracticeColor] = useState<'white' | 'black' | 'random'>('white');
-  const userElo = (profile?.currentEloRating !== undefined ? profile.currentEloRating : profile?.rating) || 800;
+  const userElo = profile?.currentEloRating || profile?.rating || 400;
   const [practiceElo, setPracticeElo] = useState<number>(Math.max(400, userElo));
   const carouselRef = useRef<HTMLDivElement>(null);
 
   // Sync user ELO on profile load
   useEffect(() => {
-    if (profile?.currentEloRating !== undefined) {
-      setPracticeElo(Math.max(400, profile.currentEloRating));
-    } else if (profile?.rating) {
-      setPracticeElo(Math.max(400, profile.rating));
-    }
+    const elo = profile?.currentEloRating || profile?.rating || 400;
+    setPracticeElo(Math.max(400, elo));
   }, [profile?.currentEloRating, profile?.rating]);
 
   const knightImgSrc = `/pieces/${pieceTheme || 'classic'}/wn.png`;

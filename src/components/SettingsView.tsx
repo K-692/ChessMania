@@ -3,7 +3,7 @@ import { Volume2, VolumeX, Music, ArrowLeft, Eye, Check, Palette, HelpCircle, Se
 import { getSoundSettings, updateSoundSettings } from '../utils/sound';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, addDoc, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -19,7 +19,7 @@ const PIECE_THEMES = [
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [settings, setSettings] = useState(getSoundSettings());
-  const { user } = useAuth();
+  const { user, profile, updateCachedProfile } = useAuth();
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [queryText, setQueryText] = useState('');
   const [category, setCategory] = useState('bug');
@@ -28,18 +28,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
   const [submitSuccess, setSubmitSuccess] = useState<boolean | null>(null);
   const [submitError, setSubmitError] = useState('');
 
-  const syncSettingsToFirestore = async (updated: Record<string, any>) => {
-    if (!user) return;
-    try {
-      const userDocRef = doc(db, 'users', user.uid);
-      const settingsUpdates: Record<string, any> = {};
-      Object.entries(updated).forEach(([key, val]) => {
-        settingsUpdates[`settings.${key}`] = val;
-      });
-      await updateDoc(userDocRef, settingsUpdates);
-    } catch (e) {
-      console.warn("Failed to sync settings to Firestore:", e);
-    }
+  const syncSettingsToFirestore = (updated: Record<string, any>) => {
+    if (!profile) return;
+    updateCachedProfile({
+      settings: {
+        ...profile.settings,
+        ...updated
+      }
+    });
   };
 
   useEffect(() => {
