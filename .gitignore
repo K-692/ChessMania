@@ -29,6 +29,7 @@ venv/
 
 # Local environment variables containing credentials
 .env
+service-account.json
 
 # Design planner
 planner.docx

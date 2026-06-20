@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, runTransaction, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
 import { X, CreditCard, Globe, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
-import type { UserProfile } from '../types';
 
 interface AddFundsModalProps {
   isOpen: boolean;
@@ -58,12 +57,8 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
   const [currencyCode, setCurrencyCode] = useState<CurrencyCode>('INR');
   const [dailySpend, setDailySpend] = useState<number>(0);
   const [checkoutStep, setCheckoutStep] = useState<'selection' | 'checkout' | 'processing' | 'success'>('selection');
-  const [paymentMethod, setPaymentMethod] = useState<'card' | 'upi'>('card');
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [upiId, setUpiId] = useState('');
+  const [isRazorpaySdkLoaded, setIsRazorpaySdkLoaded] = useState(false);
+  const [razorpayError, setRazorpayError] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successTxId, setSuccessTxId] = useState('');
 
@@ -127,153 +122,151 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
     }
   }, [isOpen, user]);
 
+  // 3. Load Razorpay SDK dynamically when the modal is opened
+  useEffect(() => {
+    if (!isOpen) return;
+    let isMounted = true;
+    setIsRazorpaySdkLoaded(false);
+    setRazorpayError(null);
+
+    const loadSDK = () => {
+      const existingScript = document.getElementById('razorpay-sdk-script') as HTMLScriptElement | null;
+      if (existingScript && (window as any).Razorpay) {
+        if (isMounted) setIsRazorpaySdkLoaded(true);
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.id = 'razorpay-sdk-script';
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.async = true;
+      script.onload = () => {
+        if (isMounted) setIsRazorpaySdkLoaded(true);
+      };
+      script.onerror = () => {
+        if (isMounted) setRazorpayError('Failed to load Razorpay secure payment gateway script.');
+      };
+      document.body.appendChild(script);
+    };
+
+    loadSDK();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
+
+  const initiatePayment = async () => {
+    if (!user || !profile) return;
+    setErrorMessage('');
+    setCheckoutStep('processing');
+
+    try {
+      // 1. Call Express backend to create a Razorpay order
+      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+      const response = await fetch(`${apiBaseUrl}/api/create-order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          packId: selectedPack.id,
+          currency: currencyCode,
+          userId: user.uid
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Failed to create payment order.');
+      }
+
+      const order = await response.json();
+
+      // 2. Open Razorpay Checkout widget
+      const razorpayKeyId = import.meta.env.VITE_RAZORPAY_KEY_ID;
+      if (!razorpayKeyId) {
+        throw new Error('Razorpay Key ID is not configured in frontend environment.');
+      }
+
+      const options = {
+        key: razorpayKeyId,
+        amount: order.amount,
+        currency: order.currency,
+        name: 'Check & Mate',
+        description: `Purchase of ${selectedPack.coins.toLocaleString()} Chess Coins`,
+        order_id: order.id,
+        prefill: {
+          email: user.email || ''
+        },
+        notes: {
+          user_id: user.uid,
+          pack_id: selectedPack.id,
+          coins: selectedPack.coins.toString()
+        },
+        handler: (res: any) => {
+          const paymentId = res.razorpay_payment_id;
+          console.log(`Payment captured on client side: ${paymentId}. Waiting for webhook sync...`);
+          
+          // Start real-time Firestore listener on the transactions collection for this payment
+          const txDocRef = doc(db, 'transactions', paymentId);
+          const unsubscribe = onSnapshot(txDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const data = docSnap.data();
+              if (data.status === 'processed') {
+                // Clean up listener
+                unsubscribe();
+                // Show success screen
+                setSuccessTxId(paymentId);
+                setCheckoutStep('success');
+              }
+            }
+          }, (err) => {
+            console.error('Error listening to transaction doc:', err);
+            // Fail-safe fallback: wait 3 seconds and check user balance
+            setTimeout(() => {
+              setCheckoutStep('success');
+            }, 3000);
+          });
+
+          // Set a safety timeout of 15 seconds to avoid getting stuck if webhook fails
+          setTimeout(() => {
+            unsubscribe();
+            // Check if we are still processing, transition to selection
+            setCheckoutStep((current) => {
+              if (current === 'processing') {
+                setErrorMessage('Webhook verification timed out. If coins are not credited shortly, please contact support.');
+                return 'checkout';
+              }
+              return current;
+            });
+          }, 15000);
+        },
+        modal: {
+          ondismiss: () => {
+            // If user closes Razorpay modal, return to checkout step
+            setCheckoutStep('checkout');
+          }
+        },
+        theme: {
+          color: '#f59e0b'
+        }
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.open();
+
+    } catch (err: any) {
+      console.error('Checkout error:', err);
+      setErrorMessage(err.message || 'An error occurred while initiating the checkout.');
+      setCheckoutStep('checkout');
+    }
+  };
+
   if (!isOpen) return null;
 
   const currentCurrency = CURRENCIES[currencyCode];
   const isCapExceeded = dailySpend + selectedPack.finalPriceINR > 40000;
-
-  // Credit coins in Firestore
-  const creditCoins = async (txId: string, isReal: boolean) => {
-    if (!user || !profile) return;
-
-    const userDocRef = doc(db, 'users', user.uid);
-    const ledgerColRef = collection(db, 'walletLedger');
-
-    await runTransaction(db, async (transaction) => {
-      const userDoc = await transaction.get(userDocRef);
-      if (!userDoc.exists()) {
-        throw new Error('User profile does not exist');
-      }
-
-      const pData = userDoc.data() as UserProfile;
-      const balanceBefore = pData.bankBalance;
-      const balanceAfter = Math.round((balanceBefore + selectedPack.coins) * 10000) / 10000;
-      const totalCoinsEarned = (pData.totalCoinsEarned || balanceBefore) + selectedPack.coins;
-
-      // Update user document
-      transaction.update(userDocRef, {
-        bankBalance: balanceAfter,
-        totalCoinsEarned: totalCoinsEarned
-      });
-
-      // Write transaction ledger
-      const newLedgerDocRef = doc(ledgerColRef);
-      transaction.set(newLedgerDocRef, {
-        uid: user.uid,
-        type: 'purchase',
-        amount: selectedPack.coins,
-        matchId: null,
-        balanceBefore,
-        balanceAfter,
-        createdAt: Date.now(),
-        pricePaid: convertPrice(selectedPack.finalPriceINR, currencyCode),
-        pricePaidINR: selectedPack.finalPriceINR,
-        currency: currencyCode,
-        paymentGateway: isReal ? 'razorpay' : 'sandbox',
-        transactionId: txId
-      });
-    });
-  };
-
-  // Trigger Razorpay payment
-  const handleRazorpayPayment = () => {
-    const razorpayKey = import.meta.env.VITE_RAZORPAY_KEY_ID;
-    if (!razorpayKey || razorpayKey.includes('dummy') || razorpayKey === '') {
-      // Switch to standard Sandbox Checkout modal
-      setCheckoutStep('checkout');
-      return;
-    }
-
-    setCheckoutStep('processing');
-    setErrorMessage('');
-
-    const options = {
-      key: razorpayKey,
-      amount: Math.round(convertPrice(selectedPack.finalPriceINR, currencyCode) * 100), // Razorpay takes amount in subunits (paise / cents)
-      currency: currencyCode,
-      name: 'Check & Mate Lounge',
-      description: `Purchase of ${selectedPack.coins.toLocaleString()} Chess Coins`,
-      image: '/game_logo.png',
-      handler: async (response: any) => {
-        try {
-          const txId = response.razorpay_payment_id || `pay_${Math.random().toString(36).substr(2, 9)}`;
-          await creditCoins(txId, true);
-          setSuccessTxId(txId);
-          setCheckoutStep('success');
-        } catch (err: any) {
-          console.error('Failed to settle payment:', err);
-          setErrorMessage(err.message || 'Payment success but failed to credit coins. Please contact support.');
-          setCheckoutStep('selection');
-        }
-      },
-      prefill: {
-        name: profile?.displayName || user?.displayName || '',
-        email: user?.email || '',
-      },
-      theme: {
-        color: '#8b5cf6', // Violet accent
-      },
-      modal: {
-        ondismiss: () => {
-          setCheckoutStep('selection');
-        }
-      }
-    };
-
-    try {
-      // Load script if not already present
-      if (!(window as any).Razorpay) {
-        const script = document.createElement('script');
-        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-        script.async = true;
-        script.onload = () => {
-          const rzp = new (window as any).Razorpay(options);
-          rzp.open();
-        };
-        script.onerror = () => {
-          setErrorMessage('Failed to load payment gateway. Try simulated checkout.');
-          setCheckoutStep('checkout');
-        };
-        document.body.appendChild(script);
-      } else {
-        const rzp = new (window as any).Razorpay(options);
-        rzp.open();
-      }
-    } catch (e: any) {
-      console.error('Error opening Razorpay:', e);
-      setErrorMessage('Could not open Razorpay. Redirecting to Sandbox checkout.');
-      setCheckoutStep('checkout');
-    }
-  };
-
-  const handleSimulatedPayment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (paymentMethod === 'card' && (!cardNumber || !cardExpiry || !cardCvv || !cardName)) {
-      setErrorMessage('Please fill out all card details');
-      return;
-    }
-    if (paymentMethod === 'upi' && !upiId) {
-      setErrorMessage('Please enter your UPI ID');
-      return;
-    }
-
-    setCheckoutStep('processing');
-    setErrorMessage('');
-
-    // Simulate network latency
-    setTimeout(async () => {
-      try {
-        const txId = `tx_sb_${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
-        await creditCoins(txId, false);
-        setSuccessTxId(txId);
-        setCheckoutStep('success');
-      } catch (err: any) {
-        console.error('Failed to credit simulated coins:', err);
-        setErrorMessage(err.message || 'Simulation failed to credit coins.');
-        setCheckoutStep('checkout');
-      }
-    }, 1800);
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-4">
@@ -415,7 +408,7 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                   </p>
                 </div>
                 <button
-                  onClick={handleRazorpayPayment}
+                  onClick={() => setCheckoutStep('checkout')}
                   disabled={isCapExceeded}
                   className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 text-slate-950 px-6 py-3 rounded-xl font-bold shadow-lg shadow-amber-500/15 transition-all cursor-pointer border border-amber-400/20 text-sm flex items-center space-x-2"
                 >
@@ -427,105 +420,57 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
           )}
 
           {checkoutStep === 'checkout' && (
-            <form onSubmit={handleSimulatedPayment} className="space-y-4">
-              <div className="bg-amber-500/10 border border-amber-500/20 p-3 rounded-xl flex items-start gap-2.5 text-xs text-amber-400">
-                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-bold">Sandbox Payment Gateway Simulation</p>
-                  <p className="text-[10px] mt-0.5">Real gateway credentials are not loaded in .env yet. We are using a secure, client-side sandbox simulator.</p>
+            <div className="space-y-4 animate-fade-in">
+              {/* Order summary card */}
+              <div className="bg-slate-900/60 border border-white/5 rounded-xl p-4 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <img src={selectedPack.imagePath} alt="Coins" className="w-10 h-10 object-contain shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-bold text-white">
+                      {selectedPack.coins.toLocaleString()} Coins Pack
+                    </h4>
+                    <p className="text-[10px] text-slate-400">Order ID: {selectedPack.id}</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-slate-500 uppercase block tracking-wider font-semibold">Total Due</span>
+                  <span className="text-base font-black text-amber-400 font-mono">
+                    {currentCurrency.symbol}{convertPrice(selectedPack.finalPriceINR, currencyCode).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
                 </div>
               </div>
 
-              {/* Payment selector tabs */}
-              <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-1.5 rounded-xl border border-white/5">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('card')}
-                  className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center flex items-center justify-center space-x-2 ${
-                    paymentMethod === 'card' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <CreditCard className="w-3.5 h-3.5" />
-                  <span>Credit Card</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('upi')}
-                  className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer text-center flex items-center justify-center space-x-2 ${
-                    paymentMethod === 'upi' ? 'bg-violet-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <span>UPI / QR Code</span>
-                </button>
-              </div>
+              {/* Razorpay Button Container */}
+              <div className="bg-slate-950/40 border border-white/5 rounded-2xl p-6 flex flex-col items-center justify-center min-h-[180px] relative">
+                {!isRazorpaySdkLoaded && !razorpayError && (
+                  <div className="flex flex-col items-center space-y-3 py-6">
+                    <div className="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-xs text-slate-400 font-medium">Initializing Razorpay secure gateway...</span>
+                  </div>
+                )}
 
-              {paymentMethod === 'card' ? (
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Cardholder Name</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. John Doe"
-                      value={cardName}
-                      onChange={(e) => setCardName(e.target.value)}
-                      className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500"
-                    />
+                {razorpayError && (
+                  <div className="flex items-center gap-2 bg-red-950/20 border border-red-500/10 rounded-xl p-4 text-xs text-red-400 w-full">
+                    <AlertTriangle className="w-4 h-4 shrink-0 animate-pulse" />
+                    <span>{razorpayError}</span>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Card Number</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="XXXX XXXX XXXX XXXX"
-                      value={cardNumber}
-                      onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, '').substr(0, 16))}
-                      className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500 font-mono"
-                    />
+                )}
+
+                {isRazorpaySdkLoaded && !razorpayError && (
+                  <div className="w-full flex flex-col items-center justify-center space-y-4">
+                    <p className="text-xs text-slate-400 text-center font-medium">
+                      Press the button below to open the secure Razorpay payment window.
+                    </p>
+                    <button
+                      onClick={initiatePayment}
+                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 py-3 rounded-xl font-bold transition-all border border-amber-400/20 cursor-pointer shadow-lg shadow-amber-500/10 text-center text-sm flex items-center justify-center space-x-2 animate-fade-in"
+                    >
+                      <CreditCard className="w-4 h-4 stroke-[2.5]" />
+                      <span>Pay with Razorpay</span>
+                    </button>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Expiry Date</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="MM/YY"
-                        value={cardExpiry}
-                        onChange={(e) => setCardExpiry(e.target.value.substr(0, 5))}
-                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500 font-mono"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">CVV Code</label>
-                      <input
-                        type="password"
-                        required
-                        placeholder="***"
-                        value={cardCvv}
-                        onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').substr(0, 3))}
-                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500 font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">UPI address ID</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="username@upi"
-                      value={upiId}
-                      onChange={(e) => setUpiId(e.target.value)}
-                      className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500 font-mono text-left"
-                    />
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    A notification will be sent to your UPI app (Google Pay, PhonePe, Paytm, etc.) to approve the payment.
-                  </p>
-                </div>
-              )}
+                )}
+              </div>
 
               {errorMessage && (
                 <div className="flex items-center gap-2 bg-red-950/20 border border-red-500/10 rounded-xl p-3 text-xs text-red-400">
@@ -534,22 +479,17 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
                 </div>
               )}
 
+              {/* Actions */}
               <div className="flex gap-3 pt-4 border-t border-white/5">
                 <button
                   type="button"
                   onClick={() => setCheckoutStep('selection')}
                   className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold py-3 rounded-xl transition-all border border-white/5 cursor-pointer text-center"
                 >
-                  Go Back
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold py-3 rounded-xl transition-all border border-amber-500/20 cursor-pointer shadow-lg shadow-amber-500/10 text-center"
-                >
-                  Pay {currentCurrency.symbol}{convertPrice(selectedPack.finalPriceINR, currencyCode).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  Cancel & Go Back
                 </button>
               </div>
-            </form>
+            </div>
           )}
 
           {checkoutStep === 'processing' && (

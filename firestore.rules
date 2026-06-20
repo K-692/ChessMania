@@ -56,6 +56,11 @@ service cloud.firestore {
       allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
     }
     
+    match /transactions/{id} {
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow write: if false;
+    }
+    
     match /ratingLedger/{entryId} {
       allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid);
       allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
