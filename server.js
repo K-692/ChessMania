@@ -201,7 +201,6 @@ app.post('/api/verify-payment', async (req, res) => {
 
     const txDocRef = db.collection('transactions').doc(razorpay_payment_id);
     const userDocRef = db.collection('users').doc(userId);
-    const leaderboardDocRef = db.collection('leaderboards').doc('global').collection('players').doc(userId);
 
     // Run a transaction to ensure idempotency and atomic updates
     const result = await db.runTransaction(async (transaction) => {
@@ -258,12 +257,6 @@ app.post('/api/verify-payment', async (req, res) => {
         processed_at: Date.now()
       });
 
-      // Sync leaderboard
-      transaction.set(leaderboardDocRef, {
-        coinsEarned: totalCoinsEarned,
-        updatedAt: Date.now()
-      }, { merge: true });
-
       return { status: 'success', balanceBefore, balanceAfter };
     });
 
@@ -280,6 +273,41 @@ app.post('/api/verify-payment', async (req, res) => {
     return res.status(500).json({ error: error.message || 'Internal database error' });
   }
 });
+
+// Periodic matchmaking queue cleanup function
+async function cleanExpiredMatchmaking() {
+  try {
+    const now = Date.now();
+    const oneMinAgo = now - 60000;
+    const fiveMinsAgo = now - 300000;
+    const batch = db.batch();
+    let deleteCount = 0;
+
+    const statuses = ['waiting', 'matched', 'cancelled'];
+    for (const status of statuses) {
+      const snap = await db.collection('matchQueues').where('status', '==', status).get();
+      snap.forEach(doc => {
+        const data = doc.data();
+        const timestamp = data.createdAt || data.queuedAt || 0;
+        const limit = status === 'waiting' ? oneMinAgo : fiveMinsAgo;
+        if (timestamp < limit) {
+          batch.delete(doc.ref);
+          deleteCount++;
+        }
+      });
+    }
+
+    if (deleteCount > 0) {
+      await batch.commit();
+      console.log(`[Cleanup] Deleted ${deleteCount} expired matchmaking entries from firestore.`);
+    }
+  } catch (error) {
+    console.error('[Cleanup] Failed to clean expired matchmaking entries:', error);
+  }
+}
+
+// Run matchmaking queue cleanup every 5 minutes
+setInterval(cleanExpiredMatchmaking, 5 * 60 * 1000);
 
 // Start Server
 app.listen(PORT, () => {

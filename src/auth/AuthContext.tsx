@@ -291,6 +291,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         console.log('Bootstrapped config/game document.');
       }
+
+      const chatConfigRef = doc(db, 'config', 'chat');
+      const chatSnap = await getDoc(chatConfigRef);
+      if (!chatSnap.exists()) {
+        await setDoc(chatConfigRef, {
+          historyExpiryHours: 24,
+          createdAt: Date.now()
+        });
+        console.log('Bootstrapped config/chat document.');
+      }
     } catch (e) {
       console.warn('Error checking/creating start configuration collections:', e);
     }
@@ -382,9 +392,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updatedAt: now
       }, { merge: true });
 
-      if (docSnap.exists()) {
-        // Profile exists, apply hourly rewards lazily
-        await applyLazyHourlyRewardTx(firebaseUser.uid);
+      if (docSnap.exists() && profileData) {
+        // Profile exists, apply hourly rewards lazily if at least 1 hour has elapsed
+        const lastReward = profileData.lastHourlyRewardAt;
+        const timeDiff = Date.now() - (lastReward || 0);
+
+        if (!lastReward || timeDiff >= 3600000) {
+          await applyLazyHourlyRewardTx(firebaseUser.uid);
+        }
 
         // Correct legacy profile rating from 1200 to 0 if they haven't played any games
         const docSnapAfterInterest = await getDoc(userDocRef);

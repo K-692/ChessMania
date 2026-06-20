@@ -8,7 +8,7 @@ import {
   where,
   limit,
   setDoc,
-  deleteDoc
+  updateDoc
 } from 'firebase/firestore';
 import type { UserProfile, MatchQueueEntry, Match, GameMode } from '../types';
 
@@ -82,7 +82,7 @@ export async function joinQueue(
  */
 export async function leaveQueue(queueId: string): Promise<void> {
   const queueRef = doc(db, 'matchQueues', queueId);
-  await deleteDoc(queueRef);
+  await updateDoc(queueRef, { status: 'cancelled' });
 }
 
 /**
@@ -262,7 +262,7 @@ export async function findMatch(
       const blackUid = isMyWhite ? opponent.uid : myUid;
       
       let initialClockTime = getInitialTimeForMode(mode);
-      let matchTimeControl = '';
+      let matchTimeControl: string;
       
       if (mode === 'all_in') {
         matchTimeControl = opponent.timeControl || '30 | 10';
@@ -288,6 +288,7 @@ export async function findMatch(
       const newMatch: Match = {
         id: mId,
         players: [myUid, opponent.uid],
+        playerPair: [myUid, opponent.uid].sort().join('_'),
         whiteUid,
         blackUid,
         stake: mode === 'all_in' ? 0 : finalStake,

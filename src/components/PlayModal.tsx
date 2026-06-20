@@ -157,15 +157,15 @@ export const PlayModal: React.FC<PlayModalProps> = ({ isOpen, onClose, pieceThem
   const [allInChoice, setAllInChoice] = useState<string>('10 | 5');
   const [practiceColor, setPracticeColor] = useState<'white' | 'black' | 'random'>('white');
   const userElo = (profile?.currentEloRating !== undefined ? profile.currentEloRating : profile?.rating) || 800;
-  const [practiceElo, setPracticeElo] = useState<number>(userElo);
+  const [practiceElo, setPracticeElo] = useState<number>(Math.max(400, userElo));
   const carouselRef = useRef<HTMLDivElement>(null);
 
   // Sync user ELO on profile load
   useEffect(() => {
     if (profile?.currentEloRating !== undefined) {
-      setPracticeElo(profile.currentEloRating);
+      setPracticeElo(Math.max(400, profile.currentEloRating));
     } else if (profile?.rating) {
-      setPracticeElo(profile.rating);
+      setPracticeElo(Math.max(400, profile.rating));
     }
   }, [profile?.currentEloRating, profile?.rating]);
 

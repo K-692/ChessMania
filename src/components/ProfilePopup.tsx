@@ -1,7 +1,10 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { getBestAchievement } from '../utils/achievements';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../firebase';
+import { useAuth } from '../auth/AuthContext';
 
 interface ProfilePopupProps {
   profile: UserProfile;
@@ -68,7 +71,47 @@ const getCountryFlag = (countryName?: string): string => {
 };
 
 export const ProfilePopup: React.FC<ProfilePopupProps> = ({ profile, onClose }) => {
+  const { user } = useAuth();
+  const [h2h, setH2h] = useState<{ wins: number; losses: number; draws: number } | null>(null);
   const bestAch = getBestAchievement(profile.gameplayCounts);
+
+  useEffect(() => {
+    if (!user || user.uid === profile.uid || profile.uid.startsWith('bot_')) {
+      setH2h(null);
+      return;
+    }
+
+    const fetchH2H = async () => {
+      try {
+        const pair = [user.uid, profile.uid].sort().join('_');
+        const q = query(
+          collection(db, 'matches'),
+          where('playerPair', '==', pair)
+        );
+        const snap = await getDocs(q);
+        let wins = 0;
+        let losses = 0;
+        let draws = 0;
+        snap.forEach((docSnap) => {
+          const matchData = docSnap.data();
+          if (matchData.status === 'active') return;
+          const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
+          if (isDraw) {
+            draws++;
+          } else if (matchData.winnerUid === user.uid) {
+            wins++;
+          } else if (matchData.winnerUid) {
+            losses++;
+          }
+        });
+        setH2h({ wins, losses, draws });
+      } catch (err) {
+        console.warn('Failed to fetch head-to-head records:', err);
+      }
+    };
+
+    fetchH2H();
+  }, [user, profile.uid]);
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4" style={{ zIndex: 10000 }}>
@@ -138,6 +181,26 @@ export const ProfilePopup: React.FC<ProfilePopupProps> = ({ profile, onClose }) 
             </div>
           </div>
         </div>
+
+        {h2h && (
+          <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2 animate-fade-in">
+            <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">H2H Record (vs you)</h5>
+            <div className="grid grid-cols-3 gap-1 text-center text-xs">
+              <div className="text-emerald-400 font-bold">
+                <p className="text-[8px] text-slate-500 uppercase">Wins</p>
+                <p className="text-xs mt-0.5">{h2h.wins}</p>
+              </div>
+              <div className="text-red-400 font-bold">
+                <p className="text-[8px] text-slate-500 uppercase">Losses</p>
+                <p className="text-xs mt-0.5">{h2h.losses}</p>
+              </div>
+              <div className="text-slate-400 font-bold">
+                <p className="text-[8px] text-slate-500 uppercase">Draws</p>
+                <p className="text-xs mt-0.5">{h2h.draws}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-slate-900/60 border border-white/5 p-3 rounded-xl space-y-2">
           <h5 className="text-[10px] font-semibold text-slate-300 uppercase tracking-wide border-b border-white/5 pb-1">Best Achievement</h5>

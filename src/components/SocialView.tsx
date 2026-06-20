@@ -7,7 +7,7 @@ import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
 import { playNotifySound } from '../utils/sound';
 import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
-import type { UserProfile, Friendship, FriendlyChallenge, GameMode } from '../types';
+import type { Friendship, UserProfile, FriendlyChallenge, Match, GameMode } from '../types';
 import { ProfilePopup } from './ProfilePopup';
 
 interface SocialViewProps {
@@ -45,10 +45,11 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
   const [incomingRequests, setIncomingRequests] = useState<Friendship[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<Friendship[]>([]);
   const [friendsProfiles, setFriendsProfiles] = useState<UserProfile[]>([]);
-  const [friendships, setFriendships] = useState<Friendship[]>([]);
   const [receivedChallenges, setReceivedChallenges] = useState<FriendlyChallenge[]>([]);
   const [sentChallenges, setSentChallenges] = useState<FriendlyChallenge[]>([]);
   const [challengerProfiles, setChallengerProfiles] = useState<Record<string, UserProfile>>({});
+  const profileCacheRef = React.useRef<Record<string, UserProfile>>({});
+  const [h2hRecords, setH2hRecords] = useState<Record<string, { wins: number; losses: number; draws: number }>>({});
 
   // Active Challenge Modal State
   const [activeChallengeFriend, setActiveChallengeFriend] = useState<UserProfile | null>(null);
@@ -105,46 +106,47 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
         }
       });
 
-      setFriendships(listFriendships);
       setIncomingRequests(listIncoming);
       setOutgoingRequests(listOutgoing);
 
-      // Fetch profiles for the friend list and requests
+      // Fetch profiles for the friend list and requests using cached batch query
       const allNeededUids = [...profileIds, ...listIncoming.map(r => r.requesterUid), ...listOutgoing.map(r => r.receiverUid)];
-      const reqProfiles = { ...challengerProfiles };
-      let profilesChanged = false;
+      const missingUids = allNeededUids.filter(uid => !profileCacheRef.current[uid]);
 
-      for (const uid of allNeededUids) {
-        if (!reqProfiles[uid]) {
+      if (missingUids.length > 0) {
+        const chunks: string[][] = [];
+        for (let i = 0; i < missingUids.length; i += 30) {
+          chunks.push(missingUids.slice(i, i + 30));
+        }
+
+        for (const chunk of chunks) {
           try {
-            const uDoc = await getDoc(doc(db, 'users', uid));
-            if (uDoc.exists()) {
-              reqProfiles[uid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-              profilesChanged = true;
-            }
+            const q = query(collection(db, 'users'), where('uid', 'in', chunk));
+            const querySnap = await getDocs(q);
+            querySnap.forEach((docSnap) => {
+              const p = { uid: docSnap.id, ...docSnap.data() } as UserProfile;
+              profileCacheRef.current[p.uid] = p;
+            });
           } catch (err) {
-            console.warn("Failed to fetch user profile for social view:", err);
+            console.warn("Failed to batch fetch user profiles, falling back to individual fetches:", err);
+            for (const uid of chunk) {
+              try {
+                const uDoc = await getDoc(doc(db, 'users', uid));
+                if (uDoc.exists()) {
+                  profileCacheRef.current[uid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+                }
+              } catch (e) {}
+            }
           }
         }
       }
 
-      if (profilesChanged) {
-        setChallengerProfiles(reqProfiles);
-      }
+      setChallengerProfiles({ ...profileCacheRef.current });
 
       const uProfiles: UserProfile[] = [];
       for (const fId of profileIds) {
-        if (reqProfiles[fId]) {
-          uProfiles.push(reqProfiles[fId]);
-        } else {
-          try {
-            const uDoc = await getDoc(doc(db, 'users', fId));
-            if (uDoc.exists()) {
-              const p = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-              uProfiles.push(p);
-              reqProfiles[fId] = p;
-            }
-          } catch (e) {}
+        if (profileCacheRef.current[fId]) {
+          uProfiles.push(profileCacheRef.current[fId]);
         }
       }
       setFriendsProfiles(uProfiles);
@@ -158,8 +160,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     const unsubChallenges = onSnapshot(qChallenges, async (snap) => {
       const received: FriendlyChallenge[] = [];
       const sent: FriendlyChallenge[] = [];
-      const reqProfiles = { ...challengerProfiles };
-      let profilesChanged = false;
+      const neededUids: string[] = [];
 
       for (const docSnap of snap.docs) {
         const data = docSnap.data() as FriendlyChallenge;
@@ -167,36 +168,45 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
         if (data.challengerUid === user.uid) {
           sent.push(data);
-          const targetUid = data.challengedUid;
-          if (!reqProfiles[targetUid]) {
-            try {
-              const uDoc = await getDoc(doc(db, 'users', targetUid));
-              if (uDoc.exists()) {
-                reqProfiles[targetUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-                profilesChanged = true;
-              }
-            } catch (e) {}
-          }
+          neededUids.push(data.challengedUid);
         } else {
           received.push(data);
-          const targetUid = data.challengerUid;
-          if (!reqProfiles[targetUid]) {
-            try {
-              const uDoc = await getDoc(doc(db, 'users', targetUid));
-              if (uDoc.exists()) {
-                reqProfiles[targetUid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
-                profilesChanged = true;
-              }
-            } catch (e) {}
+          neededUids.push(data.challengerUid);
+        }
+      }
+
+      const missingUids = neededUids.filter(uid => !profileCacheRef.current[uid]);
+      if (missingUids.length > 0) {
+        const chunks: string[][] = [];
+        for (let i = 0; i < missingUids.length; i += 30) {
+          chunks.push(missingUids.slice(i, i + 30));
+        }
+
+        for (const chunk of chunks) {
+          try {
+            const q = query(collection(db, 'users'), where('uid', 'in', chunk));
+            const querySnap = await getDocs(q);
+            querySnap.forEach((docSnap) => {
+              const p = { uid: docSnap.id, ...docSnap.data() } as UserProfile;
+              profileCacheRef.current[p.uid] = p;
+            });
+          } catch (err) {
+            console.warn("Failed to batch fetch challenge user profiles:", err);
+            for (const uid of chunk) {
+              try {
+                const uDoc = await getDoc(doc(db, 'users', uid));
+                if (uDoc.exists()) {
+                  profileCacheRef.current[uid] = { uid: uDoc.id, ...uDoc.data() } as UserProfile;
+                }
+              } catch (e) {}
+            }
           }
         }
       }
 
       setReceivedChallenges(received);
       setSentChallenges(sent);
-      if (profilesChanged) {
-        setChallengerProfiles(reqProfiles);
-      }
+      setChallengerProfiles({ ...profileCacheRef.current });
     });
 
     return () => {
@@ -204,6 +214,47 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       unsubChallenges();
     };
   }, [user]);
+
+  // Load Head-to-Head records for friends list
+  useEffect(() => {
+    if (!user) return;
+    const fetchH2H = async () => {
+      try {
+        const q = query(
+          collection(db, 'matches'),
+          where('players', 'array-contains', user.uid)
+        );
+        const snap = await getDocs(q);
+        const records: Record<string, { wins: number; losses: number; draws: number }> = {};
+
+        snap.forEach((docSnap) => {
+          const matchData = docSnap.data() as Match;
+          if (matchData.status === 'active') return;
+
+          const oppUid = matchData.players.find(p => p !== user.uid);
+          if (!oppUid) return;
+
+          if (!records[oppUid]) {
+            records[oppUid] = { wins: 0, losses: 0, draws: 0 };
+          }
+
+          const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
+          if (isDraw) {
+            records[oppUid].draws += 1;
+          } else if (matchData.winnerUid === user.uid) {
+            records[oppUid].wins += 1;
+          } else if (matchData.winnerUid) {
+            records[oppUid].losses += 1;
+          }
+        });
+
+        setH2hRecords(records);
+      } catch (err) {
+        console.warn('Failed to load H2H records:', err);
+      }
+    };
+    fetchH2H();
+  }, [user, friendsProfiles]);
 
   // Add Friend Request submission
   const handleSendFriendRequest = async (e: React.FormEvent) => {
@@ -563,12 +614,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                   const online = isOnline(fProfile.lastActiveAt);
                   const hasPendingChallenge = pendingSentChallengeUids.has(fProfile.uid);
 
-                  const friendship = user ? friendships.find(
-                    (f) =>
-                      (f.requesterUid === user.uid && f.receiverUid === fProfile.uid) ||
-                      (f.requesterUid === fProfile.uid && f.receiverUid === user.uid)
-                  ) : undefined;
-                  const userStats = user ? friendship?.stats?.[user.uid] : undefined;
+                  const record = h2hRecords[fProfile.uid] || { wins: 0, losses: 0, draws: 0 };
 
                   return (
                     <div key={fProfile.uid} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
@@ -609,7 +655,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                             </span>
                             <span>•</span>
                             <span>
-                              Record: <span className="text-emerald-400">{userStats?.wins || 0}W</span> - <span className="text-red-400">{userStats?.losses || 0}L</span> - <span className="text-amber-400">{userStats?.draws || 0}D</span>
+                              Record: <span className="text-emerald-400">{record.wins}W</span> - <span className="text-red-400">{record.losses}L</span> - <span className="text-amber-400">{record.draws}D</span>
                             </span>
                           </p>
                         </div>
@@ -953,7 +999,7 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
     return [uid1, uid2].sort().join('_');
   };
 
-  // Clean up messages older than 24 hours on load
+  // Clean up messages older than configured historyExpiryHours limit on load
   useEffect(() => {
     if (!user) return;
     const cleanup = async () => {
@@ -961,7 +1007,19 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
         const threadId = getThreadId(user.uid, friend.uid);
         const q = collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages');
         const snap = await getDocs(q);
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+
+        // Fetch chat history expiry limit from configuration
+        let historyExpiryHours = 24;
+        try {
+          const configSnap = await getDoc(doc(db, 'config', 'chat'));
+          if (configSnap.exists()) {
+            historyExpiryHours = configSnap.data().historyExpiryHours ?? 24;
+          }
+        } catch (configErr) {
+          console.warn("Failed to fetch chat configuration:", configErr);
+        }
+
+        const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
         snap.docs.forEach((docSnap) => {
           const data = docSnap.data();
           if (data.createdAt < cutoff) {
@@ -979,39 +1037,59 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
   useEffect(() => {
     if (!user) return;
     let isInitial = true;
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
     const threadId = getThreadId(user.uid, friend.uid);
     const q = query(
       collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
       orderBy('createdAt', 'asc')
     );
-    const unsubscribe = onSnapshot(q, (snap) => {
-      const msgs: any[] = [];
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      snap.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data.createdAt >= cutoff) {
-          msgs.push({ id: docSnap.id, ...data });
-        }
-      });
-      setMessages(msgs);
 
-      if (!isInitial) {
-        let hasNewFromOther = false;
-        snap.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            if (data.senderUid !== user?.uid) {
-              hasNewFromOther = true;
+    let historyExpiryHours = 24;
+    getDoc(doc(db, 'config', 'chat'))
+      .then((configSnap) => {
+        if (configSnap.exists()) {
+          historyExpiryHours = configSnap.data().historyExpiryHours ?? 24;
+        }
+      })
+      .catch(console.warn)
+      .finally(() => {
+        if (!active) return;
+        unsubscribe = onSnapshot(q, (snap) => {
+          const msgs: any[] = [];
+          const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
+          snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (data.createdAt >= cutoff) {
+              msgs.push({ id: docSnap.id, ...data });
+            }
+          });
+          setMessages(msgs);
+
+          if (!isInitial) {
+            let hasNewFromOther = false;
+            snap.docChanges().forEach((change) => {
+              if (change.type === 'added') {
+                const data = change.doc.data();
+                if (data.senderUid !== user?.uid) {
+                  hasNewFromOther = true;
+                }
+              }
+            });
+            if (hasNewFromOther) {
+              playNotifySound();
             }
           }
+          isInitial = false;
         });
-        if (hasNewFromOther) {
-          playNotifySound();
-        }
+      });
+
+    return () => {
+      active = false;
+      if (unsubscribe) {
+        unsubscribe();
       }
-      isInitial = false;
-    });
-    return () => unsubscribe();
+    };
   }, [user, friend.uid]);
 
   // Auto-scroll

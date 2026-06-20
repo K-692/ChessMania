@@ -413,8 +413,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   useEffect(() => {
     if (!match || match.status !== 'active') return;
 
-    if (isMyTurn && preMoves.length > 0) {
-      const nextMove = preMoves[0];
+    const currentPreMoves = preMovesRef.current;
+    if (isMyTurn && currentPreMoves.length > 0) {
+      const nextMove = currentPreMoves[0];
       setIllegalMoveSquares(null);
 
       const officialChess = new Chess(match.boardFEN);
@@ -438,7 +439,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           playMoveSound();
         }
 
-        const remaining = preMoves.slice(1);
+        const remaining = currentPreMoves.slice(1);
         setPreMoves(remaining);
 
         const opt = getOptimisticState(nextFen, remaining);
@@ -494,7 +495,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         }, 1550);
       }
     }
-  }, [isMyTurn, match?.boardFEN, preMoves]);
+  }, [isMyTurn, match?.boardFEN]);
 
   // 2. Realtime clock countdowns
   // Sync baseline ref ONLY when lastMoveAt changes (i.e., real move or reconnect reset)

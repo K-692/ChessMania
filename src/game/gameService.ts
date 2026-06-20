@@ -596,8 +596,8 @@ export async function acceptFriendlyChallenge(
     const whiteUid = isChallengerWhite ? challengerUid : challengedUid;
     const blackUid = isChallengerWhite ? challengedUid : challengerUid;
 
-    let initialClockTime = 10 * 60 * 1000;
-    let matchTimeControl = '';
+    let initialClockTime: number;
+    let matchTimeControl: string;
     
     if (mode === 'all_in') {
       matchTimeControl = '10 | 5'; // Default for friendly All-In challenge
@@ -610,6 +610,7 @@ export async function acceptFriendlyChallenge(
     const newMatch: Match = {
       id: mId,
       players: [challengerUid, challengedUid],
+      playerPair: [challengerUid, challengedUid].sort().join('_'),
       challengeId,
       whiteUid,
       blackUid,
@@ -697,6 +698,7 @@ export async function createPracticeMatch(
   const newMatch: Match = {
     id: mId,
     players: [userUid, botUid],
+    playerPair: [userUid, botUid].sort().join('_'),
     whiteUid,
     blackUid,
     stake: 0,

@@ -77,6 +77,7 @@ export interface MatchClocks {
 export interface Match {
   id: string;
   players: string[]; // [whiteUid, blackUid]
+  playerPair?: string; // Composite key for sorted player pairs
   challengeId?: string | null;
   whiteUid: string;
   blackUid: string;

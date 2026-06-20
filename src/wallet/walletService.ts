@@ -112,21 +112,6 @@ export async function applyLazyHourlyRewardTx(uid: string): Promise<UserProfile>
         const newLedgerDocRef = doc(ledgerColRef);
         transaction.set(newLedgerDocRef, entry);
       }
-
-      // Sync leaderboard
-      const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', uid);
-      transaction.set(leaderboardDocRef, {
-        eloRating: updatedProfile.currentEloRating,
-        coinsEarned: updatedProfile.totalCoinsEarned,
-        displayName: updatedProfile.displayName,
-        photoURL: updatedProfile.photoURL,
-        totalGamesPlayed: (updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0),
-        winRateRatio: ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0)) > 0
-          ? Math.round(((updatedProfile.wins || 0) / ((updatedProfile.wins || 0) + (updatedProfile.losses || 0) + (updatedProfile.draws || 0))) * 100)
-          : 0,
-        gameplayCounts: updatedProfile.gameplayCounts || {},
-        updatedAt: now
-      }, { merge: true });
     }
 
     return updatedProfile;

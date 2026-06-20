@@ -369,66 +369,81 @@ const AppContent: React.FC = () => {
       return;
     }
 
+    let active = true;
     const unsubscribers: (() => void)[] = [];
-    
-    friendsUids.forEach((friendUid) => {
-      const threadId = [user.uid, friendUid].sort().join('_');
-      const q = query(
-        collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
-        orderBy('createdAt', 'asc')
-      );
 
-      let isInitial = true;
-
-      const unsub = onSnapshot(q, (snap) => {
-        const isCurrentChatOpen = openChatFriend?.uid === friendUid;
-        if (isCurrentChatOpen) {
-          localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+    let historyExpiryHours = 24;
+    getDoc(doc(db, 'config', 'chat'))
+      .then((configSnap) => {
+        if (configSnap.exists()) {
+          historyExpiryHours = configSnap.data().historyExpiryHours ?? 24;
         }
-        const lastRead = parseInt(localStorage.getItem(`lastRead_${threadId}`) || '0');
-        let unread = 0;
-        let hasNewMessage = false;
+      })
+      .catch(console.warn)
+      .finally(() => {
+        if (!active) return;
 
-        snap.forEach((docSnap) => {
-          const msg = docSnap.data();
-          if (msg.senderUid !== user.uid && msg.createdAt > lastRead) {
-            unread++;
-          }
-        });
+        friendsUids.forEach((friendUid) => {
+          const threadId = [user.uid, friendUid].sort().join('_');
+          const q = query(
+            collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
+            orderBy('createdAt', 'asc')
+          );
 
-        // Check if a new message was added after initial load
-        if (!isInitial) {
-          snap.docChanges().forEach((change) => {
-            if (change.type === 'added') {
-              const msg = change.doc.data();
-              if (msg.senderUid !== user.uid && msg.createdAt > lastRead) {
-                hasNewMessage = true;
+          let isInitial = true;
+
+          const unsub = onSnapshot(q, (snap) => {
+            const isCurrentChatOpen = openChatFriend?.uid === friendUid;
+            if (isCurrentChatOpen) {
+              localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+            }
+            const lastRead = parseInt(localStorage.getItem(`lastRead_${threadId}`) || '0');
+            let unread = 0;
+            let hasNewMessage = false;
+            const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
+
+            snap.forEach((docSnap) => {
+              const msg = docSnap.data();
+              if (msg.senderUid !== user.uid && msg.createdAt > lastRead && msg.createdAt >= cutoff) {
+                unread++;
+              }
+            });
+
+            // Check if a new message was added after initial load
+            if (!isInitial) {
+              snap.docChanges().forEach((change) => {
+                if (change.type === 'added') {
+                  const msg = change.doc.data();
+                  if (msg.senderUid !== user.uid && msg.createdAt > lastRead && msg.createdAt >= cutoff) {
+                    hasNewMessage = true;
+                  }
+                }
+              });
+            }
+
+            setUnreadCounts((prev) => ({
+              ...prev,
+              [friendUid]: unread
+            }));
+
+            if (hasNewMessage && view !== 'game' && !isCurrentChatOpen) {
+              const currentSettings = getSoundSettings();
+              if (!currentSettings.muted) {
+                playNotifySound();
               }
             }
+
+            isInitial = false;
+          }, (err) => {
+            console.warn(`Error listening to messages for friend ${friendUid}:`, err);
           });
-        }
 
-        setUnreadCounts((prev) => ({
-          ...prev,
-          [friendUid]: unread
-        }));
-
-        if (hasNewMessage && view !== 'game' && !isCurrentChatOpen) {
-          const currentSettings = getSoundSettings();
-          if (!currentSettings.muted) {
-            playNotifySound();
-          }
-        }
-
-        isInitial = false;
-      }, (err) => {
-        console.warn(`Error listening to messages for friend ${friendUid}:`, err);
+          unsubscribers.push(unsub);
+        });
       });
 
-      unsubscribers.push(unsub);
-    });
-
     return () => {
+      active = false;
       unsubscribers.forEach((unsub) => unsub());
     };
   }, [user, friendsUids, openChatFriend, view]);
