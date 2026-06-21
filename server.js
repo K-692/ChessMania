@@ -11,8 +11,8 @@ import { getFirestore } from 'firebase-admin/firestore';
 dotenv.config();
 
 // Razorpay Environment Diagnostics
-const rzpKeyId = process.env.VITE_RAZORPAY_KEY_ID;
-const rzpKeySecret = process.env.RAZORPAY_KEY_SECRET;
+const rzpKeyId = process.env.VITE_RAZORPAY_KEY_ID?.trim();
+const rzpKeySecret = process.env.RAZORPAY_KEY_SECRET?.trim();
 
 console.log('----------------------------------------------------');
 console.log('📊 [Diagnostics] Checking Razorpay Configuration:');
@@ -100,8 +100,8 @@ app.post('/api/create-order', async (req, res) => {
     return res.status(400).json({ error: `Invalid packId: ${packId}` });
   }
 
-  const keyId = process.env.VITE_RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const keyId = (process.env.VITE_RAZORPAY_KEY_ID || '').trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
 
   if (!keyId || !keySecret) {
     return res.status(500).json({ error: 'Razorpay keys are not configured on the server.' });
@@ -154,8 +154,8 @@ app.post('/api/verify-payment', async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters: razorpay_order_id, razorpay_payment_id, razorpay_signature' });
   }
 
-  const keyId = process.env.VITE_RAZORPAY_KEY_ID;
-  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  const keyId = (process.env.VITE_RAZORPAY_KEY_ID || '').trim();
+  const keySecret = (process.env.RAZORPAY_KEY_SECRET || '').trim();
 
   if (!keyId || !keySecret) {
     return res.status(500).json({ error: 'Razorpay keys are not configured on the server.' });
