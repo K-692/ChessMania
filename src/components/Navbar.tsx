@@ -103,13 +103,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
             }
           }}
         >
-          <div className="flex items-center justify-center bg-slate-900/60 p-0.5 rounded-xl shadow-lg border border-white/5 overflow-hidden w-11 h-11 shrink-0">
+          <div className="flex items-center justify-center bg-slate-900/60 p-0.5 rounded-xl shadow-lg border border-white/5 overflow-hidden w-16 h-16 shrink-0">
             <img src="/game_logo.png" alt="Check & Mate Logo" className="w-full h-full object-cover" />
           </div>
           <div className="flex flex-col text-left leading-[1.05] tracking-widest bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent select-none font-black py-0.5">
-            <span className="text-[11px] uppercase font-black">CHECK</span>
-            <span className="text-[9px] font-bold text-slate-400 text-left">&</span>
-            <span className="text-[11px] uppercase font-black">MATE</span>
+            <span className="text-[13px] uppercase font-black">CHECK</span>
+            <span className="text-[10px] font-bold text-slate-400 text-left">&</span>
+            <span className="text-[13px] uppercase font-black">MATE</span>
           </div>
         </div>
 

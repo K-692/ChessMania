@@ -1,5 +1,5 @@
 import { db } from '../firebase';
-import { doc, runTransaction, collection, getDoc } from 'firebase/firestore';
+import { doc, runTransaction, collection, getDoc, writeBatch } from 'firebase/firestore';
 import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -33,71 +33,74 @@ export async function makeMove(
   const matchDocRef = doc(db, 'matches', matchId);
   const now = Date.now();
 
-  await runTransaction(db, async (transaction) => {
-    const matchSnap = await transaction.get(matchDocRef);
-    if (!matchSnap.exists()) {
-      throw new Error('Match does not exist');
-    }
+  const matchSnap = await getDoc(matchDocRef);
+  if (!matchSnap.exists()) {
+    throw new Error('Match does not exist');
+  }
 
-    const matchData = matchSnap.data() as Match;
+  const matchData = matchSnap.data() as Match;
 
-    // Guard: Ensure match is still active
-    if (matchData.status !== 'active') {
-      throw new Error('Match has already finished');
-    }
+  // Guard: Ensure match is still active
+  if (matchData.status !== 'active') {
+    throw new Error('Match has already finished');
+  }
 
-    // Guard: Ensure correct player turn
-    const expectedPlayer = matchData.turn === 'w' ? matchData.whiteUid : matchData.blackUid;
-    if (playerUid !== expectedPlayer) {
-      throw new Error('Not your turn');
-    }
+  // Guard: Ensure correct player turn
+  const expectedPlayer = matchData.turn === 'w' ? matchData.whiteUid : matchData.blackUid;
+  if (playerUid !== expectedPlayer) {
+    throw new Error('Not your turn');
+  }
 
-    // Compute clock elapsed time and add timeControl increment
-    const elapsed = now - matchData.lastMoveAt;
-    const increment = matchData.timeControl 
-      ? parseTimeControl(matchData.timeControl).increment 
-      : getIncrementForMode(matchData.mode);
-    const remainingTime = Math.max(0, matchData.clocks[playerUid] - elapsed) + increment;
+  // Compute clock elapsed time and add timeControl increment
+  const elapsed = now - matchData.lastMoveAt;
+  const increment = matchData.timeControl 
+    ? parseTimeControl(matchData.timeControl).increment 
+    : getIncrementForMode(matchData.mode);
+  const remainingTime = Math.max(0, matchData.clocks[playerUid] - elapsed) + increment;
 
-    const updatedClocks = {
-      ...matchData.clocks,
-      [playerUid]: remainingTime,
-    };
+  const updatedClocks = {
+    ...matchData.clocks,
+    [playerUid]: remainingTime,
+  };
 
-    // If clock hit 0, settle the match as a timeout
-    if (remainingTime <= 0) {
-      const opponentUid = playerUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
-      transaction.update(matchDocRef, {
-        clocks: updatedClocks,
-        status: 'timeout',
-        winnerUid: opponentUid,
-        finishedAt: now,
-      });
-      return;
-    }
+  const batch = writeBatch(db);
 
-    // Update state for next turn
-    const nextTurn = matchData.turn === 'w' ? 'b' : 'w';
-    const updatedMoves = [...matchData.moves, sanMove];
-
-    transaction.update(matchDocRef, {
-      boardFEN: newFen,
-      turn: nextTurn,
-      moves: updatedMoves,
+  // If clock hit 0, settle the match as a timeout
+  if (remainingTime <= 0) {
+    const opponentUid = playerUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
+    batch.update(matchDocRef, {
       clocks: updatedClocks,
-      lastMoveAt: now,
+      status: 'timeout',
+      winnerUid: opponentUid,
+      finishedAt: now,
     });
+    await batch.commit();
+    return;
+  }
 
-    const nextMoveIndex = matchData.moves.length;
-    const moveDocRef = doc(collection(db, 'matches', matchId, 'moves'), String(nextMoveIndex));
-    transaction.set(moveDocRef, {
-      san: sanMove,
-      fen: newFen,
-      playedBy: playerUid,
-      playedAt: now,
-      index: nextMoveIndex
-    });
+  // Update state for next turn
+  const nextTurn = matchData.turn === 'w' ? 'b' : 'w';
+  const updatedMoves = [...matchData.moves, sanMove];
+
+  batch.update(matchDocRef, {
+    boardFEN: newFen,
+    turn: nextTurn,
+    moves: updatedMoves,
+    clocks: updatedClocks,
+    lastMoveAt: now,
   });
+
+  const nextMoveIndex = matchData.moves.length;
+  const moveDocRef = doc(collection(db, 'matches', matchId, 'moves'), String(nextMoveIndex));
+  batch.set(moveDocRef, {
+    san: sanMove,
+    fen: newFen,
+    playedBy: playerUid,
+    playedAt: now,
+    index: nextMoveIndex
+  });
+
+  await batch.commit();
 }
 
 /**

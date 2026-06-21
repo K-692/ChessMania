@@ -6,7 +6,7 @@ import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo, calculateElo } from '../game/gameService';
 import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2 } from 'lucide-react';
+import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
@@ -69,6 +69,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     }
   });
   const [illegalMoveSquares, setIllegalMoveSquares] = useState<{ from: string; to: string } | null>(null);
+  const [historyIndex, setHistoryIndex] = useState<number>(-2);
   
   const preMovesRef = useRef(preMoves);
   useEffect(() => {
@@ -109,6 +110,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     const tempChess = new Chess(baseFen);
     for (const pm of queue) {
       try {
+        const piece = tempChess.get(pm.from as any);
+        if (piece && piece.color !== tempChess.turn()) {
+          const tokens = tempChess.fen().split(' ');
+          tokens[1] = piece.color;
+          tempChess.load(tokens.join(' '));
+        }
         tempChess.move({
           from: pm.from,
           to: pm.to,
@@ -122,6 +129,20 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       fen: tempChess.fen(),
       chess: tempChess
     };
+  };
+
+  const getFenForHistoryIndex = (index: number) => {
+    if (!match) return 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+    const tempChess = new Chess();
+    for (let i = 0; i <= index; i++) {
+      try {
+        tempChess.move(match.moves[i]);
+      } catch (err) {
+        console.warn('Replaying history failed at index', i, match.moves[i], err);
+        break;
+      }
+    }
+    return tempChess.fen();
   };
 
   // Game live messaging states
@@ -484,6 +505,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => unsubscribe();
   }, [matchId, whiteProfile, blackProfile, user]);
 
+  // Synchronize historyIndex to latest move whenever new moves are played
+  const prevMovesLengthRef = useRef(0);
+  useEffect(() => {
+    if (!match) return;
+    const currentLen = match.moves.length;
+    const prevLen = prevMovesLengthRef.current;
+    prevMovesLengthRef.current = currentLen;
+
+    if (historyIndex === prevLen - 1 || historyIndex === -2 || historyIndex >= currentLen) {
+      setHistoryIndex(currentLen - 1);
+    }
+  }, [match?.moves?.length, historyIndex]);
+
   // Hook to execute queued pre-moves when it becomes our turn
   useEffect(() => {
     if (!match || match.status !== 'active') return;
@@ -835,9 +869,24 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         alert("Premove queue is full (max 3 premoves).");
         return false;
       }
-      // Pre-move drop handling
+      
+      const myColor = isWhite ? 'w' : 'b';
       const opt = getOptimisticState(match.boardFEN, preMoves);
       const tempChess = new Chess(opt.fen);
+      
+      // Get the piece at the source square
+      const piece = tempChess.get(sourceSquare as any);
+      if (!piece || piece.color !== myColor) {
+        return false; // Can only premove our own pieces
+      }
+
+      // Temporarily toggle turn to myColor in tempChess if it is not myColor
+      if (tempChess.turn() !== myColor) {
+        const tokens = tempChess.fen().split(' ');
+        tokens[1] = myColor;
+        tempChess.load(tokens.join(' '));
+      }
+
       const moves = tempChess.moves({ verbose: true });
       const isLegalPromo = moves.some(
         m => m.from === sourceSquare && m.to === targetSquare && m.promotion
@@ -917,10 +966,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         }
       }
     } else if (settings.preMoveEnabled) {
+      const myColor = isWhite ? 'w' : 'b';
+      const opt = getOptimisticState(match.boardFEN, preMoves);
+      const tempChess = opt.chess;
+      
+      // Temporarily toggle turn to myColor in tempChess if it is not myColor
+      if (tempChess.turn() !== myColor) {
+        const tokens = tempChess.fen().split(' ');
+        tokens[1] = myColor;
+        tempChess.load(tokens.join(' '));
+      }
+
+      const piece = tempChess.get(square as any);
+
       if (preMoves.length >= 3 && selectedSquare) {
         // If clicking a target square to make a 4th premove
-        const opt = getOptimisticState(match.boardFEN, preMoves);
-        const moves = opt.chess.moves({
+        const moves = tempChess.moves({
           square: selectedSquare as any,
           verbose: true
         });
@@ -931,9 +992,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           return;
         }
       }
-      const opt = getOptimisticState(match.boardFEN, preMoves);
-      const piece = opt.chess.get(square as any);
-      const myColor = isWhite ? 'w' : 'b';
 
       if (selectedSquare) {
         if (selectedSquare === square) {
@@ -941,7 +999,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           return;
         }
 
-        const moves = opt.chess.moves({
+        const moves = tempChess.moves({
           square: selectedSquare as any,
           verbose: true
         });
@@ -986,8 +1044,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         alert("Premove queue is full (max 3 premoves).");
         return;
       }
+      const myColor = isWhite ? 'w' : 'b';
       const opt = getOptimisticState(match.boardFEN, preMoves);
       const tempChess = new Chess(opt.fen);
+
+      // Temporarily toggle turn to myColor in tempChess if it is not myColor
+      if (tempChess.turn() !== myColor) {
+        const tokens = tempChess.fen().split(' ');
+        tokens[1] = myColor;
+        tempChess.load(tokens.join(' '));
+      }
+
       let moveRes = null;
       try {
         moveRes = tempChess.move({ from, to, promotion: pieceType });
@@ -1273,7 +1340,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         <div className="chessboard-container aspect-square w-full h-auto lg:h-[calc(100vh-120px)] lg:max-h-[calc(100vh-120px)] lg:w-[calc(100vh-120px)] xl:h-[calc(100vh-140px)] xl:max-h-[calc(100vh-140px)] xl:w-[calc(100vh-140px)] bg-[#1a1c23] shadow-2xl overflow-hidden border border-white/10 flex items-center justify-center animate-fade-in">
           <Chessboard
             options={{
-              position: localFen,
+              position: (match && historyIndex === match.moves.length - 1) ? localFen : getFenForHistoryIndex(historyIndex),
               onPieceDrop: ({ sourceSquare, targetSquare }) => {
                 if (targetSquare) {
                   return onPieceDrop(sourceSquare, targetSquare);
@@ -1281,7 +1348,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 return false;
               },
               boardOrientation: isWhite ? 'white' : 'black',
-              allowDragging: match.status === 'active' && (isMyTurn || settings.preMoveEnabled),
+              allowDragging: match.status === 'active' && historyIndex === match.moves.length - 1 && (isMyTurn || settings.preMoveEnabled),
               animationDurationInMs: 100,
               darkSquareStyle: { backgroundColor: 'transparent' },
               lightSquareStyle: { backgroundColor: 'transparent' },
@@ -1508,6 +1575,48 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                         }, [])}
                       </div>
                     )}
+                  </div>
+                  {/* History Navigation Controls */}
+                  <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-white/5 shrink-0 select-none">
+                    <button
+                      onClick={() => {
+                        if (historyIndex > -1) {
+                          setHistoryIndex(prev => prev - 1);
+                        }
+                      }}
+                      disabled={!match || historyIndex <= -1}
+                      className="flex-grow flex items-center justify-center space-x-1.5 px-3 py-2 bg-slate-900/60 hover:bg-slate-800 border border-white/5 hover:border-white/10 rounded-xl text-xs font-semibold text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:text-white transition-all cursor-pointer"
+                      title="Previous Move"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>Back</span>
+                    </button>
+                    
+                    {match && historyIndex !== match.moves.length - 1 && (
+                      <button
+                        onClick={() => {
+                          setHistoryIndex(match.moves.length - 1);
+                        }}
+                        className="px-3 py-2 bg-violet-600/20 hover:bg-violet-600/35 border border-violet-500/25 rounded-xl text-[10px] font-bold text-violet-300 uppercase tracking-wider transition-all cursor-pointer"
+                        title="Jump to Live Move"
+                      >
+                        Live
+                      </button>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        if (match && historyIndex < match.moves.length - 1) {
+                          setHistoryIndex(prev => prev + 1);
+                        }
+                      }}
+                      disabled={!match || historyIndex >= match.moves.length - 1}
+                      className="flex-grow flex items-center justify-center space-x-1.5 px-3 py-2 bg-slate-900/60 hover:bg-slate-800 border border-white/5 hover:border-white/10 rounded-xl text-xs font-semibold text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:text-white transition-all cursor-pointer"
+                      title="Next Move"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
               ) : (

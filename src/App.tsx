@@ -80,73 +80,7 @@ const AppContent: React.FC = () => {
   const [isSavingName, setIsSavingName] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
 
-  const [networkStats, setNetworkStats] = useState({ ping: 25, strength: 'Excellent', bars: 4 });
 
-  useEffect(() => {
-    const getStats = () => {
-      const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-      if (conn) {
-        const rtt = conn.rtt || 50;
-        let bars = 4;
-        let strength = 'Excellent';
-        if (rtt > 300) {
-          bars = 1;
-          strength = 'Poor';
-        } else if (rtt > 150) {
-          bars = 2;
-          strength = 'Fair';
-        } else if (rtt > 80) {
-          bars = 3;
-          strength = 'Good';
-        }
-        return { ping: rtt, strength, bars };
-      }
-      return navigator.onLine ? { ping: 35, strength: 'Excellent', bars: 4 } : { ping: 999, strength: 'Offline', bars: 0 };
-    };
-
-    setNetworkStats(getStats());
-
-    const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
-    const updateConnectionStatus = () => {
-      setNetworkStats(getStats());
-    };
-
-    if (conn) {
-      conn.addEventListener('change', updateConnectionStatus);
-    }
-
-    const pingInterval = setInterval(async () => {
-      const startTime = performance.now();
-      try {
-        await fetch('/favicon.svg?cb=' + Date.now(), { method: 'HEAD', cache: 'no-store' });
-        const latency = Math.round(performance.now() - startTime);
-        let bars = 4;
-        let strength = 'Excellent';
-        if (latency > 300) {
-          bars = 1;
-          strength = 'Poor';
-        } else if (latency > 150) {
-          bars = 2;
-          strength = 'Fair';
-        } else if (latency > 80) {
-          bars = 3;
-          strength = 'Good';
-        }
-        setNetworkStats({ ping: latency, strength, bars });
-      } catch (e) {
-        if (!navigator.onLine) {
-          setNetworkStats({ ping: 999, strength: 'Offline', bars: 0 });
-        }
-      }
-    }, 10000);
-
-    return () => {
-      if (conn) {
-        conn.removeEventListener('change', updateConnectionStatus);
-      }
-      clearInterval(pingInterval);
-    };
-  }, []);
 
   const handleSaveUsername = async () => {
     if (!user || !profile) return;
@@ -699,7 +633,7 @@ const AppContent: React.FC = () => {
                 {/* Floating neon background glow */}
                 <div className="absolute inset-0 bg-violet-600/15 rounded-2xl blur-2xl group-hover:bg-violet-600/20 transition-all duration-300" />
 
-                <div className="glass-card rounded-2xl overflow-hidden border border-white/10 p-2 relative z-10 transition-transform duration-300 group-hover:scale-[1.02] max-h-[35vh] max-w-[35vh] aspect-square flex items-center justify-center">
+                <div className="glass-card rounded-2xl overflow-hidden border border-white/10 p-2 relative z-10 transition-transform duration-300 group-hover:scale-[1.02] max-h-[55vh] max-w-[55vh] lg:max-h-[58vh] lg:max-w-[58vh] xl:max-h-[60vh] xl:max-w-[60vh] aspect-square flex items-center justify-center">
                   <img
                     src="/chess_king_neon.png"
                     alt="Premium Chess King"
@@ -753,7 +687,7 @@ const AppContent: React.FC = () => {
         unreadChatsCount={totalUnreadChats}
       />
 
-      <main className="flex-grow">
+      <main className={`flex-grow ${view === 'game' ? 'h-[calc(100vh-80px)] max-h-[calc(100vh-80px)] overflow-hidden' : ''}`}>
         {view === 'ledger' && (
           <LedgerHistory onBack={() => setView('dashboard')} />
         )}
@@ -842,39 +776,6 @@ const AppContent: React.FC = () => {
                   <span className="text-xs font-semibold text-slate-200">
                     Active Players: <span className="text-emerald-400 font-mono font-bold">{formatActiveCount(onlineCount)}</span>
                   </span>
-                </div>
-
-                {/* Live Network Signal Strength */}
-                <div className="flex items-center space-x-3 bg-white/5 border border-white/10 px-4 py-2.5 rounded-xl shadow-md cursor-help group relative" title={`Network latency: ${networkStats.ping}ms (${networkStats.strength})`}>
-                  <div className="flex items-end gap-[2px] h-3.5 w-5 pb-[1px]">
-                    {[1, 2, 3, 4].map((bar) => {
-                      const isActive = networkStats.bars >= bar;
-                      return (
-                        <div
-                          key={bar}
-                          className={`w-[3px] rounded-t transition-all duration-300 ${isActive
-                              ? networkStats.bars === 1
-                                ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]'
-                                : networkStats.bars === 2
-                                  ? 'bg-amber-500 shadow-[0_0_4px_rgba(245,158,11,0.5)]'
-                                  : 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]'
-                              : 'bg-slate-700'
-                            }`}
-                          style={{ height: `${bar * 25}%` }}
-                        />
-                      );
-                    })}
-                  </div>
-                  <span className="text-xs font-semibold text-slate-200">
-                    Ping: <span className={`font-mono font-bold ${networkStats.bars === 1 ? 'text-red-400' : networkStats.bars === 2 ? 'text-amber-400' : 'text-emerald-400'
-                      }`}>{networkStats.ping} ms</span>
-                  </span>
-
-                  {/* Tooltip detail */}
-                  <div className="absolute bottom-[115%] right-1/2 translate-x-1/2 bg-slate-950/95 border border-white/10 text-[10px] text-slate-300 px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-50 leading-normal">
-                    <p className="font-semibold text-white">Network Status: {networkStats.strength}</p>
-                    <p className="text-slate-500 mt-0.5">Latency measured to server</p>
-                  </div>
                 </div>
               </div>
             </div>
