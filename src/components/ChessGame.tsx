@@ -27,7 +27,7 @@ const PIECE_THEMES = [
 ];
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
-  const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate } = useAuth();
+  const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate, addCachedMatch, writeBackToFirestore, gameConfig } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const [whiteProfile, setWhiteProfile] = useState<UserProfile | null>(null);
   const [blackProfile, setBlackProfile] = useState<UserProfile | null>(null);
@@ -285,8 +285,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       if (!docSnap.exists()) return;
       const matchData = docSnap.data() as Match;
 
-      // Close active practice matches older than 1 day
-      if (matchData.mode === 'practice' && matchData.status === 'active' && (Date.now() - matchData.createdAt > 24 * 60 * 60 * 1000)) {
+      // Close active practice matches older than configured hours
+      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
+      if (matchData.mode === 'practice' && matchData.status === 'active' && (Date.now() - matchData.createdAt > expiryHours * 60 * 60 * 1000)) {
         updateDoc(matchRef, {
           status: 'terminated',
           finishedAt: Date.now()
@@ -412,7 +413,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         const runSettlement = () => {
           if (!user || !profile) return;
           settleMatchPayoutAndElo(matchId, user.uid, profile, addCachedFriendUpdate)
-            .then((res) => {
+            .then(async (res) => {
               if (res) {
                 if (res.profileUpdates) {
                   updateCachedProfile(res.profileUpdates);
@@ -423,6 +424,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 if (res.eloHistoryRecord) {
                   addCachedEloHistory(res.eloHistoryRecord);
                 }
+                if (res.matchRecord) {
+                  addCachedMatch(res.matchRecord);
+                }
+                
+                // Push all match updates to Firestore as a single batch
+                await writeBackToFirestore(user.uid);
               }
             })
             .catch((err) => console.error('Match settlement failed:', err));

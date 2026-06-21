@@ -220,10 +220,10 @@ export async function findMatch(
       });
 
       // Write transaction entries
-      const transactionCol = collection(db, 'transactions');
       
-      const myLedgerRef = doc(transactionCol);
+      const myLedgerRef = doc(db, 'transactions', myUid + '_' + mId + '_debit');
       const myLedger = {
+        id: myUid + '_' + mId + '_debit',
         uid: myUid,
         userId: myUid,
         type: 'stakeDebit',
@@ -240,8 +240,9 @@ export async function findMatch(
       };
       transaction.set(myLedgerRef, myLedger);
 
-      const oppLedgerRef = doc(transactionCol);
+      const oppLedgerRef = doc(db, 'transactions', opponent.uid + '_' + mId + '_debit');
       const oppLedger = {
+        id: opponent.uid + '_' + mId + '_debit',
         uid: opponent.uid,
         userId: opponent.uid,
         type: 'stakeDebit',

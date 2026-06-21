@@ -166,6 +166,7 @@ export async function settleMatchPayoutAndElo(
   transactionRecord?: any;
   eloHistoryRecord?: any;
   practice?: boolean;
+  matchRecord?: any;
 } | null> {
   const matchDocRef = doc(db, 'matches', matchId);
   const now = Date.now();
@@ -228,7 +229,15 @@ export async function settleMatchPayoutAndElo(
   }
 
   const { delta, expectedScore } = calculateElo(myRating, opponentRating, myScore);
-  const newRating = matchData.stake === 0 ? myRating : Math.max(100, myRating + delta);
+  let newRating = myRating;
+  if (matchData.stake > 0) {
+    if (myScore === 0) {
+      const finalDelta = delta > 0 ? -delta : delta;
+      newRating = Math.max(0, myRating + finalDelta);
+    } else {
+      newRating = Math.max(0, myRating + delta);
+    }
+  }
 
   // Calculate payouts
   let myPayout = 0;
@@ -257,9 +266,12 @@ export async function settleMatchPayoutAndElo(
   const newBalance = Math.round((myBalance + myPayout) * 100) / 100;
   const newTotalCoins = Math.round(((currentUserProfile.totalCoinsEarned || myBalance) + myEarned) * 100) / 100;
 
-  // Increments
+  // Increments: only increment play count if the match was won by current user
   const myCounts = currentUserProfile.gameplayCounts || {};
-  const newMyCounts = { ...myCounts, [matchData.mode]: (myCounts[matchData.mode] || 0) + 1 };
+  const wonMatch = matchData.winnerUid === myUid;
+  const newMyCounts = wonMatch
+    ? { ...myCounts, [matchData.mode]: (myCounts[matchData.mode] || 0) + 1 }
+    : myCounts;
 
   let myWins = currentUserProfile.totalWins !== undefined ? currentUserProfile.totalWins : (currentUserProfile.wins || 0);
   let myLosses = currentUserProfile.totalLosses !== undefined ? currentUserProfile.totalLosses : (currentUserProfile.losses || 0);
@@ -291,9 +303,15 @@ export async function settleMatchPayoutAndElo(
     updatedAt: now
   };
 
+  // Reset hourly reward timer if balance fell below 1000 from >= 1000
+  if (newBalance < 1000 && myBalance >= 1000) {
+    profileUpdates.lastHourlyRewardAt = now;
+  }
+
   let transactionRecord = null;
   if (myPayout > 0 || matchData.stake === 0) {
     transactionRecord = {
+      id: myUid + '_' + matchData.id + '_' + (isDraw ? 'refund' : 'credit'),
       uid: myUid,
       userId: myUid,
       type: isDraw ? 'refund' : 'stakeCredit',
@@ -315,7 +333,7 @@ export async function settleMatchPayoutAndElo(
     eloHistoryRecord = {
       beforeRating: myRating,
       afterRating: newRating,
-      delta: matchData.stake === 0 ? 0 : delta,
+      delta: matchData.stake === 0 ? 0 : (newRating - myRating),
       expectedScore,
       actualScore: myScore,
       kFactor: 20,
@@ -349,10 +367,17 @@ export async function settleMatchPayoutAndElo(
     }
   }
 
+  const matchRecord = {
+    ...matchData,
+    settled: true,
+    finishedAt: now
+  };
+
   return {
     profileUpdates,
     transactionRecord,
-    eloHistoryRecord
+    eloHistoryRecord,
+    matchRecord
   };
 }
 
@@ -369,7 +394,6 @@ export async function acceptFriendlyChallenge(
   const challengeDocRef = doc(db, 'challenges', challengeId);
   const challengerUserRef = doc(db, 'users', challengerUid);
   const challengedUserRef = doc(db, 'users', challengedUid);
-  const ledgerCol = collection(db, 'transactions');
   const matchesCol = collection(db, 'matches');
   const newMatchDocRef = doc(matchesCol);
   const mId = newMatchDocRef.id;
@@ -430,8 +454,9 @@ export async function acceptFriendlyChallenge(
       });
 
       // Write transaction entries
-      const challengerLedgerRef = doc(ledgerCol);
+      const challengerLedgerRef = doc(db, 'transactions', challengerUid + '_' + mId + '_debit');
       transaction.set(challengerLedgerRef, {
+        id: challengerUid + '_' + mId + '_debit',
         uid: challengerUid,
         userId: challengerUid,
         type: 'stakeDebit',
@@ -447,8 +472,9 @@ export async function acceptFriendlyChallenge(
         opponentUid: challengedUid,
       });
 
-      const challengedLedgerRef = doc(ledgerCol);
+      const challengedLedgerRef = doc(db, 'transactions', challengedUid + '_' + mId + '_debit');
       transaction.set(challengedLedgerRef, {
+        id: challengedUid + '_' + mId + '_debit',
         uid: challengedUid,
         userId: challengedUid,
         type: 'stakeDebit',

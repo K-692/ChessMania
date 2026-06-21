@@ -12,7 +12,7 @@ import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
 import type { GameMode, Match, UserProfile } from './types';
-import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
 import { formatCoins, formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
@@ -23,7 +23,7 @@ import { createPracticeMatchObject } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, login, loading, updateCachedProfile, addCachedMatch } = useAuth();
+  const { user, profile, login, loading, updateCachedProfile, addCachedMatch, gameConfig } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
 
   // Settings sync state for dynamic piece style Knight image
@@ -342,6 +342,27 @@ const AppContent: React.FC = () => {
     return () => unsubscribe();
   }, [user]);
 
+  const markMessagesAsRead = async (userUid: string, friendUid: string) => {
+    const threadId = [userUid, friendUid].sort().join('_');
+    const q = query(
+      collection(db, 'users', userUid, 'chatThreads', threadId, 'messages'),
+      where('senderUid', '==', friendUid),
+      where('read', '==', false)
+    );
+    try {
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((docSnap) => {
+          batch.update(docSnap.ref, { read: true });
+        });
+        await batch.commit();
+      }
+    } catch (err) {
+      console.warn("Failed to mark messages as read:", err);
+    }
+  };
+
   // Subscribe to each friend's chat thread messages
   useEffect(() => {
     if (!user || friendsUids.length === 0) {
@@ -375,16 +396,15 @@ const AppContent: React.FC = () => {
           const unsub = onSnapshot(q, (snap) => {
             const isCurrentChatOpen = openChatFriend?.uid === friendUid;
             if (isCurrentChatOpen) {
-              localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+              markMessagesAsRead(user.uid, friendUid);
             }
-            const lastRead = parseInt(localStorage.getItem(`lastRead_${threadId}`) || '0');
             let unread = 0;
             let hasNewMessage = false;
             const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
 
             snap.forEach((docSnap) => {
               const msg = docSnap.data();
-              if (msg.senderUid !== user.uid && msg.createdAt > lastRead && msg.createdAt >= cutoff) {
+              if (msg.senderUid !== user.uid && msg.read !== true && msg.createdAt >= cutoff) {
                 unread++;
               }
             });
@@ -394,7 +414,7 @@ const AppContent: React.FC = () => {
               snap.docChanges().forEach((change) => {
                 if (change.type === 'added') {
                   const msg = change.doc.data();
-                  if (msg.senderUid !== user.uid && msg.createdAt > lastRead && msg.createdAt >= cutoff) {
+                  if (msg.senderUid !== user.uid && msg.read !== true && msg.createdAt >= cutoff) {
                     hasNewMessage = true;
                   }
                 }
@@ -431,8 +451,7 @@ const AppContent: React.FC = () => {
   // Automatically clear unread counts when opening a chat
   useEffect(() => {
     if (!user || !openChatFriend) return;
-    const threadId = [user.uid, openChatFriend.uid].sort().join('_');
-    localStorage.setItem(`lastRead_${threadId}`, Date.now().toString());
+    markMessagesAsRead(user.uid, openChatFriend.uid);
     setUnreadCounts((prev) => ({
       ...prev,
       [openChatFriend.uid]: 0
@@ -456,11 +475,12 @@ const AppContent: React.FC = () => {
         matches.push({ id: docSnap.id, ...docSnap.data() } as Match);
       });
 
-      // Close active practice matches older than 1 day
+      // Close active practice matches older than configured expiry hours (default 24h)
       const now = Date.now();
-      const oneDayMs = 24 * 60 * 60 * 1000;
+      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
+      const expiryMs = expiryHours * 60 * 60 * 1000;
       const cleanedMatches = await Promise.all(matches.map(async (m) => {
-        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > oneDayMs)) {
+        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > expiryMs)) {
           try {
             await updateDoc(doc(db, 'matches', m.id), {
               status: 'terminated',
@@ -512,21 +532,12 @@ const AppContent: React.FC = () => {
           console.warn("Failed to fetch opponent profile:", err);
         }
 
-        // Check friendship status
-        const fSnap1 = await getDocs(query(
-          collection(db, 'friendships'),
-          where('requesterUid', '==', user.uid),
-          where('receiverUid', '==', oppUid)
-        ));
-        const fSnap2 = await getDocs(query(
-          collection(db, 'friendships'),
-          where('requesterUid', '==', oppUid),
-          where('receiverUid', '==', user.uid)
-        ));
-
-        if (!fSnap1.empty || !fSnap2.empty) {
-          const anyDoc = (fSnap1.docs[0] || fSnap2.docs[0]).data();
-          statusCache[oppUid] = anyDoc.status === 'accepted' ? 'friend' : 'sent';
+        // Check friendship status in subcollection users/{user.uid}/friends/{oppUid}
+        const friendDocRef = doc(db, 'users', user.uid, 'friends', oppUid);
+        const fSnap = await getDoc(friendDocRef);
+        if (fSnap.exists()) {
+          const fData = fSnap.data();
+          statusCache[oppUid] = fData.status === 'accepted' ? 'friend' : 'sent';
         }
       }
 
@@ -565,7 +576,7 @@ const AppContent: React.FC = () => {
     if (user && view === 'dashboard') {
       fetchRecentMatches();
     }
-  }, [user, view]);
+  }, [user, view, gameConfig]);
 
 
   // Handle Match Pairing success
@@ -697,8 +708,25 @@ const AppContent: React.FC = () => {
           </div>
         </main>
 
-        <footer className="w-full text-center py-4 text-xs text-slate-500 border-t border-white/5 relative z-10">
-          Song credit: IamKrishMusic
+        <footer className="w-full text-center py-6 text-xs text-slate-400 border-t border-white/5 relative z-10 bg-slate-950/20 backdrop-blur-sm mt-auto animate-fade-in">
+          <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center space-x-1">
+              <span>Made with ❤️ by</span>
+              <a
+                href="https://github.com/K-692"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-indigo-400 hover:from-violet-300 hover:to-indigo-300 hover:underline transition-all"
+              >
+                Krishnendu Pal
+              </a>
+            </div>
+            <div className="text-slate-500 flex items-center space-x-3">
+              <span>&copy; {new Date().getFullYear()} Check & Mate. All rights reserved.</span>
+              <span className="text-white/10">|</span>
+              <span>Theme song credit: <span className="text-slate-400 font-medium">IamKrishMusic</span></span>
+            </div>
+          </div>
         </footer>
       </div>
     );

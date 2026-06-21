@@ -5,7 +5,6 @@ import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSn
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
-import { playNotifySound } from '../utils/sound';
 import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
 import type { Friendship, UserProfile, FriendlyChallenge, Match, GameMode } from '../types';
 import { ProfilePopup } from './ProfilePopup';
@@ -1036,7 +1035,6 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
   // Subscribe to messages
   useEffect(() => {
     if (!user) return;
-    let isInitial = true;
     let active = true;
     let unsubscribe: (() => void) | null = null;
     const threadId = getThreadId(user.uid, friend.uid);
@@ -1065,22 +1063,6 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
             }
           });
           setMessages(msgs);
-
-          if (!isInitial) {
-            let hasNewFromOther = false;
-            snap.docChanges().forEach((change) => {
-              if (change.type === 'added') {
-                const data = change.doc.data();
-                if (data.senderUid !== user?.uid) {
-                  hasNewFromOther = true;
-                }
-              }
-            });
-            if (hasNewFromOther) {
-              playNotifySound();
-            }
-          }
-          isInitial = false;
         });
       });
 
@@ -1112,7 +1094,8 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
         id: newMsgId,
         senderUid: user.uid,
         text,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        read: false
       };
 
       await Promise.all([

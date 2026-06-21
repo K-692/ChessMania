@@ -1,14 +1,23 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db } from '../firebase';
 import type { UserProfile } from '../types';
-import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
 import { applyLazyHourlyRewardTx } from '../wallet/walletService';
+
+export interface GameConfig {
+  hourlyRewardAmount: number;
+  maxHourlyRewardLimit: number;
+  practiceExpiryHours: number;
+  inactivityTimeoutMinutes: number;
+  hourlyRewardIntervalMinutes: number;
+}
 
 interface AuthContextType {
   user: FirebaseUser | null;
   profile: UserProfile | null;
   loading: boolean;
+  gameConfig: GameConfig | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   updateCachedProfile: (updates: Partial<UserProfile>) => void;
@@ -301,14 +310,16 @@ export const writeBackToFirestore = async (userId: string) => {
 
   // 2. Transactions
   cache.transactions.forEach((tx) => {
-    const txRef = doc(collection(db, 'transactions'));
-    batch.set(txRef, tx);
+    const txId = tx.id || (tx.uid + '_' + tx.matchId + '_' + (tx.type === 'stakeDebit' ? 'debit' : 'credit'));
+    const txRef = doc(db, 'transactions', txId);
+    batch.set(txRef, tx, { merge: true });
   });
 
   // 3. Elo History
   cache.eloHistory.forEach((elo) => {
-    const eloRef = doc(collection(db, 'users', userId, 'eloHistory'));
-    batch.set(eloRef, elo);
+    const eloId = elo.id || (elo.matchId ? (elo.opponentUid + '_' + elo.matchId) : doc(collection(db, 'dummy')).id);
+    const eloRef = doc(db, 'users', userId, 'eloHistory', eloId);
+    batch.set(eloRef, elo, { merge: true });
   });
 
   // 4. Matches (like finished practice matches)
@@ -336,11 +347,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
+  const profileUnsubRef = useRef<(() => void) | null>(null);
 
   // Expose cache update helpers to components
   const updateCachedProfile = (updates: Partial<UserProfile>) => {
     setProfile((prev) => {
       if (!prev) return null;
+      
+      // If balance falls below 1000 from >= 1000, start hourly reward countdown
+      if (updates.currentBalance !== undefined) {
+        const oldBalance = prev.currentBalance;
+        const newBalance = updates.currentBalance;
+        if (newBalance < 1000 && oldBalance >= 1000) {
+          updates.lastHourlyRewardAt = Date.now();
+        }
+      }
+
       const next = { ...prev, ...updates };
 
       const cache = getUnsavedCache();
@@ -451,14 +474,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const gameConfigRef = doc(db, 'config', 'game');
       const gameSnap = await getDoc(gameConfigRef);
-      if (!gameSnap.exists()) {
-        await setDoc(gameConfigRef, {
-          hourlyRewardAmount: 100,
-          maxHourlyRewardLimit: 1000,
-          createdAt: Date.now()
-        });
-        console.log('Bootstrapped config/game document.');
-      }
+      await setDoc(gameConfigRef, {
+        hourlyRewardAmount: 100,
+        maxHourlyRewardLimit: 1000,
+        practiceExpiryHours: 24,
+        inactivityTimeoutMinutes: 5,
+        hourlyRewardIntervalMinutes: 60,
+        createdAt: gameSnap.exists() ? (gameSnap.data().createdAt || Date.now()) : Date.now()
+      }, { merge: true });
+      console.log('Bootstrapped/merged config/game document.');
 
       const chatConfigRef = doc(db, 'config', 'chat');
       const chatSnap = await getDoc(chatConfigRef);
@@ -590,13 +614,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // Game Config listener
+    const configRef = doc(db, 'config', 'game');
+    const unsubscribeConfig = onSnapshot(configRef, (snap) => {
+      if (snap.exists()) {
+        setGameConfig(snap.data() as GameConfig);
+      }
+    });
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
+      if (profileUnsubRef.current) {
+        profileUnsubRef.current();
+        profileUnsubRef.current = null;
+      }
+
       if (firebaseUser) {
         const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
         const timeSinceLastActivity = Date.now() - lastActivity;
 
-        if (lastActivity > 0 && timeSinceLastActivity > 5 * 60 * 1000) {
-          console.log('Detected inactivity over 5 minutes on startup. Logging out...');
+        const limitMinutes = gameConfig?.inactivityTimeoutMinutes ?? 5;
+        if (lastActivity > 0 && timeSinceLastActivity > limitMinutes * 60 * 1000) {
+          console.log(`Detected inactivity over ${limitMinutes} minutes on startup. Logging out...`);
           await writeBackToFirestore(firebaseUser.uid);
           await signOut(auth);
           setUser(null);
@@ -611,8 +649,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         await writeBackToFirestore(firebaseUser.uid);
 
         const userDocRef = doc(db, 'users', firebaseUser.uid);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
+        
+        // Listen to profile document in real-time
+        profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
+          if (!docSnap.exists()) {
+            await bootstrapProfile(firebaseUser);
+            return;
+          }
+
           const rawData = docSnap.data();
 
           // New device detection check
@@ -620,6 +664,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const serverLoginTime = rawData.lastLoginAt || 0;
           if (localLoginTime > 0 && serverLoginTime > localLoginTime + 2000) {
             console.log('Detected newer login on another device. Logging out...');
+            if (profileUnsubRef.current) {
+              profileUnsubRef.current();
+              profileUnsubRef.current = null;
+            }
             await signOut(auth);
             setUser(null);
             setProfile(null);
@@ -658,10 +706,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (hasChanges && isLoggingIn) {
             await setDoc(userDocRef, sanitized, { merge: true });
           }
-        } else {
-          await bootstrapProfile(firebaseUser);
-        }
-        setLoading(false);
+          setLoading(false);
+        });
       } else {
         setUser(null);
         setProfile(null);
@@ -669,10 +715,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    return () => unsubscribeAuth();
-  }, []);
+    return () => {
+      unsubscribeConfig();
+      unsubscribeAuth();
+      if (profileUnsubRef.current) {
+        profileUnsubRef.current();
+      }
+    };
+  }, [gameConfig?.inactivityTimeoutMinutes]);
 
-  // Inactivity auto-logout after 10 seconds and online reconnection logout
+  // Inactivity auto-logout after configured minutes and online reconnection logout
   useEffect(() => {
     if (!user) return;
 
@@ -682,15 +734,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (timeoutId) clearTimeout(timeoutId);
       localStorage.setItem('checkmate_last_activity', Date.now().toString());
 
+      const timeoutMins = gameConfig?.inactivityTimeoutMinutes ?? 5;
       timeoutId = setTimeout(async () => {
-        console.log('Inactivity timeout reached (5 minutes). Logging out...');
+        console.log(`Inactivity timeout reached (${timeoutMins} minutes). Logging out...`);
         try {
           await logout();
-          alert('You have been logged out due to 5 minutes of inactivity.');
+          alert(`You have been logged out due to ${timeoutMins} minutes of inactivity.`);
         } catch (e) {
           console.warn('Failed to logout on inactivity timeout:', e);
         }
-      }, 5 * 60 * 1000); // 5 minutes
+      }, timeoutMins * 60 * 1000); // configured timeout minutes
     };
 
     const activityEvents = [
@@ -722,7 +775,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       window.removeEventListener('online', handleOnline);
     };
-  }, [user]);
+  }, [user, gameConfig?.inactivityTimeoutMinutes]);
 
   return (
     <AuthContext.Provider
@@ -730,6 +783,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         loading,
+        gameConfig,
         login,
         logout,
         updateCachedProfile,
