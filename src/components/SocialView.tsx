@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
-import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
+import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare, Eye } from 'lucide-react';
 import type { Friendship, UserProfile, FriendlyChallenge, Match, GameMode } from '../types';
 import { ProfilePopup } from './ProfilePopup';
 
@@ -61,6 +61,52 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
   // Pending challenges alert expanded state
   const [challengesExpanded, setChallengesExpanded] = useState(true);
+
+  // Active matches for spectating
+  const [friendActiveMatches, setFriendActiveMatches] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!user || friendsProfiles.length === 0) {
+      setFriendActiveMatches({});
+      return;
+    }
+
+    const unsubscribers: (() => void)[] = [];
+
+    friendsProfiles.forEach((friend) => {
+      // Query friend's 5 most recent matches using players index
+      const q = query(
+        collection(db, 'matches'),
+        where('players', 'array-contains', friend.uid),
+        orderBy('createdAt', 'desc'),
+        limit(5)
+      );
+
+      const unsub = onSnapshot(q, (snapshot) => {
+        const activeMatch = snapshot.docs.find(d => d.data().status === 'active');
+        if (activeMatch) {
+          setFriendActiveMatches((prev) => ({
+            ...prev,
+            [friend.uid]: activeMatch.id,
+          }));
+        } else {
+          setFriendActiveMatches((prev) => {
+            const next = { ...prev };
+            delete next[friend.uid];
+            return next;
+          });
+        }
+      }, (err) => {
+        console.warn(`Error listening to active matches for friend ${friend.uid}:`, err);
+      });
+
+      unsubscribers.push(unsub);
+    });
+
+    return () => {
+      unsubscribers.forEach((unsub) => unsub());
+    };
+  }, [user, friendsProfiles]);
 
   useEffect(() => {
     if (!user) return;
@@ -675,6 +721,17 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                             </span>
                           )}
                         </button>
+
+                        {/* Spectate Button */}
+                        {friendActiveMatches[fProfile.uid] && (
+                          <button
+                            onClick={() => onStartGame(friendActiveMatches[fProfile.uid])}
+                            className="flex items-center justify-center bg-emerald-500/10 hover:bg-emerald-600 hover:text-white text-emerald-400 hover:scale-105 border border-emerald-500/20 w-8 h-8 rounded-lg transition-all cursor-pointer"
+                            title="Spectate ongoing game"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                        )}
 
                         {/* Inline Challenge Button */}
                         {hasPendingChallenge ? (

@@ -11,19 +11,19 @@ import { SocialView, FriendChatModal } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
-import type { GameMode, Match, UserProfile } from './types';
-import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc, writeBatch } from 'firebase/firestore';
+import type { GameMode, UserProfile } from './types';
+import { collection, query, where, getDoc, getDocs, orderBy, onSnapshot, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
-import { formatCoins, formatActiveCount } from './utils/format';
+import { formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
-import { Edit2, X, Lock, Calendar, UserPlus, Check, Plus } from 'lucide-react';
+import { Edit2, X, Lock, Calendar, Plus } from 'lucide-react';
 import { getSoundSettings, playNotifySound } from './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
 import { createPracticeMatchObject } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, updateCachedProfile, addCachedMatch, gameConfig } = useAuth();
+  const { user, profile, loading, updateCachedProfile, addCachedMatch } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
 
   // Settings sync state for dynamic piece style Knight image
@@ -55,9 +55,16 @@ const AppContent: React.FC = () => {
   const [acceptedChallenge, setAcceptedChallenge] = useState<any | null>(null);
   const [acceptedChallengerProfile, setAcceptedChallengerProfile] = useState<any | null>(null);
 
-  // User matches history state (active or past games)
-  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
-  const [loadingMatches, setLoadingMatches] = useState(false);
+  // Navigation tracking
+  const [previousView, setPreviousView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
+
+  const handleNavigateToGame = (matchId: string) => {
+    if (view !== 'game') {
+      setPreviousView(view);
+    }
+    setActiveMatchId(matchId);
+    setView('game');
+  };
 
   // Add Funds modal state
   const [isAddFundsOpen, setIsAddFundsOpen] = useState(false);
@@ -68,10 +75,7 @@ const AppContent: React.FC = () => {
   // Real-time online players count state
   const [onlineCount, setOnlineCount] = useState<number>(1);
 
-  // Opponent profiles cache for recent matches
-  const [opponentProfiles, setOpponentProfiles] = useState<Record<string, UserProfile>>({});
-  // Track sent friend requests to opponents (key: opponentUid, value: 'sent' | 'friend')
-  const [opponentFriendStatus, setOpponentFriendStatus] = useState<Record<string, 'sending' | 'sent' | 'friend'>>({});
+
 
   // Username edit modal states
   const [isEditNameOpen, setIsEditNameOpen] = useState(false);
@@ -262,8 +266,7 @@ const AppContent: React.FC = () => {
     if (!acceptedChallenge) return;
     try {
       await setDoc(doc(db, 'challenges', acceptedChallenge.id), { status: 'completed' }, { merge: true });
-      setView('game');
-      setActiveMatchId(acceptedChallenge.matchId);
+      handleNavigateToGame(acceptedChallenge.matchId);
       setAcceptedChallenge(null);
     } catch (err) {
       console.error("Failed to join friendly match:", err);
@@ -407,131 +410,13 @@ const AppContent: React.FC = () => {
   }, [user, openChatFriend]);
 
   // 2. Fetch User's matches (for resuming or match logs)
-  const fetchRecentMatches = async () => {
-    if (!user) return;
-    setLoadingMatches(true);
-    try {
-      const q = query(
-        collection(db, 'matches'),
-        where('players', 'array-contains', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      );
-      const querySnap = await getDocs(q);
-      const matches: Match[] = [];
-      querySnap.forEach((docSnap) => {
-        matches.push({ id: docSnap.id, ...docSnap.data() } as Match);
-      });
 
-      // Close active practice matches older than configured expiry hours (default 24h)
-      const now = Date.now();
-      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
-      const expiryMs = expiryHours * 60 * 60 * 1000;
-      const cleanedMatches = await Promise.all(matches.map(async (m) => {
-        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > expiryMs)) {
-          try {
-            await updateDoc(doc(db, 'matches', m.id), {
-              status: 'terminated',
-              finishedAt: now
-            });
-            return { ...m, status: 'terminated', finishedAt: now } as Match;
-          } catch (err) {
-            console.warn("Failed to terminate old practice match:", err);
-          }
-        }
-        return m;
-      }));
-
-      setRecentMatches(cleanedMatches.slice(0, 5));
-
-      // Fetch opponent profiles for all unique opponent UIDs
-      const uniqueOpponentUids = [...new Set(matches.map((m) =>
-        m.whiteUid === user.uid ? m.blackUid : m.whiteUid
-      ))];
-
-      const profileCache: Record<string, UserProfile> = {};
-      const statusCache: Record<string, 'sent' | 'friend'> = {};
-
-      for (const oppUid of uniqueOpponentUids) {
-        if (oppUid.startsWith('bot_')) {
-          const elo = parseInt(oppUid.split('_')[1]) || 800;
-          profileCache[oppUid] = {
-            uid: oppUid,
-            displayName: `Chess Bot (${elo})`,
-            photoURL: '/game_modes/practice.png',
-            rating: elo,
-            currentEloRating: elo,
-            bankBalance: 0,
-            currentBalance: 0,
-            createdAt: Date.now(),
-            lastLoginAt: Date.now(),
-            zeroBalanceAt: null
-          };
-          continue;
-        }
-
-        // Fetch profile
-        try {
-          const uSnap = await getDoc(doc(db, 'users', oppUid));
-          if (uSnap.exists()) {
-            profileCache[oppUid] = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
-          }
-        } catch (err) {
-          console.warn("Failed to fetch opponent profile:", err);
-        }
-
-        // Check friendship status in subcollection users/{user.uid}/friends/{oppUid}
-        const friendDocRef = doc(db, 'users', user.uid, 'friends', oppUid);
-        const fSnap = await getDoc(friendDocRef);
-        if (fSnap.exists()) {
-          const fData = fSnap.data();
-          statusCache[oppUid] = fData.status === 'accepted' ? 'friend' : 'sent';
-        }
-      }
-
-      setOpponentProfiles((prev) => ({ ...prev, ...profileCache }));
-      setOpponentFriendStatus((prev) => ({ ...prev, ...statusCache }));
-    } catch (e) {
-      console.warn('Error fetching recent matches:', e);
-    } finally {
-      setLoadingMatches(false);
-    }
-  };
-
-  // Send a friend request to a recently played opponent
-  const handleSendOpponentFriendRequest = async (oppUid: string) => {
-    if (!user) return;
-    setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sending' }));
-    try {
-      await addDoc(collection(db, 'friendships'), {
-        requesterUid: user.uid,
-        receiverUid: oppUid,
-        status: 'pending',
-        createdAt: Date.now()
-      });
-      setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sent' }));
-    } catch (e) {
-      console.warn('Failed to send friend request to opponent:', e);
-      setOpponentFriendStatus((prev) => {
-        const next = { ...prev };
-        delete next[oppUid];
-        return next;
-      });
-    }
-  };
-
-  useEffect(() => {
-    if (user && view === 'dashboard') {
-      fetchRecentMatches();
-    }
-  }, [user, view, gameConfig]);
 
 
   // Handle Match Pairing success
   const handleMatchFound = (matchId: string) => {
     setMatchmakingConfig(null);
-    setActiveMatchId(matchId);
-    setView('game');
+    handleNavigateToGame(matchId);
   };
 
   if (loading) {
@@ -697,7 +582,10 @@ const AppContent: React.FC = () => {
         )}
 
         {view === 'profile' && (
-          <ProfileView onBack={() => setView('dashboard')} />
+          <ProfileView
+            onBack={() => setView('dashboard')}
+            onStartGame={handleNavigateToGame}
+          />
         )}
 
         {view === 'settings' && (
@@ -707,10 +595,7 @@ const AppContent: React.FC = () => {
         {view === 'social' && (
           <SocialView
             onBack={() => setView('dashboard')}
-            onStartGame={(matchId) => {
-              setView('game');
-              setActiveMatchId(matchId);
-            }}
+            onStartGame={handleNavigateToGame}
             setOpenChatFriend={setOpenChatFriend}
             unreadCounts={unreadCounts}
           />
@@ -720,7 +605,7 @@ const AppContent: React.FC = () => {
           <ChessGame
             matchId={activeMatchId}
             onExit={() => {
-              setView('dashboard');
+              setView(previousView);
               setActiveMatchId(null);
             }}
           />
@@ -913,117 +798,7 @@ const AppContent: React.FC = () => {
               </button>
             </div>
 
-            {/* Active & Recent Matches resumes */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-bold text-slate-200 flex items-center space-x-2.5">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" alt="Queen" className="w-5 h-5 filter invert brightness-125" />
-                <span>Recent & Active Matches</span>
-              </h3>
 
-              {loadingMatches ? (
-                <div className="py-10 text-center text-xs text-slate-500">
-                  Scanning active game rooms...
-                </div>
-              ) : recentMatches.length === 0 ? (
-                <div className="glass p-8 rounded-xl text-center border border-white/5 text-slate-500 text-xs italic">
-                  No match history found. Click "Play Now" to start your first game!
-                </div>
-              ) : (
-                <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden">
-                  {recentMatches.map((m) => {
-                    const isMWhite = m.whiteUid === user.uid;
-                    const oppUid = isMWhite ? m.blackUid : m.whiteUid;
-                    const isActive = m.status === 'active';
-                    const oppProfile = opponentProfiles[oppUid];
-                    const friendStatus = opponentFriendStatus[oppUid];
-
-                    const resultLabel = isActive ? null
-                      : m.winnerUid === user.uid ? 'WON'
-                        : m.winnerUid ? 'LOST'
-                          : 'DRAW';
-
-                    const resultColor = isActive ? ''
-                      : m.winnerUid === user.uid ? 'text-emerald-400'
-                        : m.winnerUid ? 'text-red-400'
-                          : 'text-slate-500';
-
-                    return (
-                      <div
-                        key={m.id}
-                        className={`flex items-center justify-between px-4 py-3 gap-3 ${isActive ? 'bg-violet-950/10' : 'hover:bg-white/[0.02]'
-                          } transition-colors`}
-                      >
-                        {/* Left: Status badge + opponent */}
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${isActive ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-800 text-slate-500'
-                            }`}>
-                            {isActive ? 'LIVE' : m.status}
-                          </span>
-
-                          {oppProfile?.photoURL && (
-                            <img
-                              src={oppProfile.photoURL}
-                              alt={oppProfile.displayName}
-                              className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity"
-                              title="View Profile"
-                              onClick={() => setSelectedProfile(oppProfile)}
-                            />
-                          )}
-
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-200 truncate">
-                              vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}
-                            </p>
-                            <p className="text-[10px] text-slate-500 capitalize truncate">
-                              {m.mode.replace(/_/g, ' ')} &bull; {
-                                m.mode === 'all_in' && m.allInStakes && user
-                                  ? formatCoins(m.allInStakes[user.uid] || 0)
-                                  : formatCoins(m.stake)
-                              }
-                              {oppProfile && <span className="ml-1">· {oppProfile.rating} Elo</span>}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Right: friend action + result or resume */}
-                        <div className="flex items-center gap-2 shrink-0">
-                          {friendStatus === 'friend' ? (
-                            <span className="hidden sm:flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
-                              <Check className="w-3 h-3" /> Friends
-                            </span>
-                          ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
-                            <span className="hidden sm:block text-[10px] text-slate-400 font-medium animate-pulse">
-                              {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
-                            </span>
-                          ) : oppProfile && !oppUid.startsWith('bot_') ? (
-                            <button
-                              onClick={() => handleSendOpponentFriendRequest(oppUid)}
-                              className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2 py-0.5 rounded transition-all cursor-pointer"
-                            >
-                              <UserPlus className="w-3 h-3" />
-                              Add
-                            </button>
-                          ) : null}
-
-                          {isActive ? (
-                            <button
-                              onClick={() => handleMatchFound(m.id)}
-                              className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
-                            >
-                              Resume
-                            </button>
-                          ) : (
-                            <span className={`text-xs font-bold ${resultColor}`}>
-                              {resultLabel}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
 
 
           </div>

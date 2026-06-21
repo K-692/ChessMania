@@ -74,6 +74,13 @@ export interface MatchClocks {
   [uid: string]: number; // remaining time in milliseconds
 }
 
+export interface MatchMoveDetail {
+  san: string;
+  playedBy: string;
+  playedAt: number;
+  clocks: Record<string, number>;
+}
+
 export interface Match {
   id: string;
   players: string[]; // [whiteUid, blackUid]
@@ -91,6 +98,7 @@ export interface Match {
   createdAt: number;
   finishedAt: number | null;
   moves: string[]; // history of moves in SAN format
+  moveDetails?: MatchMoveDetail[]; // sequential moves details with timestamps and clocks
   lastMoveAt: number; // UTC timestamp of last move to compute clock elapsed
   drawOffers?: string[]; // uids of players offering draw
   timeControl?: string; // Time control string (e.g. '10 | 5', '15 min')

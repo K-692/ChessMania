@@ -82,10 +82,19 @@ export async function makeMove(
   const nextTurn = matchData.turn === 'w' ? 'b' : 'w';
   const updatedMoves = [...matchData.moves, sanMove];
 
+  const newMoveDetail = {
+    san: sanMove,
+    playedBy: playerUid,
+    playedAt: now,
+    clocks: updatedClocks,
+  };
+  const updatedMoveDetails = [...(matchData.moveDetails || []), newMoveDetail];
+
   batch.update(matchDocRef, {
     boardFEN: newFen,
     turn: nextTurn,
     moves: updatedMoves,
+    moveDetails: updatedMoveDetails,
     clocks: updatedClocks,
     lastMoveAt: now,
   });

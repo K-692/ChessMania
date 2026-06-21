@@ -11,6 +11,7 @@ import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
 import { NetworkSignal } from './NetworkSignal';
+import { parseTimeControl } from '../matchmaking/matchmakingService';
 
 interface ChessGameProps {
   matchId: string;
@@ -30,6 +31,7 @@ const PIECE_THEMES = [
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate, addCachedMatch, writeBackToFirestore, gameConfig } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
+  const isSpectator = match ? !match.players.includes(user?.uid || '') : false;
   const [whiteProfile, setWhiteProfile] = useState<UserProfile | null>(null);
   const [blackProfile, setBlackProfile] = useState<UserProfile | null>(null);
   const [localFen, setLocalFen] = useState<string>('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
@@ -41,7 +43,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   // Settings and Profile dialog visibility states
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
-  const [hasClosedResultPopup, setHasClosedResultPopup] = useState(false);
+  const [hasClosedResultPopup, setHasClosedResultPopup] = useState(true);
+  const wasActiveLoadedRef = useRef(false);
   
   // Sound settings state
   const [settings, setSettings] = useState(getSoundSettings());
@@ -183,9 +186,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => clearInterval(interval);
   }, []);
 
-  // Update client presence and heartbeat to Firestore
+  // Update client presence and heartbeat to Firestore (only if playing, not spectating)
   useEffect(() => {
-    if (!user) return;
+    if (!user || !match) return;
+    const isSpectator = !match.players.includes(user.uid);
+    if (isSpectator) return;
+
     const matchRef = doc(db, 'matches', matchId);
 
     // Initial presence
@@ -208,7 +214,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         [`presence.${user.uid}`]: false
       }).catch(console.warn);
     };
-  }, [matchId, user]);
+  }, [matchId, user, match?.players]);
 
   // 1. Fetch players profiles separately when match is loaded
   useEffect(() => {
@@ -343,6 +349,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     const unsubscribe = onSnapshot(matchRef, async (docSnap) => {
       if (!docSnap.exists()) return;
       const matchData = docSnap.data() as Match;
+
+      // Track active transition to show result popup only when transitioning from active in-session
+      if (matchData.status === 'active') {
+        wasActiveLoadedRef.current = true;
+      } else {
+        if (wasActiveLoadedRef.current) {
+          setHasClosedResultPopup(false);
+          wasActiveLoadedRef.current = false;
+        }
+      }
 
       // Close active practice matches older than configured hours
       const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
@@ -770,13 +786,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     onExit();
   };
 
-  useEffect(() => {
-    return () => {
-      if (matchStateRef.current && matchStateRef.current.status !== 'active') {
-        deleteGameMessages(matchId);
-      }
-    };
-  }, [matchId]);
 
   const executeMove = (from: string, to: string, promotion?: string): boolean => {
     if (!match) return false;
@@ -1214,11 +1223,46 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     );
   }
 
-  const myClock = isWhite ? whiteClock : blackClock;
-  const oppClock = isWhite ? blackClock : whiteClock;
+  // Determine displayed clocks based on review historyIndex vs latest move
+  const isReviewingHistory = match && (historyIndex !== match.moves.length - 1);
 
-  const myProfile = isWhite ? whiteProfile : blackProfile;
-  const oppProfile = isWhite ? blackProfile : whiteProfile;
+  const displayedWhiteClock = (() => {
+    if (!match) return 0;
+    if (match.status === 'active' && !isReviewingHistory) {
+      return whiteClock;
+    }
+    // Reviewing or finished game at specific index
+    if (historyIndex === -1) {
+      // Return initial time
+      const initialTime = match.timeControl ? parseTimeControl(match.timeControl).initialTime : (match.clocks[match.whiteUid] || 600000);
+      return initialTime;
+    }
+    if (match.moveDetails && match.moveDetails[historyIndex]) {
+      return match.moveDetails[historyIndex].clocks[match.whiteUid];
+    }
+    return match.clocks[match.whiteUid];
+  })();
+
+  const displayedBlackClock = (() => {
+    if (!match) return 0;
+    if (match.status === 'active' && !isReviewingHistory) {
+      return blackClock;
+    }
+    if (historyIndex === -1) {
+      const initialTime = match.timeControl ? parseTimeControl(match.timeControl).initialTime : (match.clocks[match.blackUid] || 600000);
+      return initialTime;
+    }
+    if (match.moveDetails && match.moveDetails[historyIndex]) {
+      return match.moveDetails[historyIndex].clocks[match.blackUid];
+    }
+    return match.clocks[match.blackUid];
+  })();
+
+  const myClock = isSpectator ? displayedWhiteClock : (isWhite ? displayedWhiteClock : displayedBlackClock);
+  const oppClock = isSpectator ? displayedBlackClock : (isWhite ? displayedBlackClock : displayedWhiteClock);
+
+  const myProfile = isSpectator ? whiteProfile : (isWhite ? whiteProfile : blackProfile);
+  const oppProfile = isSpectator ? blackProfile : (isWhite ? blackProfile : whiteProfile);
 
   const hasOpponentDrawOffer = match.drawOffers?.includes(isWhite ? match.blackUid : match.whiteUid);
 
@@ -1347,8 +1391,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 }
                 return false;
               },
-              boardOrientation: isWhite ? 'white' : 'black',
-              allowDragging: match.status === 'active' && historyIndex === match.moves.length - 1 && (isMyTurn || settings.preMoveEnabled),
+              boardOrientation: (isWhite || isSpectator) ? 'white' : 'black',
+              allowDragging: !isSpectator && match.status === 'active' && historyIndex === match.moves.length - 1 && (isMyTurn || settings.preMoveEnabled),
               animationDurationInMs: 100,
               darkSquareStyle: { backgroundColor: 'transparent' },
               lightSquareStyle: { backgroundColor: 'transparent' },
@@ -1464,7 +1508,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 flex-wrap">
-                  <span>{oppProfile?.displayName || 'Opponent'} {isWhite ? '(Black)' : '(White)'}</span>
+                  <span>{isSpectator ? (blackProfile?.displayName || 'Black') : (oppProfile?.displayName || 'Opponent')} {isSpectator ? '(Black)' : (isWhite ? '(Black)' : '(White)')}</span>
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5 animate-fade-in">
@@ -1502,7 +1546,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           </div>
 
           {/* Disconnection Warning Message */}
-          {match.status === 'active' && match.mode !== 'practice' && isOpponentDisconnected && (
+          {match.status === 'active' && match.mode !== 'practice' && !isSpectator && isOpponentDisconnected && (
             <div className="bg-amber-500/10 border border-amber-500/30 p-2.5 rounded-lg flex items-center justify-between text-amber-300 animate-pulse text-xs text-left shrink-0">
               <div className="flex items-center space-x-2">
                 <div className="w-2 h-2 bg-amber-500 rounded-full animate-ping" />
@@ -1644,45 +1688,47 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                     <div ref={chatEndRef} />
                   </div>
                   
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!gameMsgInput.trim() || !user) return;
-                      const text = gameMsgInput.trim();
-                      setGameMsgInput('');
-                      try {
-                        await addDoc(collection(db, 'matches', matchId, 'messages'), {
-                          senderUid: user.uid,
-                          text,
-                          createdAt: Date.now()
-                        });
-                      } catch (err) {
-                        console.warn("Failed to send game message:", err);
-                      }
-                    }}
-                    className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5 shrink-0"
-                  >
-                    <input
-                      type="text"
-                      placeholder="Send a message..."
-                      value={gameMsgInput}
-                      onChange={(e) => setGameMsgInput(e.target.value)}
-                      className="flex-grow bg-slate-950/60 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
-                    />
-                    <button
-                      type="submit"
-                      className="bg-violet-600 hover:bg-violet-500 text-white p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                  {!isSpectator && (
+                    <form
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (!gameMsgInput.trim() || !user) return;
+                        const text = gameMsgInput.trim();
+                        setGameMsgInput('');
+                        try {
+                          await addDoc(collection(db, 'matches', matchId, 'messages'), {
+                            senderUid: user.uid,
+                            text,
+                            createdAt: Date.now()
+                          });
+                        } catch (err) {
+                          console.warn("Failed to send game message:", err);
+                        }
+                      }}
+                      className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5 shrink-0"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  </form>
+                      <input
+                        type="text"
+                        placeholder="Send a message..."
+                        value={gameMsgInput}
+                        onChange={(e) => setGameMsgInput(e.target.value)}
+                        className="flex-grow bg-slate-950/60 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+                      />
+                      <button
+                        type="submit"
+                        className="bg-violet-600 hover:bg-violet-500 text-white p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                      </button>
+                    </form>
+                  )}
                 </div>
               )}
             </div>
           </div>
 
           {/* Action Panel (Offer Draw / Resign) */}
-          {match.status === 'active' && (
+          {match.status === 'active' && !isSpectator && (
             <div className="bg-slate-900/10 p-2.5 rounded-xl border border-white/5 space-y-2 shrink-0">
               <div className="grid grid-cols-2 gap-2">
                 {match.mode !== 'practice' && (
@@ -1734,7 +1780,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               </div>
               <div>
                 <p className="text-xs font-semibold text-slate-300 flex items-center gap-1.5 flex-wrap">
-                  <span>{myProfile?.displayName || 'You'} {isWhite ? '(White)' : '(Black)'}</span>
+                  <span>{isSpectator ? (whiteProfile?.displayName || 'White') : (myProfile?.displayName || 'You')} {isSpectator ? '(White)' : (isWhite ? '(White)' : '(Black)')}</span>
                 </p>
                 <div className="flex items-center space-x-1.5 mt-0.5">
                   <span className="text-[10px] text-slate-500 flex items-center space-x-0.5 animate-fade-in">
@@ -2054,15 +2100,33 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
             {/* Content of the Popup */}
             {(() => {
-              const isWinner = match.winnerUid === user?.uid;
+              const isWinner = !isSpectator && match.winnerUid === user?.uid;
               const isDraw = match.status === 'draw' || match.status === 'stalemate';
-              const isLoser = !isDraw && !isWinner;
+              const isLoser = !isSpectator && !isDraw && !isWinner;
 
-              const resultEmoji = isDraw ? '🤝' : isWinner ? '🏆' : '💀';
-              const resultTitle = isDraw ? 'Game Drawn' : isWinner ? 'Victory!' : 'Defeat';
-              const titleColor = isDraw ? 'text-amber-300' : isWinner ? 'text-emerald-300' : 'text-red-400';
+              let resultEmoji = isDraw ? '🤝' : isWinner ? '🏆' : '💀';
+              let resultTitle = isDraw ? 'Game Drawn' : isWinner ? 'Victory!' : 'Defeat';
+              let titleColor = isDraw ? 'text-amber-300' : isWinner ? 'text-emerald-300' : 'text-red-400';
+
+              if (isSpectator) {
+                if (isDraw) {
+                  resultEmoji = '🤝';
+                  resultTitle = 'Game Drawn';
+                  titleColor = 'text-amber-300';
+                } else {
+                  const winnerName = match.winnerUid === match.whiteUid 
+                    ? (whiteProfile?.displayName || 'White') 
+                    : (blackProfile?.displayName || 'Black');
+                  resultEmoji = '🏆';
+                  resultTitle = `${winnerName} Won!`;
+                  titleColor = 'text-emerald-300';
+                }
+              }
 
               const walletImpact = (() => {
+                if (isSpectator) {
+                  return { label: 'Spectator Mode', color: 'text-slate-400', net: 0 };
+                }
                 if (match.mode === 'practice') {
                   return { label: '±0 (Practice Match)', color: 'text-slate-400', net: 0 };
                 }
@@ -2133,50 +2197,54 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                   <h3 className={`text-2xl font-black tracking-tight ${titleColor}`}>{resultTitle}</h3>
                   <p className="text-xs text-slate-500 uppercase tracking-widest font-medium">{statusLabel}</p>
 
-                  <div className="border-t border-white/5 my-4" />
+                  {!isSpectator && (
+                    <>
+                      <div className="border-t border-white/5 my-4" />
 
-                  {/* Coin Impact */}
-                  <div className="flex flex-col items-center gap-3">
-                    <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border w-full max-w-[280px] justify-center ${
-                      isWinner ? 'bg-emerald-950/20 border-emerald-500/20' : isDraw ? 'bg-amber-950/20 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
-                    }`}>
-                      <img
-                        src="/coin_pack/100 coins.png"
-                        alt="Coins"
-                        className="w-6 h-6 object-contain"
-                      />
-                      <div className="text-left">
-                        <p className="text-[9px] text-slate-500 uppercase tracking-widest">Net Coins</p>
-                        <p className={`text-base font-black ${walletImpact.color}`}>{walletImpact.label}</p>
-                      </div>
-                    </div>
-
-                    {/* Final Coin Balance */}
-                    <div className="text-xs text-slate-400 font-medium">
-                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins(finalCoinBalance)}</span>
-                    </div>
-                  </div>
-
-                  <div className="border-t border-white/5 my-4" />
-
-                  {/* Elo Rating Impact */}
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="text-sm font-semibold text-slate-300">
-                      Elo Rating
-                    </div>
-                    {match.mode === 'practice' || match.stake === 0 ? (
-                      <div className="text-xs text-slate-500 italic">Unrated Match</div>
-                    ) : (
-                      <div className="space-y-1">
-                        <div className={`text-lg font-bold ${eloDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {eloDelta >= 0 ? `+${eloDelta}` : eloDelta} Elo
+                      {/* Coin Impact */}
+                      <div className="flex flex-col items-center gap-3">
+                        <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border w-full max-w-[280px] justify-center ${
+                          isWinner ? 'bg-emerald-950/20 border-emerald-500/20' : isDraw ? 'bg-amber-950/20 border-amber-500/20' : 'bg-red-950/20 border-red-500/20'
+                        }`}>
+                          <img
+                            src="/coin_pack/100 coins.png"
+                            alt="Coins"
+                            className="w-6 h-6 object-contain"
+                          />
+                          <div className="text-left">
+                            <p className="text-[9px] text-slate-500 uppercase tracking-widest">Net Coins</p>
+                            <p className={`text-base font-black ${walletImpact.color}`}>{walletImpact.label}</p>
+                          </div>
                         </div>
-                        <div className="text-xs text-slate-400">
-                          New Rating: <span className="text-slate-200 font-bold">{newElo}</span>
+
+                        {/* Final Coin Balance */}
+                        <div className="text-xs text-slate-400 font-medium">
+                          Coin Balance: <span className="text-slate-200 font-bold">{formatCoins(finalCoinBalance)}</span>
                         </div>
                       </div>
-                    )}
-                  </div>
+
+                      <div className="border-t border-white/5 my-4" />
+
+                      {/* Elo Rating Impact */}
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="text-sm font-semibold text-slate-300">
+                          Elo Rating
+                        </div>
+                        {match.mode === 'practice' || match.stake === 0 ? (
+                          <div className="text-xs text-slate-500 italic">Unrated Match</div>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className={`text-lg font-bold ${eloDelta >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {eloDelta >= 0 ? `+${eloDelta}` : eloDelta} Elo
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              New Rating: <span className="text-slate-200 font-bold">{newElo}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
 
                   <div className="pt-4 flex flex-col gap-2">
                     {/* Exit Match Button */}

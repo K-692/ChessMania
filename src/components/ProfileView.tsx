@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, getDocs } from 'firebase/firestore';
-import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart } from 'lucide-react';
+import { collection, getDocs, query, where, orderBy, limit, getDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
+import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart, UserPlus, Check } from 'lucide-react';
 
 import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
+import { formatCoins } from '../utils/format';
+import type { UserProfile, Match } from '../types';
+import { ProfilePopup } from './ProfilePopup';
 
 const isCountryChangeLocked = (lastChangedAt?: number | null) => {
   if (!lastChangedAt) return false;
@@ -78,6 +81,7 @@ const getCountryFlag = (countryName: string): string => {
 
 interface ProfileViewProps {
   onBack: () => void;
+  onStartGame: (matchId: string) => void;
 }
 
 const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }> = {
@@ -94,12 +98,134 @@ const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }>
   all_in: { label: 'All In ‼️', price: 'Entire Balance', tc: "Player's Choice" }
 };
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
-  const { user, profile, updateCachedProfile } = useAuth();
+export const ProfileView: React.FC<ProfileViewProps> = ({ onBack, onStartGame }) => {
+  const { user, profile, updateCachedProfile, gameConfig } = useAuth();
   const [isEditCountryOpen, setIsEditCountryOpen] = useState(false);
   const [countryInput, setCountryInput] = useState('');
   const [savingCountry, setSavingCountry] = useState(false);
   const [countryError, setCountryError] = useState('');
+
+  // User matches history state (active or past games)
+  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+  const [opponentProfiles, setOpponentProfiles] = useState<Record<string, UserProfile>>({});
+  const [opponentFriendStatus, setOpponentFriendStatus] = useState<Record<string, 'sending' | 'sent' | 'friend'>>({});
+  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
+
+  const fetchRecentMatches = async () => {
+    if (!user) return;
+    setLoadingMatches(true);
+    try {
+      const q = query(
+        collection(db, 'matches'),
+        where('players', 'array-contains', user.uid),
+        orderBy('createdAt', 'desc'),
+        limit(20)
+      );
+      const querySnap = await getDocs(q);
+      const matches: Match[] = [];
+      querySnap.forEach((docSnap) => {
+        matches.push({ id: docSnap.id, ...docSnap.data() } as Match);
+      });
+
+      // Close active practice matches older than configured expiry hours (default 24h)
+      const now = Date.now();
+      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
+      const expiryMs = expiryHours * 60 * 60 * 1000;
+      const cleanedMatches = await Promise.all(matches.map(async (m) => {
+        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > expiryMs)) {
+          try {
+            await updateDoc(doc(db, 'matches', m.id), {
+              status: 'terminated',
+              finishedAt: now
+            });
+            return { ...m, status: 'terminated', finishedAt: now } as Match;
+          } catch (err) {
+            console.warn("Failed to terminate old practice match:", err);
+          }
+        }
+        return m;
+      }));
+
+      setRecentMatches(cleanedMatches.slice(0, 15));
+
+      const uniqueOpponentUids = [...new Set(matches.map((m) =>
+        m.whiteUid === user.uid ? m.blackUid : m.whiteUid
+      ))];
+
+      const profileCache: Record<string, UserProfile> = {};
+      const statusCache: Record<string, 'sent' | 'friend'> = {};
+
+      for (const oppUid of uniqueOpponentUids) {
+        if (oppUid.startsWith('bot_')) {
+          const elo = parseInt(oppUid.split('_')[1]) || 800;
+          profileCache[oppUid] = {
+            uid: oppUid,
+            displayName: `Chess Bot (${elo})`,
+            photoURL: '/game_modes/practice.png',
+            rating: elo,
+            currentEloRating: elo,
+            bankBalance: 0,
+            currentBalance: 0,
+            createdAt: Date.now(),
+            lastLoginAt: Date.now(),
+            zeroBalanceAt: null
+          };
+          continue;
+        }
+
+        try {
+          const uSnap = await getDoc(doc(db, 'users', oppUid));
+          if (uSnap.exists()) {
+            profileCache[oppUid] = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
+          }
+        } catch (err) {
+          console.warn("Failed to fetch opponent profile:", err);
+        }
+
+        const friendDocRef = doc(db, 'users', user.uid, 'friends', oppUid);
+        const fSnap = await getDoc(friendDocRef);
+        if (fSnap.exists()) {
+          const fData = fSnap.data();
+          statusCache[oppUid] = fData.status === 'accepted' ? 'friend' : 'sent';
+        }
+      }
+
+      setOpponentProfiles((prev) => ({ ...prev, ...profileCache }));
+      setOpponentFriendStatus((prev) => ({ ...prev, ...statusCache }));
+    } catch (e) {
+      console.warn('Error fetching recent matches:', e);
+    } finally {
+      setLoadingMatches(false);
+    }
+  };
+
+  const handleSendOpponentFriendRequest = async (oppUid: string) => {
+    if (!user) return;
+    setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sending' }));
+    try {
+      await addDoc(collection(db, 'friendships'), {
+        requesterUid: user.uid,
+        receiverUid: oppUid,
+        status: 'pending',
+        createdAt: Date.now()
+      });
+      setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sent' }));
+    } catch (e) {
+      console.warn('Failed to send friend request to opponent:', e);
+      setOpponentFriendStatus((prev) => {
+        const next = { ...prev };
+        delete next[oppUid];
+        return next;
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchRecentMatches();
+    }
+  }, [user, gameConfig]);
 
   // Elo rating history states
   const [ratingHistory, setRatingHistory] = useState<{ date: string; elo: number }[]>([]);
@@ -695,6 +821,146 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
           })}
         </div>
       </div>
+
+      {/* Active & Recent Matches */}
+      <div className="space-y-4">
+        <div className="space-y-1">
+          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
+            <Gamepad2 className="w-5 h-5 text-violet-400" />
+            <span>Recent & Active Matches</span>
+          </h3>
+          <p className="text-xs text-slate-500 text-left">
+            Review your recently finished matches, analyze your play move-by-move, or resume ongoing battles.
+          </p>
+        </div>
+
+        {loadingMatches ? (
+          <div className="py-10 text-center text-xs text-slate-500">
+            Scanning active game rooms...
+          </div>
+        ) : recentMatches.length === 0 ? (
+          <div className="glass p-8 rounded-xl text-center border border-white/5 text-slate-500 text-xs italic">
+            No match history found. Play games to populate your history!
+          </div>
+        ) : (
+          <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden shadow-xl">
+            {recentMatches.map((m) => {
+              const isMWhite = m.whiteUid === user.uid;
+              const oppUid = isMWhite ? m.blackUid : m.whiteUid;
+              const isActive = m.status === 'active';
+              const oppProfile = opponentProfiles[oppUid];
+              const friendStatus = opponentFriendStatus[oppUid];
+
+              const resultLabel = isActive ? null
+                : m.winnerUid === user.uid ? 'WON'
+                  : m.winnerUid ? 'LOST'
+                    : 'DRAW';
+
+              const resultColor = isActive ? ''
+                : m.winnerUid === user.uid ? 'text-emerald-400'
+                  : m.winnerUid ? 'text-red-400'
+                    : 'text-slate-500';
+
+              return (
+                <div
+                  key={m.id}
+                  className={`flex flex-col sm:flex-row sm:items-center justify-between px-5 py-4 gap-4 ${
+                    isActive ? 'bg-violet-950/15' : 'hover:bg-white/[0.02]'
+                  } transition-colors`}
+                >
+                  {/* Left: Status badge + opponent */}
+                  <div className="flex items-center gap-4 min-w-0">
+                    <span className={`shrink-0 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
+                      isActive ? 'bg-violet-500/25 text-violet-300 border border-violet-500/20' : 'bg-slate-800/80 text-slate-500 border border-white/5'
+                    }`}>
+                      {isActive ? 'LIVE' : m.status}
+                    </span>
+
+                    {oppProfile?.photoURL && (
+                      <img
+                        src={oppProfile.photoURL}
+                        alt={oppProfile.displayName}
+                        className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity shadow-md"
+                        title="View Profile"
+                        onClick={() => setSelectedProfile(oppProfile)}
+                      />
+                    )}
+
+                    <div className="min-w-0 text-left">
+                      <p className="text-sm font-semibold text-slate-200 truncate flex items-center gap-1.5">
+                        <span>vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}</span>
+                        {oppProfile && !oppUid.startsWith('bot_') && (
+                          <span className="text-[10px] text-slate-500 font-mono">({oppProfile.rating} Elo)</span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-slate-500 capitalize truncate mt-0.5">
+                        {m.mode.replace(/_/g, ' ')} &bull; {
+                          m.mode === 'all_in' && m.allInStakes && user
+                            ? formatCoins(m.allInStakes[user.uid] || 0)
+                            : formatCoins(m.stake)
+                        } &bull; {new Date(m.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Right: friend action + result or resume/analyze */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
+                    <div className="flex items-center gap-2">
+                      {friendStatus === 'friend' ? (
+                        <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10">
+                          <Check className="w-3 h-3" /> Friends
+                        </span>
+                      ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
+                        <span className="text-[10px] text-slate-400 font-medium animate-pulse bg-slate-900 border border-white/5 px-2 py-0.5 rounded">
+                          {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
+                        </span>
+                      ) : oppProfile && !oppUid.startsWith('bot_') ? (
+                        <button
+                          onClick={() => handleSendOpponentFriendRequest(oppUid)}
+                          className="flex items-center gap-1 text-[10px] font-bold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2.5 py-1 rounded-lg transition-all cursor-pointer shadow"
+                        >
+                          <UserPlus className="w-3 h-3" />
+                          Add Friend
+                        </button>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isActive ? (
+                        <button
+                          onClick={() => onStartGame(m.id)}
+                          className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-violet-600/10 transition-all cursor-pointer border border-violet-500/20"
+                        >
+                          Resume
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-black tracking-wider ${resultColor} px-2 py-1 bg-slate-900/40 rounded border border-white/5`}>
+                            {resultLabel}
+                          </span>
+                          <button
+                            onClick={() => onStartGame(m.id)}
+                            className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 text-xs font-bold px-4 py-2 rounded-xl border border-white/10 transition-all cursor-pointer hover:border-white/20 shadow-md"
+                          >
+                            Analyze
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {selectedProfile && (
+        <ProfilePopup
+          profile={selectedProfile}
+          onClose={() => setSelectedProfile(null)}
+        />
+      )}
 
       {/* Edit Country Modal */}
       {isEditCountryOpen && (
