@@ -10,6 +10,7 @@ import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
 import { ProfilePopup } from './ProfilePopup';
+import { NetworkSignal } from './NetworkSignal';
 
 interface ChessGameProps {
   matchId: string;
@@ -1273,13 +1274,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               )}
             </div>
 
-            <button
-              onClick={() => setShowSettingsModal(true)}
-              className="flex items-center space-x-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all border border-white/5 text-xs font-semibold cursor-pointer"
-            >
-              <Settings className="w-4 h-4" />
-              <span>Settings</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <NetworkSignal />
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="flex items-center space-x-1 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition-all border border-white/5 text-xs font-semibold cursor-pointer"
+              >
+                <Settings className="w-4 h-4" />
+                <span>Settings</span>
+              </button>
+            </div>
           </div>
 
           {/* Opponent Profile and Clock */}

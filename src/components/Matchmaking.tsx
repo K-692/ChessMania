@@ -7,6 +7,7 @@ import { playMatchFoundSound } from '../utils/sound';
 import { joinQueue, leaveQueue, findMatch } from '../matchmaking/matchmakingService';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import { NetworkSignal } from './NetworkSignal';
 
 interface MatchmakingProps {
   mode: GameMode;
@@ -131,7 +132,10 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
         </div>
 
         {/* Info */}
-        <div className="space-y-2">
+        <div className="space-y-2 flex flex-col items-center">
+          <div className="mb-2">
+            <NetworkSignal />
+          </div>
           <h3 className="text-xl font-bold tracking-wide text-slate-100">
             {statusText}
           </h3>

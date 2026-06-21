@@ -445,6 +445,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       if (auth.currentUser) {
+        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        try {
+          await setDoc(userDocRef, { sessionActive: false }, { merge: true });
+        } catch (err) {
+          console.warn("Failed to set sessionActive to false on logout:", err);
+        }
         await writeBackToFirestore(auth.currentUser.uid);
       }
       await signOut(auth);
@@ -604,8 +610,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
       
-      await setDoc(userDocRef, { lastLoginAt: now }, { merge: true });
-      localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, now.toString());
+      const localSessionId = localStorage.getItem('checkmate_session_id') || Math.random().toString(36).substring(2) + '_' + Date.now();
+      localStorage.setItem('checkmate_session_id', localSessionId);
+      await setDoc(userDocRef, { 
+        lastLoginAt: now,
+        sessionActive: true,
+        activeSessionId: localSessionId,
+        lastActiveAt: now
+      }, { merge: true });
       setProfile(sanitized);
 
     } catch (error) {
@@ -643,13 +655,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
+        // Check local session ID, initialize if missing
+        let localSessionId = localStorage.getItem('checkmate_session_id');
+        if (!localSessionId) {
+          localSessionId = Math.random().toString(36).substring(2) + '_' + Date.now();
+          localStorage.setItem('checkmate_session_id', localSessionId);
+        }
+
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        try {
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            const sessionActive = data.sessionActive === true;
+            const activeSessionId = data.activeSessionId;
+            const lastActiveAt = data.lastActiveAt || 0;
+            const now = Date.now();
+
+            // Block session if another is active within the last 40 seconds
+            if (sessionActive && activeSessionId !== localSessionId && (now - lastActiveAt < 40000)) {
+              console.log('Blocked sign-in: Another active session detected on another device/browser.');
+              if (profileUnsubRef.current) {
+                (profileUnsubRef.current as any)();
+                profileUnsubRef.current = null;
+              }
+              await signOut(auth);
+              setUser(null);
+              setProfile(null);
+              setLoading(false);
+              alert('Already a session is going on in another device. Please wait until that session ends or log out from the other device.');
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to check active sessions on login:", err);
+        }
+
+        // Set session active to true on login
+        try {
+          await setDoc(userDocRef, {
+            sessionActive: true,
+            activeSessionId: localSessionId,
+            lastActiveAt: Date.now(),
+            lastLoginAt: Date.now()
+          }, { merge: true });
+        } catch (err) {
+          console.warn("Failed to mark session active:", err);
+        }
+
         setUser(firebaseUser);
 
         // Commit any cached changes from previous tab/session first
         await writeBackToFirestore(firebaseUser.uid);
 
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        
         // Listen to profile document in real-time
         profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
           if (!docSnap.exists()) {
@@ -658,38 +716,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           const rawData = docSnap.data();
-
-          // New device detection check
-          const localLoginTime = parseInt(localStorage.getItem(`checkmate_session_login_time_${firebaseUser.uid}`) || '0');
-          const serverLoginTime = rawData.lastLoginAt || 0;
-          if (localLoginTime > 0 && serverLoginTime > localLoginTime + 2000) {
-            console.log('Detected newer login on another device. Logging out...');
-            if (profileUnsubRef.current) {
-              profileUnsubRef.current();
-              profileUnsubRef.current = null;
-            }
-            await signOut(auth);
-            setUser(null);
-            setProfile(null);
-            setLoading(false);
-            alert('You have been logged out because a new sign-in was detected on another device.');
-            return;
-          }
-
-          if (localLoginTime === 0) {
-            localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, serverLoginTime.toString());
-          }
-
-          // Handle if user is logging in now vs refreshing
-          const isLoggingIn = sessionStorage.getItem('checkmate_is_logging_in') === 'true';
           sessionStorage.removeItem('checkmate_is_logging_in');
-          const now = Date.now();
-
-          if (isLoggingIn) {
-            await setDoc(userDocRef, { lastLoginAt: now }, { merge: true });
-            localStorage.setItem(`checkmate_session_login_time_${firebaseUser.uid}`, now.toString());
-            rawData.lastLoginAt = now;
-          }
 
           const { sanitized, hasChanges } = sanitizeProfile(
             rawData,
@@ -703,7 +730,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const mergedProfile = { ...sanitized, ...unsaved.profileUpdates };
           setProfile(mergedProfile);
 
-          if (hasChanges && isLoggingIn) {
+          if (hasChanges) {
             await setDoc(userDocRef, sanitized, { merge: true });
           }
           setLoading(false);
@@ -776,6 +803,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.removeEventListener('online', handleOnline);
     };
   }, [user, gameConfig?.inactivityTimeoutMinutes]);
+
+  // Periodic Firestore presence heartbeat
+  useEffect(() => {
+    if (!user) return;
+    
+    const intervalId = setInterval(async () => {
+      const localSessionId = localStorage.getItem('checkmate_session_id');
+      if (!localSessionId) return;
+      
+      const userDocRef = doc(db, 'users', user.uid);
+      try {
+        await setDoc(userDocRef, { 
+          lastActiveAt: Date.now(),
+          lastLoginAt: Date.now(),
+          sessionActive: true,
+          activeSessionId: localSessionId
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Heartbeat presence update failed:", err);
+      }
+    }, 20000);
+
+    return () => clearInterval(intervalId);
+  }, [user]);
 
   return (
     <AuthContext.Provider
