@@ -1893,6 +1893,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               // Calculate Elo changes
               const myProfile = isWhite ? whiteProfile : blackProfile;
               const oppProfile = isWhite ? blackProfile : whiteProfile;
+              const myBalance = myProfile ? (myProfile.currentBalance !== undefined ? myProfile.currentBalance : myProfile.bankBalance) : 0;
               let eloDelta = 0;
               const myRating = myProfile ? (myProfile.currentEloRating !== undefined ? myProfile.currentEloRating : myProfile.rating) : 0;
               let newElo = myRating;
@@ -1901,9 +1902,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 const oppRating = oppProfile.currentEloRating !== undefined ? oppProfile.currentEloRating : oppProfile.rating;
                 const myScore = isDraw ? 0.5 : isWinner ? 1 : 0;
                 const eloResult = calculateElo(myRating, oppRating, myScore);
-                eloDelta = eloResult.delta;
-                newElo = Math.max(100, myRating + eloDelta);
+                if (myScore === 0) {
+                  const finalDelta = eloResult.delta > 0 ? -eloResult.delta : eloResult.delta;
+                  eloDelta = finalDelta;
+                } else {
+                  eloDelta = eloResult.delta;
+                }
+                newElo = Math.max(0, myRating + eloDelta);
               }
+
+              const finalCoinBalance = (() => {
+                if (match.mode === 'practice') return myBalance;
+                if (isDraw) return myBalance + match.stake;
+                if (isWinner) {
+                  if (match.mode === 'all_in' && match.allInStakes && user) {
+                    const oppUid = match.players.find(p => p !== user.uid) || '';
+                    const oppStakeVal = match.allInStakes[oppUid] || 0;
+                    const myStakeVal = match.allInStakes[user.uid] || 0;
+                    return myBalance + myStakeVal + oppStakeVal;
+                  }
+                  return myBalance + match.stake * 2;
+                }
+                return myBalance;
+              })();
 
               return (
                 <div className="space-y-4 text-center">
@@ -1931,7 +1952,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
                     {/* Final Coin Balance */}
                     <div className="text-xs text-slate-400 font-medium">
-                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins((profile?.currentBalance !== undefined ? profile.currentBalance : profile?.bankBalance) || 0)}</span>
+                      Coin Balance: <span className="text-slate-200 font-bold">{formatCoins(finalCoinBalance)}</span>
                     </div>
                   </div>
 

@@ -266,10 +266,11 @@ export async function settleMatchPayoutAndElo(
   const newBalance = Math.round((myBalance + myPayout) * 100) / 100;
   const newTotalCoins = Math.round(((currentUserProfile.totalCoinsEarned || myBalance) + myEarned) * 100) / 100;
 
-  // Increments: only increment play count if the match was won by current user
+  // Increments: only increment play count if the match was won by current user AND is not a friendly challenge
   const myCounts = currentUserProfile.gameplayCounts || {};
   const wonMatch = matchData.winnerUid === myUid;
-  const newMyCounts = wonMatch
+  const isFriendly = !!matchData.challengeId;
+  const newMyCounts = (wonMatch && !isFriendly)
     ? { ...myCounts, [matchData.mode]: (myCounts[matchData.mode] || 0) + 1 }
     : myCounts;
 

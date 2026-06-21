@@ -426,6 +426,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       sessionStorage.setItem('checkmate_is_logging_in', 'true');
+      localStorage.setItem('checkmate_last_activity', Date.now().toString());
       await setPersistence(auth, browserSessionPersistence);
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
@@ -641,6 +642,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (firebaseUser) {
+        const isLoggingIn = sessionStorage.getItem('checkmate_is_logging_in') === 'true';
+        if (isLoggingIn) {
+          localStorage.setItem('checkmate_last_activity', Date.now().toString());
+        }
         const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
         const timeSinceLastActivity = Date.now() - lastActivity;
 

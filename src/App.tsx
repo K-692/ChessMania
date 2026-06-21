@@ -11,6 +11,7 @@ import { SocialView, FriendChatModal } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
+import { NetworkSignal } from './components/NetworkSignal';
 import type { GameMode, Match, UserProfile } from './types';
 import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
@@ -192,6 +193,20 @@ const AppContent: React.FC = () => {
         setIsSavingName(false);
         return;
       }
+
+      // Update Firestore user document immediately
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        displayName: trimmed,
+        lastUsernameChangedAt: Date.now()
+      });
+
+      // Update Leaderboard document immediately
+      const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', user.uid);
+      await setDoc(leaderboardDocRef, {
+        displayName: trimmed,
+        updatedAt: Date.now()
+      }, { merge: true });
 
       updateCachedProfile({
         displayName: trimmed,
@@ -678,14 +693,17 @@ const AppContent: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex items-center pt-2">
+              <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
                 <button
                   onClick={login}
                   className="w-full sm:w-auto flex items-center justify-center space-x-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-8 py-4 rounded-xl font-semibold shadow-xl shadow-violet-600/25 hover:shadow-violet-600/35 transition-all text-base border border-violet-500/25 cursor-pointer"
                 >
-                  <img src={knightImgSrc} alt="Knight" className="w-6 h-6 object-contain" />
-                  <span>Play Chess Now (Get 1,000 Coins)</span>
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" alt="Google" className="w-5 h-5 object-contain bg-white p-0.5 rounded-full" />
+                  <span>Sign In with Google</span>
                 </button>
+                <div className="shrink-0">
+                  <NetworkSignal />
+                </div>
               </div>
             </div>
 
