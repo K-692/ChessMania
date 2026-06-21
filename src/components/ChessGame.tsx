@@ -60,13 +60,50 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   };
 
   // Pre-move and illegal move visual states
-  const [preMoves, setPreMoves] = useState<{ from: string; to: string; promotion?: string }[]>([]);
+  const [preMoves, setPreMoves] = useState<{ from: string; to: string; promotion?: string }[]>(() => {
+    try {
+      const saved = sessionStorage.getItem(`checkmate_premoves_${matchId}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
   const [illegalMoveSquares, setIllegalMoveSquares] = useState<{ from: string; to: string } | null>(null);
   
   const preMovesRef = useRef(preMoves);
   useEffect(() => {
     preMovesRef.current = preMoves;
-  }, [preMoves]);
+    try {
+      sessionStorage.setItem(`checkmate_premoves_${matchId}`, JSON.stringify(preMoves));
+    } catch (e) {}
+  }, [preMoves, matchId]);
+
+  useEffect(() => {
+    if (match && match.status !== 'active') {
+      setPreMoves([]);
+      try {
+        sessionStorage.removeItem(`checkmate_premoves_${matchId}`);
+      } catch (e) {}
+    }
+  }, [match?.status, matchId]);
+
+  const handleRemovePremove = (indexToRemove: number) => {
+    const nextPreMoves = preMoves.filter((_, idx) => idx !== indexToRemove);
+    setPreMoves(nextPreMoves);
+    if (match) {
+      const opt = getOptimisticState(match.boardFEN, nextPreMoves);
+      setLocalFen(opt.fen);
+      chessRef.current.load(opt.fen);
+    }
+  };
+
+  const handleClearPremoves = () => {
+    setPreMoves([]);
+    if (match) {
+      setLocalFen(match.boardFEN);
+      chessRef.current.load(match.boardFEN);
+    }
+  };
 
   const getOptimisticState = (baseFen: string, queue: typeof preMoves) => {
     const tempChess = new Chess(baseFen);
@@ -793,7 +830,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       }
 
       return executeMove(sourceSquare, targetSquare);
-    } else if (settings.preMoveEnabled && preMoves.length < 3) {
+    } else if (settings.preMoveEnabled) {
+      if (preMoves.length >= 3) {
+        alert("Premove queue is full (max 3 premoves).");
+        return false;
+      }
       // Pre-move drop handling
       const opt = getOptimisticState(match.boardFEN, preMoves);
       const tempChess = new Chess(opt.fen);
@@ -875,7 +916,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           setSelectedSquare(square);
         }
       }
-    } else if (settings.preMoveEnabled && preMoves.length < 3) {
+    } else if (settings.preMoveEnabled) {
+      if (preMoves.length >= 3 && selectedSquare) {
+        // If clicking a target square to make a 4th premove
+        const opt = getOptimisticState(match.boardFEN, preMoves);
+        const moves = opt.chess.moves({
+          square: selectedSquare as any,
+          verbose: true
+        });
+        const legalMove = moves.find((m: any) => m.to === square);
+        if (legalMove) {
+          alert("Premove queue is full (max 3 premoves).");
+          setSelectedSquare(null);
+          return;
+        }
+      }
       const opt = getOptimisticState(match.boardFEN, preMoves);
       const piece = opt.chess.get(square as any);
       const myColor = isWhite ? 'w' : 'b';
@@ -927,6 +982,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     if (isMyTurn) {
       executeMove(from, to, pieceType);
     } else {
+      if (preMoves.length >= 3) {
+        alert("Premove queue is full (max 3 premoves).");
+        return;
+      }
       const opt = getOptimisticState(match.boardFEN, preMoves);
       const tempChess = new Chess(opt.fen);
       let moveRes = null;
@@ -1210,8 +1269,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   return (
     <div className="w-full h-auto lg:h-[calc(100vh-64px)] xl:h-[calc(100vh-80px)] flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden bg-transparent">
       {/* Left Column: Chessboard (fits top-to-bottom of the left half) */}
-      <div className="w-full lg:w-auto lg:h-full flex items-center justify-start bg-slate-900/10 p-0 shrink-0">
-        <div className="chessboard-container aspect-square w-full h-auto lg:h-[calc(100vh-64px)] lg:max-h-[calc(100vh-64px)] lg:w-[calc(100vh-64px)] xl:h-[calc(100vh-80px)] xl:max-h-[calc(100vh-80px)] xl:w-[calc(100vh-80px)] bg-[#1a1c23] shadow-2xl overflow-hidden border border-white/10 lg:border-y-0 lg:border-l-0 flex items-center justify-center">
+      <div className="w-full lg:w-auto lg:h-full flex flex-col items-center justify-center bg-slate-900/10 p-3 shrink-0">
+        <div className="chessboard-container aspect-square w-full h-auto lg:h-[calc(100vh-120px)] lg:max-h-[calc(100vh-120px)] lg:w-[calc(100vh-120px)] xl:h-[calc(100vh-140px)] xl:max-h-[calc(100vh-140px)] xl:w-[calc(100vh-140px)] bg-[#1a1c23] shadow-2xl overflow-hidden border border-white/10 flex items-center justify-center animate-fade-in">
           <Chessboard
             options={{
               position: localFen,
@@ -1222,7 +1281,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                 return false;
               },
               boardOrientation: isWhite ? 'white' : 'black',
-              allowDragging: match.status === 'active' && (isMyTurn || (settings.preMoveEnabled && preMoves.length < 3)),
+              allowDragging: match.status === 'active' && (isMyTurn || settings.preMoveEnabled),
               animationDurationInMs: 100,
               darkSquareStyle: { backgroundColor: 'transparent' },
               lightSquareStyle: { backgroundColor: 'transparent' },
@@ -1240,6 +1299,39 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             }}
           />
         </div>
+
+        {/* Queued Premoves Bar */}
+        {preMoves.length > 0 && (
+          <div className="flex items-center space-x-2 mt-2 px-3 py-1.5 bg-slate-950/60 border border-white/10 rounded-lg text-xs w-full max-w-[calc(100vh-120px)] xl:max-w-[calc(100vh-140px)] shrink-0 shadow-lg">
+            <span className="text-rose-400 font-bold uppercase tracking-wider text-[10px] shrink-0">
+              Queued Premoves:
+            </span>
+            <div className="flex items-center space-x-1.5 overflow-x-auto scrollbar-none flex-grow">
+              {preMoves.map((pm, idx) => (
+                <span
+                  key={idx}
+                  className="flex items-center space-x-1 bg-rose-500/10 border border-rose-500/30 text-rose-300 px-2 py-0.5 rounded text-[11px] font-mono shrink-0 select-none"
+                >
+                  <span>{idx + 1}. {pm.from}→{pm.to}{pm.promotion ? `=${pm.promotion.toUpperCase()}` : ''}</span>
+                  <button
+                    onClick={() => handleRemovePremove(idx)}
+                    className="hover:text-red-400 text-rose-400 cursor-pointer text-[10px] font-extrabold ml-1 w-3 h-3 flex items-center justify-center rounded-full hover:bg-rose-500/20"
+                    title="Remove this premove"
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+            <button
+              onClick={() => handleClearPremoves()}
+              className="ml-auto text-slate-500 hover:text-rose-400 text-[10px] uppercase font-bold cursor-pointer transition-colors shrink-0"
+              title="Clear all queued premoves (Right-click board also works)"
+            >
+              Clear All
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right Column: Actions, Players, Clocks, Info, Moves */}

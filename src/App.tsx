@@ -11,7 +11,6 @@ import { SocialView, FriendChatModal } from './components/SocialView';
 import { SettingsView } from './components/SettingsView';
 import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
-import { NetworkSignal } from './components/NetworkSignal';
 import type { GameMode, Match, UserProfile } from './types';
 import { collection, query, where, getDoc, getDocs, orderBy, limit, onSnapshot, doc, setDoc, addDoc, updateDoc, writeBatch } from 'firebase/firestore';
 import { db } from './firebase';
@@ -24,7 +23,7 @@ import { createPracticeMatchObject } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, login, loading, updateCachedProfile, addCachedMatch, gameConfig } = useAuth();
+  const { user, profile, loading, updateCachedProfile, addCachedMatch, gameConfig } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
 
   // Settings sync state for dynamic piece style Knight image
@@ -612,7 +611,7 @@ const AppContent: React.FC = () => {
   // Not Authenticated Landing Page
   if (!user) {
     return (
-      <div className="min-h-screen bg-transparent flex flex-col relative overflow-hidden">
+      <div className="h-screen bg-transparent flex flex-col relative overflow-hidden">
         {/* Ambient Floating Chess Pieces */}
         <img
           src={knightImgSrc}
@@ -640,84 +639,71 @@ const AppContent: React.FC = () => {
 
         <Navbar onNavigate={() => { }} currentView="" />
 
-        <main className="flex-grow flex items-center justify-center px-6 py-12 relative z-10">
-          <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+        <main className="flex-grow flex items-center justify-center px-6 py-4 md:py-6 relative z-10 min-h-0 overflow-hidden">
+          <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-center max-h-full">
 
             {/* Left Column: Pitch & Details */}
-            <div className="lg:col-span-7 text-left space-y-6">
-              <div className="inline-flex items-center space-x-2.5 bg-violet-500/10 border border-violet-500/20 px-3.5 py-1.5 rounded-full text-xs font-semibold text-violet-400 uppercase tracking-widest">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" alt="Queen" className="w-4.5 h-4.5 filter invert brightness-125 animate-pulse" />
+            <div className="lg:col-span-7 text-left space-y-4 flex flex-col justify-center max-h-full">
+              <div className="inline-flex items-center space-x-2 bg-violet-500/10 border border-violet-500/20 px-3 py-1 rounded-full text-[10px] font-semibold text-violet-400 uppercase tracking-widest self-start">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" alt="Queen" className="w-3.5 h-3.5 filter invert brightness-125 animate-pulse" />
                 <span>High-Voltage Chess-Coin Clashes ⚡</span>
               </div>
 
-              <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-white leading-none">
+              <h1 className="text-3xl md:text-5xl font-bold tracking-tight text-white leading-tight">
                 Check & Mate: <br />
                 <span className="bg-gradient-to-r from-violet-400 via-violet-500 to-indigo-400 bg-clip-text text-transparent">
                   High-Stakes Chess Lounge
                 </span>
               </h1>
-              <p className="text-base text-slate-400 font-light leading-relaxed">
+              <p className="text-sm text-slate-400 font-light leading-relaxed">
                 Step into the ultimate chess arena! Stake your chess-coins, outsmart rivals in real-time matches, and seize the entire prize pool. Watch your balance grow continuously with hourly coin credits, represent your country globally, and dominate the global rankings!
               </p>
 
               {/* Bullet points explaining the Chess Coin Stakes */}
-              <div className="space-y-4 border-y border-white/5 py-6 my-2">
+              <div className="space-y-2.5 border-y border-white/5 py-4 my-1">
                 <div className="flex items-start space-x-3.5">
-                  <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md">
-                    <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md shrink-0">
+                    <img src="/coin_pack/100 coins.png" alt="Coin" className="w-4 h-4 object-contain" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-200">Play Chess, Earn Coins</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">Stalk the queues with 100+ coins in Rapid (10m) or Bullet (5m) games. The winner takes the entire prize pool.</p>
+                    <h4 className="text-xs font-semibold text-slate-200">Play Chess, Earn Coins</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Stalk the queues with 100+ coins in Rapid (10m) or Bullet (5m) games. The winner takes the entire prize pool.</p>
                   </div>
                 </div>
 
                 <div className="flex items-start space-x-3.5">
-                  <div className="w-8 h-8 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" alt="Rook" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(139,92,246,0.5)] brightness-125" />
+                  <div className="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md shrink-0">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" alt="Rook" className="w-4 h-4 filter invert drop-shadow-[0_0_2px_rgba(139,92,246,0.5)] brightness-125" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-200">Dynamic Elo Matchmaking</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">Paired by rating band (±100 Elo). The band automatically widens every 10 seconds to keep queues fast.</p>
+                    <h4 className="text-xs font-semibold text-slate-200">Dynamic Elo Matchmaking</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Paired by rating band (±100 Elo). The band automatically widens every 10 seconds to keep queues fast.</p>
                   </div>
                 </div>
 
                 <div className="flex items-start space-x-3.5">
-                  <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg" alt="King" className="w-5 h-5 filter invert drop-shadow-[0_0_2px_rgba(99,102,241,0.5)] brightness-125" />
+                  <div className="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center mt-0.5 overflow-hidden p-0.5 shadow-md shrink-0">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg" alt="King" className="w-4 h-4 filter invert drop-shadow-[0_0_2px_rgba(99,102,241,0.5)] brightness-125" />
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-slate-200">Hourly Coin Credits & Growth</h4>
-                    <p className="text-xs text-slate-400 mt-0.5">Receive 100 coins credited to your wallet balance automatically for every hour active, up to a maximum limit of 1000 coins.</p>
+                    <h4 className="text-xs font-semibold text-slate-200">Hourly Coin Credits & Growth</h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Receive 100 coins credited to your wallet balance automatically for every hour active, up to a maximum limit of 1000 coins.</p>
                   </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
-                <button
-                  onClick={login}
-                  className="w-full sm:w-auto flex items-center justify-center space-x-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-8 py-4 rounded-xl font-semibold shadow-xl shadow-violet-600/25 hover:shadow-violet-600/35 transition-all text-base border border-violet-500/25 cursor-pointer"
-                >
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/action/google.svg" alt="Google" className="w-5 h-5 object-contain bg-white p-0.5 rounded-full" />
-                  <span>Sign In with Google</span>
-                </button>
-                <div className="shrink-0">
-                  <NetworkSignal />
                 </div>
               </div>
             </div>
 
             {/* Right Column: High-quality Chess King Graphic */}
-            <div className="lg:col-span-5 flex flex-col items-center">
+            <div className="lg:col-span-5 flex flex-col items-center justify-center min-h-0">
               <div className="relative group">
                 {/* Floating neon background glow */}
                 <div className="absolute inset-0 bg-violet-600/15 rounded-2xl blur-2xl group-hover:bg-violet-600/20 transition-all duration-300" />
 
-                <div className="glass-card rounded-2xl overflow-hidden border border-white/10 p-3 relative z-10 transition-transform duration-300 group-hover:scale-[1.02]">
+                <div className="glass-card rounded-2xl overflow-hidden border border-white/10 p-2 relative z-10 transition-transform duration-300 group-hover:scale-[1.02] max-h-[35vh] max-w-[35vh] aspect-square flex items-center justify-center">
                   <img
                     src="/chess_king_neon.png"
                     alt="Premium Chess King"
-                    className="w-full h-auto rounded-xl shadow-2xl object-cover aspect-square"
+                    className="w-full h-full rounded-xl shadow-2xl object-cover"
                   />
                 </div>
               </div>
@@ -726,7 +712,7 @@ const AppContent: React.FC = () => {
           </div>
         </main>
 
-        <footer className="w-full text-center py-6 text-xs text-slate-400 border-t border-white/5 relative z-10 bg-slate-950/20 backdrop-blur-sm mt-auto animate-fade-in">
+        <footer className="w-full text-center py-4 text-xs text-slate-400 border-t border-white/5 relative z-10 bg-slate-950/20 backdrop-blur-sm mt-auto animate-fade-in shrink-0">
           <div className="max-w-6xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center space-x-1">
               <span>Made with ❤️ by</span>

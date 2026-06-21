@@ -6,6 +6,7 @@ import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import { NetworkSignal } from './NetworkSignal';
 
 interface NavbarProps {
   onNavigate: (view: 'dashboard' | 'ledger' | 'leaderboard' | 'profile' | 'social' | 'settings') => void;
@@ -243,6 +244,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                     </p>
                   </div>
                 </div>
+                <NetworkSignal />
                 <button
                   onClick={logout}
                   disabled={loading}
@@ -254,6 +256,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               </>
             ) : (
               <div className="flex items-center space-x-3">
+                <NetworkSignal />
                 <button
                   onClick={toggleMute}
                   className="p-2.5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5 rounded-xl border border-white/5 transition-all cursor-pointer flex items-center justify-center"
@@ -267,7 +270,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   className="flex items-center space-x-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl font-medium shadow-lg shadow-violet-600/20 hover:shadow-violet-600/30 transition-all border border-violet-500/20 disabled:opacity-50 cursor-pointer"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>Sign in with Google</span>
+                  <span>Sign in</span>
                 </button>
               </div>
             )
@@ -276,6 +279,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
         {/* Mobile / Tablet Compact Stats & Hamburger Menu Controls */}
         <div className="flex lg:hidden items-center space-x-3">
+          <NetworkSignal />
           {!isGameActive && user && (
             <>
               {/* Compact Wallet */}

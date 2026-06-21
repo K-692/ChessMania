@@ -454,6 +454,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         await writeBackToFirestore(auth.currentUser.uid);
       }
+      // Clear session premove queues
+      if (typeof window !== 'undefined') {
+        try {
+          for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i);
+            if (key && key.startsWith('checkmate_premoves_')) {
+              sessionStorage.removeItem(key);
+              i--; // index shifts down
+            }
+          }
+        } catch (e) {}
+      }
       await signOut(auth);
       setProfile(null);
       clearUnsavedCache();
