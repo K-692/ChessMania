@@ -41,6 +41,9 @@ export interface UserProfile {
 }
 
 export type GameMode =
+  | 'classical'
+  | 'practice'
+  | 'all_in'
   | 'beginner'
   | 'casual_rapid'
   | 'standard_rapid'
@@ -50,9 +53,7 @@ export type GameMode =
   | 'competitive_blitz'
   | 'bullet'
   | 'arena_bullet'
-  | 'championship'
-  | 'all_in'
-  | 'practice';
+  | 'championship';
 
 export interface MatchQueueEntry {
   id?: string;

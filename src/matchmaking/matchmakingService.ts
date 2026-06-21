@@ -13,6 +13,9 @@ import {
 import type { UserProfile, MatchQueueEntry, Match, GameMode } from '../types';
 
 export const STANDARD_TIME_CONTROLS: Record<GameMode, string> = {
+  classical: '10 | 5',
+  practice: '10 | 5',
+  all_in: '10 | 5',
   beginner: '15 min',
   casual_rapid: '10 min',
   standard_rapid: '10 | 5',
@@ -22,9 +25,7 @@ export const STANDARD_TIME_CONTROLS: Record<GameMode, string> = {
   competitive_blitz: '3 | 2',
   bullet: '1 | 1',
   arena_bullet: '1 min',
-  championship: '30 | 20',
-  all_in: '30 | 10',
-  practice: '10 | 5'
+  championship: '30 | 20'
 };
 
 export function getInitialTimeForMode(mode: GameMode): number {
@@ -100,7 +101,7 @@ export async function findMatch(
 ): Promise<string | null> {
   try {
     let q;
-    if (mode === 'all_in' && timeControl) {
+    if (timeControl) {
       q = query(
         collection(db, 'matchQueues'),
         where('status', '==', 'waiting'),
@@ -264,29 +265,8 @@ export async function findMatch(
       const whiteUid = isMyWhite ? myUid : opponent.uid;
       const blackUid = isMyWhite ? opponent.uid : myUid;
       
-      let initialClockTime = getInitialTimeForMode(mode);
-      let matchTimeControl: string;
-      
-      if (mode === 'all_in') {
-        matchTimeControl = opponent.timeControl || '30 | 10';
-        initialClockTime = parseTimeControl(matchTimeControl).initialTime;
-      } else {
-        const standardTCs: Record<GameMode, string> = {
-          beginner: '15 min',
-          casual_rapid: '10 min',
-          standard_rapid: '10 | 5',
-          competitive_rapid: '15 | 10',
-          classical_lite: '20 | 10',
-          blitz: '5 | 3',
-          competitive_blitz: '3 | 2',
-          bullet: '1 | 1',
-          arena_bullet: '1 min',
-          championship: '30 | 20',
-          all_in: '30 | 10',
-          practice: '10 | 5'
-        };
-        matchTimeControl = standardTCs[mode];
-      }
+      let matchTimeControl = timeControl || opponent.timeControl || '10 | 5';
+      let initialClockTime = parseTimeControl(matchTimeControl).initialTime;
 
       const newMatch: Match = {
         id: mId,

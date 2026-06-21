@@ -446,13 +446,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setLoading(true);
       if (auth.currentUser) {
-        const userDocRef = doc(db, 'users', auth.currentUser.uid);
+        const timeoutPromise = new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('Firestore write timeout')), 2000)
+        );
         try {
-          await setDoc(userDocRef, { sessionActive: false }, { merge: true });
+          await Promise.race([
+            (async () => {
+              const userDocRef = doc(db, 'users', auth.currentUser!.uid);
+              await setDoc(userDocRef, { sessionActive: false }, { merge: true });
+              await writeBackToFirestore(auth.currentUser!.uid);
+            })(),
+            timeoutPromise
+          ]);
         } catch (err) {
-          console.warn("Failed to set sessionActive to false on logout:", err);
+          console.warn("Logout Firestore updates timed out or failed:", err);
         }
-        await writeBackToFirestore(auth.currentUser.uid);
       }
       // Clear session premove queues
       if (typeof window !== 'undefined') {

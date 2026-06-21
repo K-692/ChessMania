@@ -12,11 +12,12 @@ import { NetworkSignal } from './NetworkSignal';
 interface MatchmakingProps {
   mode: GameMode;
   stake: number;
+  timeControl: string;
   onMatchFound: (matchId: string) => void;
   onCancel: () => void;
 }
 
-export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFound, onCancel }) => {
+export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, timeControl, onMatchFound, onCancel }) => {
   const { user, profile } = useAuth();
   const [queueId, setQueueId] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState<number>(0);
@@ -32,7 +33,7 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
     const setupQueue = async () => {
       try {
         const ratingVal = profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating;
-        const id = await joinQueue(user.uid, ratingVal, stake, mode);
+        const id = await joinQueue(user.uid, ratingVal, stake, mode, timeControl);
         activeQueueId = id;
         setQueueId(id);
         setStatusText('Searching for opponent...');
@@ -67,7 +68,7 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
       }
       unsubscribePromise.then((unsub) => unsub && unsub());
     };
-  }, [user, profile, mode, stake]);
+  }, [user, profile, mode, stake, timeControl]);
 
   // 2. Incremental clock & rating band expansion timer
   useEffect(() => {
@@ -85,12 +86,12 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
     }
   }, [elapsedTime, onCancel]);
 
-  // 3. Search triggers every 2 seconds, expanding rating band by 5 every 10 seconds
+  // 3. Search triggers every 2 seconds, expanding rating band by 10 every 10 seconds
   useEffect(() => {
     if (!queueId || !user || !profile) return;
 
     const performSearch = async () => {
-      const currentBand = Math.floor(elapsedTime / 10) * 5;
+      const currentBand = Math.floor(elapsedTime / 10) * 10;
 
       setStatusText('Searching for opponent...');
 
@@ -101,7 +102,8 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
         ratingVal,
         stake,
         mode,
-        currentBand
+        currentBand,
+        timeControl
       );
 
       if (matchId) {
@@ -114,7 +116,7 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
     if (elapsedTime === 0 || elapsedTime % 2 === 0) {
       performSearch();
     }
-  }, [elapsedTime, queueId, user, profile, mode, stake]);
+  }, [elapsedTime, queueId, user, profile, mode, stake, timeControl]);
 
   const formatTime = (sec: number) => {
     const mins = Math.floor(sec / 60);
@@ -149,7 +151,7 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, onMatchFo
           <div>
             <p className="text-xs text-slate-500">Selected Game Mode</p>
             <p className="text-sm font-semibold text-slate-300 capitalize">
-              {mode} Chess
+              Classical Chess ({timeControl})
             </p>
           </div>
           <div className="text-right">

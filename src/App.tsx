@@ -19,11 +19,10 @@ import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, Plus } from 'lucide-react';
 import { getSoundSettings, playNotifySound } from './utils/sound';
 import { applyLazyHourlyRewardTx } from './wallet/walletService';
-import { createPracticeMatchObject } from './game/gameService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, updateCachedProfile, addCachedMatch } = useAuth();
+  const { user, profile, loading, updateCachedProfile } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
 
   // Settings sync state for dynamic piece style Knight image
@@ -46,7 +45,7 @@ const AppContent: React.FC = () => {
   const [isPlayModalOpen, setIsPlayModalOpen] = useState(false);
 
   // Matchmaking state
-  const [matchmakingConfig, setMatchmakingConfig] = useState<{ mode: GameMode; stake: number } | null>(null);
+  const [matchmakingConfig, setMatchmakingConfig] = useState<{ mode: GameMode; stake: number; timeControl?: string } | null>(null);
 
   // Game state
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
@@ -810,19 +809,8 @@ const AppContent: React.FC = () => {
         isOpen={isPlayModalOpen}
         onClose={() => setIsPlayModalOpen(false)}
         pieceTheme={settings.pieceTheme}
-        onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
-          if (mode === 'practice' && practiceConfig && user) {
-            try {
-              const newMatch = createPracticeMatchObject(user.uid, practiceConfig.elo, practiceConfig.color);
-              await setDoc(doc(db, 'matches', newMatch.id), newMatch);
-              addCachedMatch(newMatch);
-              handleMatchFound(newMatch.id);
-            } catch (err) {
-              console.error("Failed to start practice match:", err);
-            }
-          } else {
-            setMatchmakingConfig({ mode, stake });
-          }
+        onStartSearch={(mode, stake, timeControl) => {
+          setMatchmakingConfig({ mode, stake, timeControl });
         }}
       />
 
@@ -835,6 +823,7 @@ const AppContent: React.FC = () => {
         <Matchmaking
           mode={matchmakingConfig.mode}
           stake={matchmakingConfig.stake}
+          timeControl={matchmakingConfig.timeControl || '10 | 5'}
           onMatchFound={handleMatchFound}
           onCancel={() => setMatchmakingConfig(null)}
         />

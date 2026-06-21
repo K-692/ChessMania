@@ -29,9 +29,12 @@ const PIECE_THEMES = [
 ];
 
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
-  const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate, addCachedMatch, writeBackToFirestore, gameConfig } = useAuth();
+  const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate, addCachedMatch, writeBackToFirestore } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
   const isSpectator = match ? !match.players.includes(user?.uid || '') : false;
+  const [isOpponentDisconnected, setIsOpponentDisconnected] = useState(false);
+  const lastHeartbeatChangeTimeRef = useRef<number>(Date.now());
+  const lastOppHeartbeatRef = useRef<number>(0);
   const [whiteProfile, setWhiteProfile] = useState<UserProfile | null>(null);
   const [blackProfile, setBlackProfile] = useState<UserProfile | null>(null);
   const [localFen, setLocalFen] = useState<string>('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
@@ -268,80 +271,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     fetchProfiles();
   }, [match?.whiteUid, match?.blackUid, whiteProfile, blackProfile]);
 
-  // Bot movement logic for practice mode
-  useEffect(() => {
-    if (!match || match.status !== 'active') return;
-
-    const botUid = match.turn === 'w' ? match.whiteUid : match.blackUid;
-    const isBotTurn = botUid.startsWith('bot_');
-
-    if (!isBotTurn) return;
-
-    // Guard against race conditions: only play bot move when local FEN matches the synchronized Firestore FEN
-    if (localFen !== match.boardFEN) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        const elo = parseInt(botUid.split('_')[1]) || 800;
-        const botColor = match.turn;
-        
-        const { getBotMove } = await import('../utils/chessBot');
-        const move = await getBotMove(localFen, elo, botColor, match.moves);
-        
-        if (move) {
-          const tempChess = new Chess(localFen);
-          const moveRes = tempChess.move({
-            from: move.from,
-            to: move.to,
-            promotion: move.promotion || 'q'
-          });
-          
-          if (moveRes) {
-            const nextFen = tempChess.fen();
-            setLocalFen(nextFen);
-            
-            await makeMove(matchId, botUid, nextFen, moveRes.san);
-            
-            if (tempChess.isGameOver()) {
-              let status: MatchStatus = 'active';
-              let winnerUid: string | null = null;
-
-              if (tempChess.isCheckmate()) {
-                status = 'checkmate';
-                winnerUid = match.turn === 'w' ? match.whiteUid : match.blackUid;
-              } else if (tempChess.isDraw()) {
-                status = 'draw';
-              } else if (tempChess.isStalemate()) {
-                status = 'stalemate';
-              }
-
-              if (status !== 'active') {
-                const now = Date.now();
-                const elapsed = now - match.lastMoveAt;
-                const updatedClocks = {
-                  ...match.clocks,
-                  [botUid]: Math.max(0, match.clocks[botUid] - elapsed),
-                };
-
-                await updateDoc(doc(db, 'matches', matchId), {
-                  boardFEN: nextFen,
-                  clocks: updatedClocks,
-                  status,
-                  winnerUid,
-                  finishedAt: now,
-                });
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error making bot move:", err);
-      }
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [match?.turn, match?.status, matchId, localFen]);
-
   // 2. Fetch match updates in real-time
   useEffect(() => {
     const matchRef = doc(db, 'matches', matchId);
@@ -358,16 +287,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           setHasClosedResultPopup(false);
           wasActiveLoadedRef.current = false;
         }
-      }
-
-      // Close active practice matches older than configured hours
-      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
-      if (matchData.mode === 'practice' && matchData.status === 'active' && (Date.now() - matchData.createdAt > expiryHours * 60 * 60 * 1000)) {
-        updateDoc(matchRef, {
-          status: 'terminated',
-          finishedAt: Date.now()
-        }).catch(console.warn);
-        return;
       }
 
       const prevMatch = matchStateRef.current;
@@ -422,37 +341,53 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       // Only sync FEN from DB when a new move arrives or it is the opponent's turn.
       // This prevents the optimistic local FEN from being overwritten by a stale
       // DB snapshot while our write is still in-flight (piece rollback bug).
-      const prevMovesCount = matchStateRef.current?.moves?.length ?? 0;
-      const newMovesCount = matchData.moves?.length ?? 0;
-      const isPractice = matchData.mode === 'practice';
-      const isOpponentTurn = !isPractice && (matchData.turn === 'w'
-        ? user?.uid !== matchData.whiteUid
-        : user?.uid !== matchData.blackUid);
-      if (newMovesCount > prevMovesCount || isOpponentTurn || matchData.status !== 'active') {
-        if (preMovesRef.current.length > 0) {
-          const opt = getOptimisticState(matchData.boardFEN, preMovesRef.current);
-          setLocalFen(opt.fen);
-          chessRef.current.load(opt.fen);
-        } else {
-          setLocalFen(matchData.boardFEN);
-          try {
-            chessRef.current.load(matchData.boardFEN);
-          } catch (e) {
-            console.warn('FEN sync mismatch:', e);
+      const isSpectatorLocal = !matchData.players.includes(user?.uid || '');
+      if (isSpectatorLocal) {
+        setLocalFen(matchData.boardFEN);
+        try {
+          chessRef.current.load(matchData.boardFEN);
+        } catch (e) {
+          console.warn('Spectator FEN sync mismatch:', e);
+        }
+      } else {
+        const prevMovesCount = matchStateRef.current?.moves?.length ?? 0;
+        const newMovesCount = matchData.moves?.length ?? 0;
+        const isPractice = matchData.mode === 'practice';
+        const isOpponentTurn = !isPractice && (matchData.turn === 'w'
+          ? user?.uid !== matchData.whiteUid
+          : user?.uid !== matchData.blackUid);
+        if (newMovesCount > prevMovesCount || isOpponentTurn || matchData.status !== 'active') {
+          if (preMovesRef.current.length > 0) {
+            const opt = getOptimisticState(matchData.boardFEN, preMovesRef.current);
+            setLocalFen(opt.fen);
+            chessRef.current.load(opt.fen);
+          } else {
+            setLocalFen(matchData.boardFEN);
+            try {
+              chessRef.current.load(matchData.boardFEN);
+            } catch (e) {
+              console.warn('FEN sync mismatch:', e);
+            }
           }
         }
       }
 
-      // Profiles are fetched in a separate effect
-
       // Sync player disconnection states & initialization timers using heartbeats
-      if (matchData.status === 'active' && matchData.mode !== 'practice') {
-        const myUid = user?.uid;
+      const isUserPlayer = user && matchData.players.includes(user.uid);
+      if (isUserPlayer && matchData.status === 'active' && matchData.mode !== 'practice') {
+        const myUid = user.uid;
         const oppUid = myUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
 
         const oppLastActive = matchData.heartbeats?.[oppUid] || 0;
-        // Consider opponent offline if heartbeat is older than 10 seconds or not present
-        const isOpponentStale = oppLastActive === 0 || (Date.now() - oppLastActive > 10000);
+        
+        // Track heartbeat changes relative to last seen snapshot value to avoid clock skew loops
+        if (oppLastActive !== lastOppHeartbeatRef.current) {
+          lastOppHeartbeatRef.current = oppLastActive;
+          lastHeartbeatChangeTimeRef.current = Date.now();
+        }
+
+        const elapsedSinceLastChange = Date.now() - lastHeartbeatChangeTimeRef.current;
+        const isOpponentStale = oppLastActive === 0 || (elapsedSinceLastChange > 15000);
 
         if (!isOpponentStale) {
           if (matchData.disconnectedUid) {
@@ -520,6 +455,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     return () => unsubscribe();
   }, [matchId, whiteProfile, blackProfile, user]);
+
+  // Hook to monitor connection stability of the opponent with custom ticker (skew-safe)
+  useEffect(() => {
+    if (!match || match.status !== 'active' || isSpectator || match.mode === 'practice') {
+      setIsOpponentDisconnected(false);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - lastHeartbeatChangeTimeRef.current;
+      const isWhite = user?.uid === match.whiteUid;
+      const oppUid = isWhite ? match.blackUid : match.whiteUid;
+      const oppLastActive = match.heartbeats?.[oppUid] || 0;
+
+      if (oppLastActive === 0 || elapsed > 15000) {
+        setIsOpponentDisconnected(true);
+      } else {
+        setIsOpponentDisconnected(false);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [match?.id, match?.status, match?.heartbeats, isSpectator, user?.uid, match?.whiteUid, match?.blackUid, match?.mode]);
 
   // Synchronize historyIndex to latest move whenever new moves are played
   const prevMovesLengthRef = useRef(0);
@@ -780,8 +738,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   };
 
   const handleExit = async () => {
-    if (match && match.status !== 'active') {
-      await deleteGameMessages(matchId);
+    if (match) {
+      if (match.status === 'active' && !isSpectator) {
+        try {
+          const matchRef = doc(db, 'matches', matchId);
+          await updateDoc(matchRef, {
+            status: 'terminated',
+            finishedAt: Date.now()
+          });
+        } catch (err) {
+          console.warn("Failed to terminate match on exit:", err);
+        }
+      }
+      if (match.status !== 'active') {
+        await deleteGameMessages(matchId);
+      }
     }
     onExit();
   };
@@ -875,7 +846,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       return executeMove(sourceSquare, targetSquare);
     } else if (settings.preMoveEnabled) {
       if (preMoves.length >= 3) {
-        alert("Premove queue is full (max 3 premoves).");
+        playIllegalMoveSound();
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
         return false;
       }
       
@@ -886,6 +860,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       // Get the piece at the source square
       const piece = tempChess.get(sourceSquare as any);
       if (!piece || piece.color !== myColor) {
+        playIllegalMoveSound();
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
         return false; // Can only premove our own pieces
       }
 
@@ -921,6 +899,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         return true;
       } else {
         playIllegalMoveSound();
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
         setIllegalMoveSquares({ from: sourceSquare, to: targetSquare });
         setTimeout(() => setIllegalMoveSquares(null), 1500);
         return false;
@@ -996,7 +977,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         });
         const legalMove = moves.find((m: any) => m.to === square);
         if (legalMove) {
-          alert("Premove queue is full (max 3 premoves).");
+          playIllegalMoveSound();
+          setPreMoves([]);
+          setLocalFen(match.boardFEN);
+          chessRef.current.load(match.boardFEN);
           setSelectedSquare(null);
           return;
         }
@@ -1031,6 +1015,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         if (piece && piece.color === myColor) {
           setSelectedSquare(square);
         } else {
+          playIllegalMoveSound();
+          setPreMoves([]);
+          setLocalFen(match.boardFEN);
+          chessRef.current.load(match.boardFEN);
           setSelectedSquare(null);
         }
       } else {
@@ -1050,7 +1038,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       executeMove(from, to, pieceType);
     } else {
       if (preMoves.length >= 3) {
-        alert("Premove queue is full (max 3 premoves).");
+        playIllegalMoveSound();
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
         return;
       }
       const myColor = isWhite ? 'w' : 'b';
@@ -1078,6 +1069,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         playMoveSound();
       } else {
         playIllegalMoveSound();
+        setPreMoves([]);
+        setLocalFen(match.boardFEN);
+        chessRef.current.load(match.boardFEN);
         setIllegalMoveSquares({ from, to });
         setTimeout(() => setIllegalMoveSquares(null), 1500);
       }
@@ -1266,10 +1260,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   const hasOpponentDrawOffer = match.drawOffers?.includes(isWhite ? match.blackUid : match.whiteUid);
 
-  // Connection states
-  const oppUidForPresence = isWhite ? match.blackUid : match.whiteUid;
-  const oppLastActiveTime = match.heartbeats?.[oppUidForPresence] || 0;
-  const isOpponentDisconnected = oppLastActiveTime === 0 || (Date.now() - oppLastActiveTime > 10000);
+
 
   // Custom square highlights styling
   const customSquareStyles: Record<string, React.CSSProperties> = {};

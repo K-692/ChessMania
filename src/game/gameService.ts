@@ -4,7 +4,37 @@ import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
 export function getIncrementForMode(mode: GameMode): number {
-  return parseTimeControl(STANDARD_TIME_CONTROLS[mode]).increment;
+  const tc = STANDARD_TIME_CONTROLS[mode] || '10 | 5';
+  return parseTimeControl(tc).increment;
+}
+
+function getOriginalModeForTimeControl(timeControl?: string, mode?: string): string {
+  if (!timeControl) return mode || 'classical';
+  const tc = timeControl.trim();
+  switch (tc) {
+    case '15 min':
+      return 'beginner';
+    case '10 min':
+      return 'casual_rapid';
+    case '10 | 5':
+      return 'standard_rapid';
+    case '15 | 10':
+      return 'competitive_rapid';
+    case '20 | 10':
+      return 'classical_lite';
+    case '5 | 3':
+      return 'blitz';
+    case '3 | 2':
+      return 'competitive_blitz';
+    case '1 | 1':
+      return 'bullet';
+    case '1 min':
+      return 'arena_bullet';
+    case '30 | 20':
+      return 'championship';
+    default:
+      return mode || 'classical';
+  }
 }
 
 /**
@@ -166,7 +196,7 @@ export async function submitGameAction(
 /**
  * Atomically settles the coin payouts and Elo updates of a completed game.
  * Guarantees idempotency by checking and switching match.status from active/resigned/timeout/etc.
- * to settled, or using a settled flag. Let's add 'settled' to the transaction checks.
+ * to settled, or using a settled flag.
  */
 export async function settleMatchPayoutAndElo(
   matchId: string,
@@ -198,9 +228,10 @@ export async function settleMatchPayoutAndElo(
     }
 
     const isDraw = data.status === 'draw' || data.status === 'stalemate';
-    const hasWinner = !!data.winnerUid;
+    const isTerminated = data.status === 'terminated';
+    const hasWinner = !isDraw && !isTerminated && !!data.winnerUid;
 
-    if (!isDraw && !hasWinner) {
+    if (!isDraw && !isTerminated && !hasWinner) {
       return;
     }
 
@@ -235,14 +266,15 @@ export async function settleMatchPayoutAndElo(
   const myBalance = currentUserProfile.currentBalance !== undefined ? currentUserProfile.currentBalance : (currentUserProfile.bankBalance || 0);
 
   const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
+  const isTerminated = matchData.status === 'terminated';
   let myScore = 0.5;
-  if (!isDraw) {
+  if (!isDraw && !isTerminated) {
     myScore = matchData.winnerUid === myUid ? 1 : 0;
   }
 
   const { delta, expectedScore } = calculateElo(myRating, opponentRating, myScore);
   let newRating = myRating;
-  if (matchData.stake > 0) {
+  if (!isTerminated && matchData.stake > 0) {
     if (myScore === 0) {
       const finalDelta = delta > 0 ? -delta : delta;
       newRating = Math.max(0, myRating + finalDelta);
@@ -255,7 +287,10 @@ export async function settleMatchPayoutAndElo(
   let myPayout = 0;
   let myEarned = 0;
 
-  if (matchData.mode === 'all_in' && matchData.allInStakes) {
+  if (isTerminated) {
+    myPayout = matchData.stake;
+    myEarned = 0;
+  } else if (matchData.mode === 'all_in' && matchData.allInStakes) {
     const myStakeVal = matchData.allInStakes[myUid] || 0;
     const oppStakeVal = matchData.allInStakes[opponentUid] || 0;
     const totalPool = myStakeVal + oppStakeVal;
@@ -282,17 +317,23 @@ export async function settleMatchPayoutAndElo(
   const myCounts = currentUserProfile.gameplayCounts || {};
   const wonMatch = matchData.winnerUid === myUid;
   const isFriendly = !!matchData.challengeId;
-  const newMyCounts = (wonMatch && !isFriendly)
-    ? { ...myCounts, [matchData.mode]: (myCounts[matchData.mode] || 0) + 1 }
+
+  // Map time control to original mode for achievement tracking
+  const achievementMode = getOriginalModeForTimeControl(matchData.timeControl, matchData.mode);
+
+  const newMyCounts = (wonMatch && !isFriendly && !isTerminated)
+    ? { ...myCounts, [achievementMode]: (myCounts[achievementMode] || 0) + 1 }
     : myCounts;
 
   let myWins = currentUserProfile.totalWins !== undefined ? currentUserProfile.totalWins : (currentUserProfile.wins || 0);
   let myLosses = currentUserProfile.totalLosses !== undefined ? currentUserProfile.totalLosses : (currentUserProfile.losses || 0);
   let myDraws = currentUserProfile.totalDraws !== undefined ? currentUserProfile.totalDraws : (currentUserProfile.draws || 0);
 
-  if (isDraw) myDraws++;
-  else if (matchData.winnerUid === myUid) myWins++;
-  else myLosses++;
+  if (!isTerminated) {
+    if (isDraw) myDraws++;
+    else if (matchData.winnerUid === myUid) myWins++;
+    else myLosses++;
+  }
 
   const myTotalGamesPlayed = myWins + myLosses + myDraws;
   const myWinRateRatio = myTotalGamesPlayed > 0 ? Math.round((myWins / myTotalGamesPlayed) * 100) : 0;
@@ -324,10 +365,10 @@ export async function settleMatchPayoutAndElo(
   let transactionRecord = null;
   if (myPayout > 0 || matchData.stake === 0) {
     transactionRecord = {
-      id: myUid + '_' + matchData.id + '_' + (isDraw ? 'refund' : 'credit'),
+      id: myUid + '_' + matchData.id + '_' + (isTerminated ? 'refund' : (isDraw ? 'refund' : 'credit')),
       uid: myUid,
       userId: myUid,
-      type: isDraw ? 'refund' : 'stakeCredit',
+      type: (isTerminated || isDraw) ? 'refund' : 'stakeCredit',
       amount: 0,
       coins: myPayout,
       currency: 'INR',
@@ -342,7 +383,7 @@ export async function settleMatchPayoutAndElo(
   }
 
   let eloHistoryRecord = null;
-  if (matchData.stake > 0 || matchData.stake === 0) {
+  if (!isTerminated && (matchData.stake > 0 || matchData.stake === 0)) {
     eloHistoryRecord = {
       beforeRating: myRating,
       afterRating: newRating,
@@ -358,7 +399,7 @@ export async function settleMatchPayoutAndElo(
   }
 
   // Handle H2H Friend Stats Update
-  if (addCachedFriendUpdate) {
+  if (addCachedFriendUpdate && !isTerminated) {
     const friendDocRef = doc(db, 'users', myUid, 'friends', opponentUid);
     const friendSnap = await getDoc(friendDocRef);
     if (friendSnap.exists()) {
@@ -584,56 +625,4 @@ export async function acceptFriendlyChallenge(
     }
     return res.matchId!;
   });
-}
-
-/**
- * Seeding a practice match against a bot engine locally.
- */
-export function createPracticeMatchObject(
-  userUid: string,
-  botElo: number,
-  userColor: 'white' | 'black' | 'random'
-): Match {
-  const matchesCol = collection(db, 'matches');
-  const newMatchDocRef = doc(matchesCol);
-  const mId = newMatchDocRef.id;
-  const now = Date.now();
-
-  const botUid = `bot_${botElo}`;
-
-  let isUserWhite = Math.random() < 0.5;
-  if (userColor === 'white') {
-    isUserWhite = true;
-  } else if (userColor === 'black') {
-    isUserWhite = false;
-  }
-
-  const whiteUid = isUserWhite ? userUid : botUid;
-  const blackUid = isUserWhite ? botUid : userUid;
-
-  const initialClockTime = 10 * 60 * 1000; // 10 minutes default
-  const matchTimeControl = '10 | 5';
-
-  return {
-    id: mId,
-    players: [userUid, botUid],
-    playerPair: [userUid, botUid].sort().join('_'),
-    whiteUid,
-    blackUid,
-    stake: 0,
-    mode: 'practice',
-    boardFEN: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-    turn: 'w',
-    clocks: {
-      [whiteUid]: initialClockTime,
-      [blackUid]: initialClockTime,
-    },
-    status: 'active',
-    winnerUid: null,
-    createdAt: now,
-    finishedAt: null,
-    moves: [],
-    lastMoveAt: now,
-    timeControl: matchTimeControl,
-  };
 }
