@@ -189,15 +189,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                       </button>
                     )}
                   </div>
-
-                  {/* Rating Info */}
-                  <div className="flex items-center space-x-2 bg-slate-900/60 border border-white/5 px-3 py-1.5 rounded-lg">
-                    <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-5 h-5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
-                    <span className="text-violet-300 font-semibold text-sm">
-                      {profile ? (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) : '---'}
-                    </span>
-                    <span className="text-slate-500 text-xs">Elo</span>
-                  </div>
                 </div>
 
                 {/* User Profile Card */}
@@ -297,14 +288,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                     <Plus className="w-3 h-3 stroke-[2.5]" />
                   </button>
                 )}
-              </div>
-
-              {/* Compact Rating */}
-              <div className="flex items-center space-x-1 bg-slate-900/60 border border-white/5 px-2.5 py-1.5 rounded-lg shrink-0">
-                <img src={`/pieces/${pieceTheme}/wn.png`} alt="Knight" className="w-4.5 h-4.5 object-contain filter drop-shadow-[0_0_2px_rgba(139,92,246,0.5)]" />
-                <span className="text-violet-300 font-bold text-xs font-mono">
-                  {profile ? (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) : '---'}
-                </span>
               </div>
 
               {/* Hamburger Button */}

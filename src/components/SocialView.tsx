@@ -26,8 +26,7 @@ const CHALLENGE_MODES = [
   { id: 'competitive_blitz' as GameMode, label: 'Competitive Blitz', price: 100000, tc: '3 | 2' },
   { id: 'bullet' as GameMode, label: 'Bullet', price: 500000, tc: '1 | 1' },
   { id: 'arena_bullet' as GameMode, label: 'Arena Bullet', price: 1000000, tc: '1 min' },
-  { id: 'championship' as GameMode, label: 'Championship', price: 5000000, tc: '30 | 20' },
-  { id: 'all_in' as GameMode, label: 'All In ‼️', price: 'all_in', tc: '10 | 5' }
+  { id: 'championship' as GameMode, label: 'Championship', price: 5000000, tc: '30 | 20' }
 ];
 
 export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, setOpenChatFriend, unreadCounts }) => {
@@ -425,7 +424,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
     const modeConfig = CHALLENGE_MODES[selectedModeIdx];
     const balance = profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance;
-    const stake = challengeType === 'friendly' ? 0 : (modeConfig.price === 'all_in' ? balance : (modeConfig.price as number));
+    const stake = challengeType === 'friendly' ? 0 : modeConfig.price;
 
     if (challengeType === 'arena') {
       if (balance < stake || stake <= 0) {
@@ -989,11 +988,9 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                             <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
                             <span>)</span>
                           </span>
-                        ) : mode.price === 'all_in' ? (
-                          <span>ALL IN</span>
                         ) : (
                           <span className="flex items-center gap-0.5">
-                            <span>{formatCoins(mode.price as number)}</span>
+                            <span>{formatCoins(mode.price)}</span>
                             <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
                           </span>
                         )}

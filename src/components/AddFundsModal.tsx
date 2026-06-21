@@ -124,37 +124,65 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
     }
   }, [isOpen, user]);
 
-  // 3. Load Razorpay SDK dynamically when the modal is opened
+  // 3. Load/Verify Razorpay SDK when the modal is opened
   useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
     setIsRazorpaySdkLoaded(false);
     setRazorpayError(null);
 
-    const loadSDK = () => {
-      const existingScript = document.getElementById('razorpay-sdk-script') as HTMLScriptElement | null;
-      if (existingScript && (window as any).Razorpay) {
+    const checkOrLoadSDK = () => {
+      // If Razorpay is already available globally, use it immediately
+      if ((window as any).Razorpay) {
         if (isMounted) setIsRazorpaySdkLoaded(true);
         return;
       }
 
-      const script = document.createElement('script');
-      script.id = 'razorpay-sdk-script';
-      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      script.async = true;
-      script.onload = () => {
+      // Check if a script tag is already loading checkout.js
+      let script = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]') as HTMLScriptElement | null;
+      if (!script) {
+        script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        document.head.appendChild(script);
+      }
+
+      const handleLoad = () => {
         if (isMounted) setIsRazorpaySdkLoaded(true);
       };
-      script.onerror = () => {
-        if (isMounted) setRazorpayError('Failed to load Razorpay secure payment gateway script.');
+
+      const handleError = () => {
+        if (isMounted) {
+          setRazorpayError('Failed to load Razorpay secure payment gateway script. Please verify your internet connection or check if an ad-blocker is blocking checkout.razorpay.com.');
+        }
       };
-      document.body.appendChild(script);
+
+      script.addEventListener('load', handleLoad);
+      script.addEventListener('error', handleError);
+
+      // Polling backup
+      let attempts = 0;
+      const interval = setInterval(() => {
+        if ((window as any).Razorpay) {
+          clearInterval(interval);
+          if (isMounted) setIsRazorpaySdkLoaded(true);
+        } else if (attempts++ > 30) {
+          clearInterval(interval);
+        }
+      }, 100);
+
+      return () => {
+        clearInterval(interval);
+        script?.removeEventListener('load', handleLoad);
+        script?.removeEventListener('error', handleError);
+      };
     };
 
-    loadSDK();
+    const cleanup = checkOrLoadSDK();
 
     return () => {
       isMounted = false;
+      if (cleanup) cleanup();
     };
   }, [isOpen]);
 
@@ -164,8 +192,15 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
     setCheckoutStep('processing');
 
     try {
+      // Get base API URL. 
+      // If not configured, fall back to http://localhost:5001 when running on deployed hosting environment.
+      let apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+      if (!apiBaseUrl) {
+        const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        apiBaseUrl = isLocalhost ? '' : 'http://localhost:5001';
+      }
+
       // 1. Call Express backend to create a Razorpay order
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
       const response = await fetch(`${apiBaseUrl}/api/create-order`, {
         method: 'POST',
         headers: {
@@ -179,8 +214,20 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Failed to create payment order.');
+        const errText = await response.text();
+        let errMsg = 'Failed to create payment order.';
+        try {
+          const errData = JSON.parse(errText);
+          errMsg = errData.error || errMsg;
+        } catch {
+          // If response is not JSON, might be SPA HTML template due to rewrite
+          if (errText.includes('<!DOCTYPE html>') || errText.includes('<html')) {
+            errMsg = 'Backend endpoint not found. SPA returned HTML instead. Please verify if the backend local test server is running on port 5001.';
+          } else {
+            errMsg = errText || errMsg;
+          }
+        }
+        throw new Error(errMsg);
       }
 
       const order = await response.json();
@@ -216,7 +263,6 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
           setCheckoutStep('processing');
 
           try {
-            const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
             const verifyResponse = await fetch(`${apiBaseUrl}/api/verify-payment`, {
               method: 'POST',
               headers: {
@@ -244,7 +290,11 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
             }
           } catch (err: any) {
             console.error('Verification error:', err);
-            setErrorMessage(err.message || 'Payment verification failed. If coins are not credited shortly, please contact support.');
+            let msg = err.message || 'Payment verification failed.';
+            if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+              msg = 'Failed to connect to the backend server for signature verification. Please make sure the local test server is running on port 5001 (run `node server.js`).';
+            }
+            setErrorMessage(msg);
             setCheckoutStep('checkout');
           }
         },
@@ -264,7 +314,11 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
 
     } catch (err: any) {
       console.error('Checkout error:', err);
-      setErrorMessage(err.message || 'An error occurred while initiating the checkout.');
+      let msg = err.message || 'An error occurred while initiating the checkout.';
+      if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
+        msg = 'Failed to connect to the backend server. Please verify that the backend test server is running locally on port 5001 (run `node server.js`).';
+      }
+      setErrorMessage(msg);
       setCheckoutStep('checkout');
     }
   };

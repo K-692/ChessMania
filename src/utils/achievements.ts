@@ -89,14 +89,6 @@ export const ACHIEVEMENTS: Achievement[] = [
     description: 'Won 5 Championship matches. The ultimate arena champion.',
     color: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10 hover:border-yellow-500/50',
     difficultyRank: 10
-  },
-  {
-    id: 'all_in',
-    name: 'All-In Legend ‼️',
-    badge: '‼️ All-In',
-    description: 'Won 5 All In matches. Ultimate risk-taker legend.',
-    color: 'text-purple-400 border-purple-500/30 bg-purple-500/5 hover:bg-purple-500/10 hover:border-purple-500/50',
-    difficultyRank: 11
   }
 ];
 

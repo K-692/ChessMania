@@ -94,8 +94,7 @@ const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }>
   competitive_blitz: { label: 'Competitive Blitz', price: '100K Coins', tc: '3 | 2' },
   bullet: { label: 'Bullet', price: '500K Coins', tc: '1 | 1' },
   arena_bullet: { label: 'Arena Bullet', price: '1M Coins', tc: '1 min' },
-  championship: { label: 'Championship', price: '5M Coins', tc: '30 | 20' },
-  all_in: { label: 'All In ‼️', price: 'Entire Balance', tc: "Player's Choice" }
+  championship: { label: 'Championship', price: '5M Coins', tc: '30 | 20' }
 };
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ onBack, onStartGame }) => {
