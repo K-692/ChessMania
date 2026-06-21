@@ -444,6 +444,7 @@ export async function acceptFriendlyChallenge(
         balanceBefore: challengerBalance,
         balanceAfter: updatedChallengerBalance,
         createdAt: now,
+        opponentUid: challengedUid,
       });
 
       const challengedLedgerRef = doc(ledgerCol);
@@ -460,6 +461,7 @@ export async function acceptFriendlyChallenge(
         balanceBefore: challengedBalance,
         balanceAfter: updatedChallengedBalance,
         createdAt: now,
+        opponentUid: challengerUid,
       });
     }
 

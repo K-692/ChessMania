@@ -25,7 +25,7 @@ import { createPracticeMatchObject } from './game/gameService';
 const AppContent: React.FC = () => {
   const { user, profile, login, loading, updateCachedProfile, addCachedMatch } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
-  
+
   // Settings sync state for dynamic piece style Knight image
   const [settings, setSettings] = useState(() => getSoundSettings());
   useEffect(() => {
@@ -44,17 +44,17 @@ const AppContent: React.FC = () => {
 
   // Play modal state
   const [isPlayModalOpen, setIsPlayModalOpen] = useState(false);
-  
+
   // Matchmaking state
   const [matchmakingConfig, setMatchmakingConfig] = useState<{ mode: GameMode; stake: number } | null>(null);
-  
+
   // Game state
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
 
   // Friendly Challenge States
   const [acceptedChallenge, setAcceptedChallenge] = useState<any | null>(null);
   const [acceptedChallengerProfile, setAcceptedChallengerProfile] = useState<any | null>(null);
-  
+
   // User matches history state (active or past games)
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -159,7 +159,7 @@ const AppContent: React.FC = () => {
       setNameError('Username must be between 3 and 20 characters');
       return;
     }
-    
+
     // Alphanumeric validation (only English letters and numbers, strictly no symbols)
     const alphanumericRegex = /^[a-zA-Z0-9]+$/;
     if (!alphanumericRegex.test(trimmed)) {
@@ -255,7 +255,7 @@ const AppContent: React.FC = () => {
       const now = Date.now();
       const hourMs = 60 * 60 * 1000;
       const elapsedMs = now - lastHourlyRewardAt;
-      
+
       // Find out when the next hour will complete
       const elapsedHours = Math.floor(elapsedMs / hourMs);
       const nextRewardTime = lastHourlyRewardAt + (elapsedHours + 1) * hourMs;
@@ -291,7 +291,7 @@ const AppContent: React.FC = () => {
         setAcceptedChallenge(null);
         return;
       }
-      
+
       const chDoc = snap.docs[0];
       const chData = { id: chDoc.id, ...chDoc.data() } as any;
       setAcceptedChallenge(chData);
@@ -588,42 +588,42 @@ const AppContent: React.FC = () => {
     return (
       <div className="min-h-screen bg-transparent flex flex-col relative overflow-hidden">
         {/* Ambient Floating Chess Pieces */}
-        <img 
-          src={knightImgSrc} 
-          alt="" 
-          className="absolute top-[15%] left-[5%] w-24 h-24 opacity-[0.03] pointer-events-none animate-float-1" 
+        <img
+          src={knightImgSrc}
+          alt=""
+          className="absolute top-[15%] left-[5%] w-24 h-24 opacity-[0.03] pointer-events-none animate-float-1"
         />
-        <img 
-          src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" 
-          alt="" 
-          className="absolute bottom-[20%] left-[8%] w-28 h-28 opacity-[0.02] filter invert pointer-events-none animate-drift" 
+        <img
+          src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg"
+          alt=""
+          className="absolute bottom-[20%] left-[8%] w-28 h-28 opacity-[0.02] filter invert pointer-events-none animate-drift"
         />
-        <img 
-          src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" 
-          alt="" 
-          className="absolute top-[25%] right-[10%] w-32 h-32 opacity-[0.03] filter invert pointer-events-none animate-float-2" 
+        <img
+          src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg"
+          alt=""
+          className="absolute top-[25%] right-[10%] w-32 h-32 opacity-[0.03] filter invert pointer-events-none animate-float-2"
         />
-        <img 
-          src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" 
-          alt="" 
-          className="absolute bottom-[10%] right-[30%] w-20 h-20 opacity-[0.02] filter invert pointer-events-none animate-float-1" 
+        <img
+          src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg"
+          alt=""
+          className="absolute bottom-[10%] right-[30%] w-20 h-20 opacity-[0.02] filter invert pointer-events-none animate-float-1"
         />
 
         {/* Glow Effects */}
         <div className="absolute top-1/2 left-1/2 divine-glow w-[600px] h-[600px] rounded-full pointer-events-none z-0" />
 
-        <Navbar onNavigate={() => {}} currentView="" />
+        <Navbar onNavigate={() => { }} currentView="" />
 
         <main className="flex-grow flex items-center justify-center px-6 py-12 relative z-10">
           <div className="max-w-6xl w-full grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-            
+
             {/* Left Column: Pitch & Details */}
             <div className="lg:col-span-7 text-left space-y-6">
               <div className="inline-flex items-center space-x-2.5 bg-violet-500/10 border border-violet-500/20 px-3.5 py-1.5 rounded-full text-xs font-semibold text-violet-400 uppercase tracking-widest">
                 <img src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" alt="Queen" className="w-4.5 h-4.5 filter invert brightness-125 animate-pulse" />
                 <span>High-Voltage Chess-Coin Clashes ⚡</span>
               </div>
-              
+
               <h1 className="text-4xl md:text-6xl font-bold tracking-tight text-white leading-none">
                 Check & Mate: <br />
                 <span className="bg-gradient-to-r from-violet-400 via-violet-500 to-indigo-400 bg-clip-text text-transparent">
@@ -683,7 +683,7 @@ const AppContent: React.FC = () => {
               <div className="relative group">
                 {/* Floating neon background glow */}
                 <div className="absolute inset-0 bg-violet-600/15 rounded-2xl blur-2xl group-hover:bg-violet-600/20 transition-all duration-300" />
-                
+
                 <div className="glass-card rounded-2xl overflow-hidden border border-white/10 p-3 relative z-10 transition-transform duration-300 group-hover:scale-[1.02]">
                   <img
                     src="/chess_king_neon.png"
@@ -820,26 +820,24 @@ const AppContent: React.FC = () => {
                       return (
                         <div
                           key={bar}
-                          className={`w-[3px] rounded-t transition-all duration-300 ${
-                            isActive
+                          className={`w-[3px] rounded-t transition-all duration-300 ${isActive
                               ? networkStats.bars === 1
                                 ? 'bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]'
                                 : networkStats.bars === 2
-                                ? 'bg-amber-500 shadow-[0_0_4px_rgba(245,158,11,0.5)]'
-                                : 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]'
+                                  ? 'bg-amber-500 shadow-[0_0_4px_rgba(245,158,11,0.5)]'
+                                  : 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]'
                               : 'bg-slate-700'
-                          }`}
+                            }`}
                           style={{ height: `${bar * 25}%` }}
                         />
                       );
                     })}
                   </div>
                   <span className="text-xs font-semibold text-slate-200">
-                    Ping: <span className={`font-mono font-bold ${
-                      networkStats.bars === 1 ? 'text-red-400' : networkStats.bars === 2 ? 'text-amber-400' : 'text-emerald-400'
-                    }`}>{networkStats.ping} ms</span>
+                    Ping: <span className={`font-mono font-bold ${networkStats.bars === 1 ? 'text-red-400' : networkStats.bars === 2 ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>{networkStats.ping} ms</span>
                   </span>
-                  
+
                   {/* Tooltip detail */}
                   <div className="absolute bottom-[115%] right-1/2 translate-x-1/2 bg-slate-950/95 border border-white/10 text-[10px] text-slate-300 px-2.5 py-1.5 rounded-lg shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 whitespace-nowrap z-50 leading-normal">
                     <p className="font-semibold text-white">Network Status: {networkStats.strength}</p>
@@ -851,7 +849,7 @@ const AppContent: React.FC = () => {
 
             {/* Dashboard Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              
+
               {/* Elo card */}
               <div className="glass p-6 rounded-xl border border-white/5 flex flex-col justify-between items-center text-center space-y-4">
                 <div className="flex items-center justify-between w-full">
@@ -897,7 +895,7 @@ const AppContent: React.FC = () => {
                       <p className="text-xs text-slate-500">
                         Available Play Stakes (Coins)
                       </p>
-                      
+
                       <button
                         onClick={() => setIsAddFundsOpen(true)}
                         className="flex items-center space-x-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 px-3 py-1.5 rounded-xl font-bold shadow-lg shadow-amber-500/10 transition-all border border-amber-400/20 cursor-pointer text-xs"
@@ -932,7 +930,7 @@ const AppContent: React.FC = () => {
                             {hourlyRewardTimer}
                           </span>
                         </div>
-                        
+
                         <div className="space-y-1">
                           <div className="w-full bg-slate-950/80 rounded-full h-2 overflow-hidden border border-white/5">
                             {(() => {
@@ -998,101 +996,99 @@ const AppContent: React.FC = () => {
                   No match history found. Click "Play Now" to start your first game!
                 </div>
               ) : (
-              <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden">
-                {recentMatches.map((m) => {
-                  const isMWhite = m.whiteUid === user.uid;
-                  const oppUid = isMWhite ? m.blackUid : m.whiteUid;
-                  const isActive = m.status === 'active';
-                  const oppProfile = opponentProfiles[oppUid];
-                  const friendStatus = opponentFriendStatus[oppUid];
+                <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden">
+                  {recentMatches.map((m) => {
+                    const isMWhite = m.whiteUid === user.uid;
+                    const oppUid = isMWhite ? m.blackUid : m.whiteUid;
+                    const isActive = m.status === 'active';
+                    const oppProfile = opponentProfiles[oppUid];
+                    const friendStatus = opponentFriendStatus[oppUid];
 
-                  const resultLabel = isActive ? null
-                    : m.winnerUid === user.uid ? 'WON'
-                    : m.winnerUid ? 'LOST'
-                    : 'DRAW';
+                    const resultLabel = isActive ? null
+                      : m.winnerUid === user.uid ? 'WON'
+                        : m.winnerUid ? 'LOST'
+                          : 'DRAW';
 
-                  const resultColor = isActive ? ''
-                    : m.winnerUid === user.uid ? 'text-emerald-400'
-                    : m.winnerUid ? 'text-red-400'
-                    : 'text-slate-500';
+                    const resultColor = isActive ? ''
+                      : m.winnerUid === user.uid ? 'text-emerald-400'
+                        : m.winnerUid ? 'text-red-400'
+                          : 'text-slate-500';
 
-                  return (
-                    <div
-                      key={m.id}
-                      className={`flex items-center justify-between px-4 py-3 gap-3 ${
-                        isActive ? 'bg-violet-950/10' : 'hover:bg-white/[0.02]'
-                      } transition-colors`}
-                    >
-                      {/* Left: Status badge + opponent */}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          isActive ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-800 text-slate-500'
-                        }`}>
-                          {isActive ? 'LIVE' : m.status}
-                        </span>
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex items-center justify-between px-4 py-3 gap-3 ${isActive ? 'bg-violet-950/10' : 'hover:bg-white/[0.02]'
+                          } transition-colors`}
+                      >
+                        {/* Left: Status badge + opponent */}
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${isActive ? 'bg-violet-500/20 text-violet-300' : 'bg-slate-800 text-slate-500'
+                            }`}>
+                            {isActive ? 'LIVE' : m.status}
+                          </span>
 
-                        {oppProfile?.photoURL && (
-                          <img 
-                            src={oppProfile.photoURL} 
-                            alt={oppProfile.displayName} 
-                            className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity" 
-                            title="View Profile"
-                            onClick={() => setSelectedProfile(oppProfile)}
-                          />
-                        )}
+                          {oppProfile?.photoURL && (
+                            <img
+                              src={oppProfile.photoURL}
+                              alt={oppProfile.displayName}
+                              className="w-6 h-6 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity"
+                              title="View Profile"
+                              onClick={() => setSelectedProfile(oppProfile)}
+                            />
+                          )}
 
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-200 truncate">
-                            vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}
-                          </p>
-                          <p className="text-[10px] text-slate-500 capitalize truncate">
-                            {m.mode.replace(/_/g, ' ')} &bull; {
-                              m.mode === 'all_in' && m.allInStakes && user
-                                ? formatCoins(m.allInStakes[user.uid] || 0)
-                                : formatCoins(m.stake)
-                            }
-                            {oppProfile && <span className="ml-1">· {oppProfile.rating} Elo</span>}
-                          </p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-200 truncate">
+                              vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}
+                            </p>
+                            <p className="text-[10px] text-slate-500 capitalize truncate">
+                              {m.mode.replace(/_/g, ' ')} &bull; {
+                                m.mode === 'all_in' && m.allInStakes && user
+                                  ? formatCoins(m.allInStakes[user.uid] || 0)
+                                  : formatCoins(m.stake)
+                              }
+                              {oppProfile && <span className="ml-1">· {oppProfile.rating} Elo</span>}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Right: friend action + result or resume */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          {friendStatus === 'friend' ? (
+                            <span className="hidden sm:flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
+                              <Check className="w-3 h-3" /> Friends
+                            </span>
+                          ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
+                            <span className="hidden sm:block text-[10px] text-slate-400 font-medium animate-pulse">
+                              {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
+                            </span>
+                          ) : oppProfile && !oppUid.startsWith('bot_') ? (
+                            <button
+                              onClick={() => handleSendOpponentFriendRequest(oppUid)}
+                              className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2 py-0.5 rounded transition-all cursor-pointer"
+                            >
+                              <UserPlus className="w-3 h-3" />
+                              Add
+                            </button>
+                          ) : null}
+
+                          {isActive ? (
+                            <button
+                              onClick={() => handleMatchFound(m.id)}
+                              className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
+                            >
+                              Resume
+                            </button>
+                          ) : (
+                            <span className={`text-xs font-bold ${resultColor}`}>
+                              {resultLabel}
+                            </span>
+                          )}
                         </div>
                       </div>
-
-                      {/* Right: friend action + result or resume */}
-                      <div className="flex items-center gap-2 shrink-0">
-                        {friendStatus === 'friend' ? (
-                          <span className="hidden sm:flex items-center gap-1 text-[10px] text-emerald-400 font-semibold">
-                            <Check className="w-3 h-3" /> Friends
-                          </span>
-                        ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
-                          <span className="hidden sm:block text-[10px] text-slate-400 font-medium animate-pulse">
-                            {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
-                          </span>
-                        ) : oppProfile && !oppUid.startsWith('bot_') ? (
-                          <button
-                            onClick={() => handleSendOpponentFriendRequest(oppUid)}
-                            className="hidden sm:flex items-center gap-1 text-[10px] font-semibold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2 py-0.5 rounded transition-all cursor-pointer"
-                          >
-                            <UserPlus className="w-3 h-3" />
-                            Add
-                          </button>
-                        ) : null}
-
-                        {isActive ? (
-                          <button
-                            onClick={() => handleMatchFound(m.id)}
-                            className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition-all cursor-pointer"
-                          >
-                            Resume
-                          </button>
-                        ) : (
-                          <span className={`text-xs font-bold ${resultColor}`}>
-                            {resultLabel}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
@@ -1102,24 +1098,25 @@ const AppContent: React.FC = () => {
       </main>
 
       {/* Modals & Queue Components */}
-        <PlayModal
-          isOpen={isPlayModalOpen}
-          onClose={() => setIsPlayModalOpen(false)}
-          pieceTheme={settings.pieceTheme}
-          onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
-            if (mode === 'practice' && practiceConfig && user) {
-              try {
-                const newMatch = createPracticeMatchObject(user.uid, practiceConfig.elo, practiceConfig.color);
-                addCachedMatch(newMatch);
-                handleMatchFound(newMatch.id);
-              } catch (err) {
-                console.error("Failed to start practice match:", err);
-              }
-            } else {
-              setMatchmakingConfig({ mode, stake });
+      <PlayModal
+        isOpen={isPlayModalOpen}
+        onClose={() => setIsPlayModalOpen(false)}
+        pieceTheme={settings.pieceTheme}
+        onStartSearch={async (mode, stake, _timeControl, practiceConfig) => {
+          if (mode === 'practice' && practiceConfig && user) {
+            try {
+              const newMatch = createPracticeMatchObject(user.uid, practiceConfig.elo, practiceConfig.color);
+              await setDoc(doc(db, 'matches', newMatch.id), newMatch);
+              addCachedMatch(newMatch);
+              handleMatchFound(newMatch.id);
+            } catch (err) {
+              console.error("Failed to start practice match:", err);
             }
-          }}
-        />
+          } else {
+            setMatchmakingConfig({ mode, stake });
+          }
+        }}
+      />
 
       <AddFundsModal
         isOpen={isAddFundsOpen}
@@ -1258,7 +1255,7 @@ const AppContent: React.FC = () => {
                   try {
                     await setDoc(doc(db, 'challenges', acceptedChallenge.id), { status: 'completed' }, { merge: true });
                     setAcceptedChallenge(null);
-                  } catch (e) {}
+                  } catch (e) { }
                 }}
                 className="text-slate-500 hover:text-slate-300 p-1.5 cursor-pointer"
               >
@@ -1270,9 +1267,9 @@ const AppContent: React.FC = () => {
       )}
 
       {selectedProfile && (
-        <ProfilePopup 
-          profile={selectedProfile} 
-          onClose={() => setSelectedProfile(null)} 
+        <ProfilePopup
+          profile={selectedProfile}
+          onClose={() => setSelectedProfile(null)}
         />
       )}
 

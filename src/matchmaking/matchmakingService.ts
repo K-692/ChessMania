@@ -236,6 +236,7 @@ export async function findMatch(
         balanceBefore: myBalance,
         balanceAfter: updatedMyBalance,
         createdAt: now,
+        opponentUid: opponent.uid,
       };
       transaction.set(myLedgerRef, myLedger);
 
@@ -253,6 +254,7 @@ export async function findMatch(
         balanceBefore: oppBalance,
         balanceAfter: updatedOppBalance,
         createdAt: now,
+        opponentUid: myUid,
       };
       transaction.set(oppLedgerRef, oppLedger);
 
