@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo, calculateElo } from '../game/gameService';
 import { doc, getDoc } from 'firebase/firestore';
-import { ref, onValue, set, update, push, remove, onDisconnect } from 'firebase/database';
+import { ref, onValue, set, update, push, remove, onDisconnect, serverTimestamp } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCoins } from '../utils/format';
@@ -32,6 +32,22 @@ const PIECE_THEMES = [
 export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
   const { user, profile, updateCachedProfile, addCachedTransaction, addCachedEloHistory, addCachedFriendUpdate, addCachedMatch, writeBackToFirestore } = useAuth();
   const [match, setMatch] = useState<Match | null>(null);
+  
+  // Track client time offset from Firebase server time
+  const [serverTimeOffset, setServerTimeOffset] = useState<number>(0);
+  
+  useEffect(() => {
+    const offsetRef = ref(rtdb, '.info/serverTimeOffset');
+    const unsub = onValue(offsetRef, (snap) => {
+      if (snap.exists()) {
+        const offset = snap.val();
+        setServerTimeOffset(offset);
+        console.log(`Synced serverTimeOffset: ${offset}ms`);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   const isSpectator = match ? !match.players.includes(user?.uid || '') : false;
   const [isOpponentDisconnected, setIsOpponentDisconnected] = useState(false);
   const lastHeartbeatChangeTimeRef = useRef<number>(Date.now());
@@ -213,7 +229,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       try {
         await onDisconnect(presenceRef).set(false);
         await set(presenceRef, true);
-        await set(heartbeatRef, Date.now());
+        await set(heartbeatRef, serverTimestamp());
       } catch (err) {
         console.warn("RTDB game presence setup on (re)connect failed:", err);
       }
@@ -221,7 +237,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     // 3-second heartbeat loops for opponent disconnect detection
     const heartbeatInterval = setInterval(() => {
-      set(heartbeatRef, Date.now()).catch(console.warn);
+      set(heartbeatRef, serverTimestamp()).catch(console.warn);
     }, 3000);
 
     return () => {
@@ -236,7 +252,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     if (!match) return;
     const fetchProfiles = async () => {
       try {
-        if (!whiteProfile) {
+        if (!whiteProfile && match.whiteUid) {
           if (match.whiteUid.startsWith('bot_')) {
             const elo = parseInt(match.whiteUid.split('_')[1]) || 800;
             setWhiteProfile({
@@ -253,10 +269,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             });
           } else {
             const snap = await getDoc(doc(db, 'users', match.whiteUid));
-            if (snap.exists()) setWhiteProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+            if (snap.exists()) {
+              setWhiteProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+            } else {
+              console.warn(`Firestore profile for whiteUid ${match.whiteUid} does not exist. Using fallback.`);
+              setWhiteProfile({
+                uid: match.whiteUid,
+                displayName: 'Chess Player',
+                photoURL: 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+                rating: 1200,
+                currentEloRating: 1200,
+                bankBalance: 1000,
+                currentBalance: 1000,
+                createdAt: Date.now(),
+                lastLoginAt: Date.now(),
+                zeroBalanceAt: null
+              } as UserProfile);
+            }
           }
         }
-        if (!blackProfile) {
+        if (!blackProfile && match.blackUid) {
           if (match.blackUid.startsWith('bot_')) {
             const elo = parseInt(match.blackUid.split('_')[1]) || 800;
             setBlackProfile({
@@ -273,7 +305,23 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
             });
           } else {
             const snap = await getDoc(doc(db, 'users', match.blackUid));
-            if (snap.exists()) setBlackProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+            if (snap.exists()) {
+              setBlackProfile({ uid: snap.id, ...snap.data() } as UserProfile);
+            } else {
+              console.warn(`Firestore profile for blackUid ${match.blackUid} does not exist. Using fallback.`);
+              setBlackProfile({
+                uid: match.blackUid,
+                displayName: 'Chess Player',
+                photoURL: 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+                rating: 1200,
+                currentEloRating: 1200,
+                bankBalance: 1000,
+                currentBalance: 1000,
+                createdAt: Date.now(),
+                lastLoginAt: Date.now(),
+                zeroBalanceAt: null
+              } as UserProfile);
+            }
           }
         }
       } catch (err) {
@@ -353,7 +401,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       // Only sync FEN from DB when a new move arrives or it is the opponent's turn.
       // This prevents the optimistic local FEN from being overwritten by a stale
       // DB snapshot while our write is still in-flight (piece rollback bug).
-      const isSpectatorLocal = !matchData.players.includes(user?.uid || '');
+      const isSpectatorLocal = !matchData.players?.includes(user?.uid || '');
       if (isSpectatorLocal) {
         setLocalFen(matchData.boardFEN);
         try {
@@ -385,7 +433,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       }
 
       // Sync player disconnection states & initialization timers using heartbeats
-      const isUserPlayer = user && matchData.players.includes(user.uid);
+      const isUserPlayer = user && matchData.players?.includes(user.uid);
       if (isUserPlayer && matchData.status === 'active' && matchData.mode !== 'practice') {
         const myUid = user.uid;
         const oppUid = myUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
@@ -399,20 +447,28 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         }
 
         const elapsedSinceLastChange = Date.now() - lastHeartbeatChangeTimeRef.current;
-        const isOpponentStale = oppLastActive === 0 || (elapsedSinceLastChange > 15000);
+        
+        // Clock-skew safe staleness detection:
+        // If the opponent has never set a heartbeat, they are only stale if the match age exceeds the initial grace period.
+        // If they have set a heartbeat, they are stale if 15s have elapsed since their last heartbeat update.
+        const matchAge = (Date.now() + serverTimeOffset) - matchData.createdAt;
+        const initialGracePeriod = matchData.challengeId ? 180000 : 60000;
+        const isOpponentStale = oppLastActive === 0
+          ? (matchAge > initialGracePeriod)
+          : (elapsedSinceLastChange > 15000);
 
         if (!isOpponentStale) {
           if (matchData.disconnectedUid) {
             update(ref(rtdb, `matches/${matchId}`), {
               disconnectedUid: null,
               disconnectedAt: null,
-              lastMoveAt: Date.now() // Offset clocks on reconnection
+              lastMoveAt: serverTimestamp() // Offset clocks on reconnection using server timestamp
             }).catch(console.warn);
           }
           // Reset lastMoveAt when both join for the first time
           if ((matchData.moves || []).length === 0 && Math.abs(matchData.lastMoveAt - matchData.createdAt) < 5000) {
             update(ref(rtdb, `matches/${matchId}`), {
-              lastMoveAt: Date.now()
+              lastMoveAt: serverTimestamp()
             }).catch(console.warn);
           }
         } else {
@@ -420,7 +476,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
           if (!matchData.disconnectedUid) {
             update(ref(rtdb, `matches/${matchId}`), {
               disconnectedUid: oppUid,
-              disconnectedAt: Date.now()
+              disconnectedAt: serverTimestamp()
             }).catch(console.warn);
           }
         }
@@ -641,28 +697,33 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => clearInterval(interval);
   }, [match?.status, matchId, user]);
 
-  // 3. Handle disconnection timeouts (1 minute limit)
+  // 3. Handle disconnection timeouts (1 minute limit, 3 minutes for friendly game setup)
   useEffect(() => {
     if (!match || match.status !== 'active' || match.mode === 'practice') return;
 
     const interval = setInterval(() => {
-      const now = Date.now();
+      const now = Date.now() + serverTimeOffset;
       const oppUid = user?.uid === match.whiteUid ? match.blackUid : match.whiteUid;
       const oppLastActive = match.heartbeats?.[oppUid] || 0;
-      const isOpponentStale = oppLastActive === 0 || (now - oppLastActive > 10000);
+      
+      const matchAge = now - match.createdAt;
+      const initialGracePeriod = match.challengeId ? 180000 : 60000;
+      const isOpponentStale = oppLastActive === 0
+        ? (matchAge > initialGracePeriod)
+        : (now - oppLastActive > 15000);
 
       let time = 60;
       if (match.disconnectedAt) {
         time = Math.max(0, Math.ceil((60000 - (now - match.disconnectedAt)) / 1000));
       } else if (isOpponentStale && match.moves.length === 0) {
-        time = Math.max(0, Math.ceil((60000 - (now - match.createdAt)) / 1000));
+        time = Math.max(0, Math.ceil((initialGracePeriod - (now - match.createdAt)) / 1000));
       }
       setReconnectCountdown(time);
 
-      // Execute timeout victory if 1 minute limit exceeded
+      // Execute timeout victory if initial startup limit exceeded
       if (isOpponentStale && (match.moves || []).length === 0) {
         const elapsed = now - match.createdAt;
-        if (elapsed > 60000) {
+        if (elapsed > initialGracePeriod) {
           if (user?.uid) {
             update(ref(rtdb, `matches/${matchId}`), {
               status: 'timeout',
@@ -689,7 +750,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     }, 500);
 
     return () => clearInterval(interval);
-  }, [match, user, matchId]);
+  }, [match, user, matchId, serverTimeOffset]);
 
   // Subscribe to game messages in RTDB
   useEffect(() => {
