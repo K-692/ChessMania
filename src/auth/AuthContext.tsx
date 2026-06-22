@@ -3,7 +3,7 @@ import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, ty
 import { auth, googleProvider, db, rtdb } from '../firebase';
 import type { UserProfile } from '../types';
 import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
-import { ref as rRef, set as rSet, get as rGet, onDisconnect, serverTimestamp } from 'firebase/database';
+import { ref as rRef, set as rSet, get as rGet, onDisconnect, onValue, serverTimestamp } from 'firebase/database';
 import { applyLazyHourlyRewardTx } from '../wallet/walletService';
 
 export interface GameConfig {
@@ -849,53 +849,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user]);
 
-  // Realtime Database presence registration and onDisconnect setup with a 30s heartbeat
+  // Realtime Database presence registration using .info/connected for robust reconnection handling.
+  // Firebase's onDisconnect() is a one-shot handler: once the connection drops and the
+  // server executes the onDisconnect payload, the handler is consumed. On reconnection,
+  // it must be re-registered. Previously, only a 30-second heartbeat did this, leaving a
+  // gap where the user appeared offline. Now we listen to .info/connected to immediately
+  // re-register onDisconnect AND re-set online status on every reconnection event.
   useEffect(() => {
     if (!user) return;
     
     const statusRef = rRef(rtdb, `status/${user.uid}`);
+    const connectedRef = rRef(rtdb, '.info/connected');
     let heartbeatInterval: any;
-    
-    const setupPresence = async () => {
+    const localSessionId = localStorage.getItem('checkmate_session_id') || '';
+
+    const isOfflineForDatabase = {
+      state: 'offline',
+      lastChanged: serverTimestamp(),
+      activeSessionId: ''
+    };
+    const isOnlineForDatabase = {
+      state: 'online',
+      lastChanged: serverTimestamp(),
+      activeSessionId: localSessionId
+    };
+
+    // Listen to .info/connected — fires on every connect/reconnect event.
+    // Each time we reconnect, we re-register onDisconnect and re-set online status.
+    const unsubConnected = onValue(connectedRef, async (snapshot) => {
+      if (snapshot.val() === false) {
+        // Client is disconnected — do nothing; onDisconnect will handle cleanup server-side
+        return;
+      }
+
+      // Connected (or reconnected): re-register onDisconnect and set online
       try {
-        const localSessionId = localStorage.getItem('checkmate_session_id') || '';
-        const isOfflineForDatabase = {
-          state: 'offline',
-          lastChanged: serverTimestamp(),
-          activeSessionId: ''
-        };
-        const isOnlineForDatabase = {
+        await onDisconnect(statusRef).set(isOfflineForDatabase);
+        await rSet(statusRef, isOnlineForDatabase);
+      } catch (err) {
+        console.warn("Failed to register presence on (re)connect:", err);
+      }
+    });
+
+    // Continuous heartbeat every 20 seconds as a safety net in case
+    // .info/connected misses an edge case (e.g. hibernation recovery)
+    heartbeatInterval = setInterval(async () => {
+      try {
+        await rSet(statusRef, {
           state: 'online',
           lastChanged: serverTimestamp(),
           activeSessionId: localSessionId
-        };
-
-        // When user disconnects, set status to offline automatically
-        await onDisconnect(statusRef).set(isOfflineForDatabase);
-        
-        // Set user to online initially
-        await rSet(statusRef, isOnlineForDatabase);
-
-        // Continuous heartbeat every 30 seconds to refresh active presence
-        heartbeatInterval = setInterval(async () => {
-          try {
-            await rSet(statusRef, {
-              state: 'online',
-              lastChanged: serverTimestamp(),
-              activeSessionId: localSessionId
-            });
-          } catch (e) {
-            console.warn("Heartbeat write failed:", e);
-          }
-        }, 30000);
-      } catch (err) {
-        console.warn("Failed to register presence in RTDB:", err);
+        });
+      } catch (e) {
+        console.warn("Heartbeat write failed:", e);
       }
-    };
-
-    setupPresence();
+    }, 20000);
 
     return () => {
+      // Unsubscribe the .info/connected listener
+      unsubConnected();
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       // Explicitly mark offline when user logs out or unmounts
       rSet(statusRef, {

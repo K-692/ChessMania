@@ -190,7 +190,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => clearInterval(interval);
   }, []);
 
-  // Update client presence and heartbeat to RTDB (only if playing, not spectating)
+  // Update client presence and heartbeat to RTDB (only if playing, not spectating).
+  // Uses .info/connected to re-register onDisconnect on every reconnect event,
+  // preventing the one-shot onDisconnect from leaving the player stuck as absent.
   useEffect(() => {
     if (!user || !match) return;
     const isSpectator = !match.players.includes(user.uid);
@@ -198,25 +200,32 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
     const presenceRef = ref(rtdb, `matches/${matchId}/presence/${user.uid}`);
     const heartbeatRef = ref(rtdb, `matches/${matchId}/heartbeats/${user.uid}`);
+    const connectedRef = ref(rtdb, '.info/connected');
 
-    // Initial presence and disconnect handler setup
-    const setupPresence = async () => {
+    // Listen for connection state changes and re-register onDisconnect each time
+    const unsubConnected = onValue(connectedRef, async (snapshot) => {
+      if (snapshot.val() === false) {
+        // Disconnected — server-side onDisconnect will handle cleanup
+        return;
+      }
+
+      // Connected or reconnected: re-register onDisconnect and set presence
       try {
         await onDisconnect(presenceRef).set(false);
         await set(presenceRef, true);
         await set(heartbeatRef, Date.now());
       } catch (err) {
-        console.warn("RTDB presence setup in game failed:", err);
+        console.warn("RTDB game presence setup on (re)connect failed:", err);
       }
-    };
-    setupPresence();
+    });
 
-    // 3-second heartbeat loops
+    // 3-second heartbeat loops for opponent disconnect detection
     const heartbeatInterval = setInterval(() => {
       set(heartbeatRef, Date.now()).catch(console.warn);
     }, 3000);
 
     return () => {
+      unsubConnected();
       clearInterval(heartbeatInterval);
       set(presenceRef, false).catch(console.warn);
     };
