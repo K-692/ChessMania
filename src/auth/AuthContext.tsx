@@ -837,23 +837,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       window.addEventListener(event, resetTimer);
     });
 
-    const handleOnline = async () => {
-      console.log('Reconnected network event. Logging out...');
-      try {
-        await logout();
-        alert('You have been logged out because you reconnected. Please sign in again.');
-      } catch (e) {
-        console.warn('Failed to logout on reconnect:', e);
-      }
-    };
-    window.addEventListener('online', handleOnline);
+    // Note: We do NOT listen to window 'online' events to log the user out.
+    // Logging out on reconnection is disruptive and violates the requirement
+    // to allow players to reconnect and resume their games on network recovery.
 
     return () => {
       clearInterval(checkInterval);
       activityEvents.forEach((event) => {
         window.removeEventListener(event, resetTimer);
       });
-      window.removeEventListener('online', handleOnline);
     };
   }, [user]);
 
