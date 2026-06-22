@@ -224,6 +224,8 @@ export async function settleMatchPayoutAndElo(
 
   const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
   const isTerminated = matchData.status === 'terminated';
+  const neverPlayed = !matchData.moves || matchData.moves.length === 0;
+
   let myScore = 0.5;
   if (!isDraw && !isTerminated) {
     myScore = matchData.winnerUid === myUid ? 1 : 0;
@@ -231,7 +233,7 @@ export async function settleMatchPayoutAndElo(
 
   const { delta, expectedScore } = calculateElo(myRating, opponentRating, myScore);
   let newRating = myRating;
-  if (!isTerminated && matchData.stake > 0) {
+  if (!isTerminated && !neverPlayed && matchData.stake > 0) {
     if (myScore === 0) {
       const finalDelta = delta > 0 ? -delta : delta;
       newRating = Math.max(0, myRating + finalDelta);
@@ -244,8 +246,12 @@ export async function settleMatchPayoutAndElo(
   let myPayout = 0;
   let myEarned = 0;
 
-  if (isTerminated) {
-    myPayout = matchData.stake;
+  if (isTerminated || neverPlayed) {
+    if (matchData.mode === 'all_in' && matchData.allInStakes) {
+      myPayout = matchData.allInStakes[myUid] || 0;
+    } else {
+      myPayout = matchData.stake;
+    }
     myEarned = 0;
   } else if (matchData.mode === 'all_in' && matchData.allInStakes) {
     const myStakeVal = matchData.allInStakes[myUid] || 0;
@@ -277,7 +283,7 @@ export async function settleMatchPayoutAndElo(
   // Map time control to original mode for achievement tracking
   const achievementMode = getOriginalModeForTimeControl(matchData.timeControl, matchData.mode);
 
-  const newMyCounts = (wonMatch && !isFriendly && !isTerminated)
+  const newMyCounts = (wonMatch && !isFriendly && !isTerminated && !neverPlayed)
     ? { ...myCounts, [achievementMode]: (myCounts[achievementMode] || 0) + 1 }
     : myCounts;
 
@@ -285,7 +291,7 @@ export async function settleMatchPayoutAndElo(
   let myLosses = currentUserProfile.totalLosses !== undefined ? currentUserProfile.totalLosses : (currentUserProfile.losses || 0);
   let myDraws = currentUserProfile.totalDraws !== undefined ? currentUserProfile.totalDraws : (currentUserProfile.draws || 0);
 
-  if (!isTerminated) {
+  if (!isTerminated && !neverPlayed) {
     if (isDraw) myDraws++;
     else if (matchData.winnerUid === myUid) myWins++;
     else myLosses++;
@@ -320,10 +326,10 @@ export async function settleMatchPayoutAndElo(
   let transactionRecord = null;
   if (myPayout > 0 || matchData.stake === 0) {
     transactionRecord = {
-      id: myUid + '_' + matchData.id + '_' + (isTerminated ? 'refund' : (isDraw ? 'refund' : 'credit')),
+      id: myUid + '_' + matchData.id + '_' + ((isTerminated || neverPlayed) ? 'refund' : (isDraw ? 'refund' : 'credit')),
       uid: myUid,
       userId: myUid,
-      type: (isTerminated || isDraw) ? 'refund' : 'stakeCredit',
+      type: (isTerminated || neverPlayed || isDraw) ? 'refund' : 'stakeCredit',
       amount: 0,
       coins: myPayout,
       currency: 'INR',
@@ -338,7 +344,7 @@ export async function settleMatchPayoutAndElo(
   }
 
   let eloHistoryRecord = null;
-  if (!isTerminated && (matchData.stake > 0 || matchData.stake === 0)) {
+  if (!isTerminated && !neverPlayed && (matchData.stake > 0 || matchData.stake === 0)) {
     eloHistoryRecord = {
       beforeRating: myRating,
       afterRating: newRating,
@@ -353,7 +359,7 @@ export async function settleMatchPayoutAndElo(
     };
   }
 
-  if (addCachedFriendUpdate && !isTerminated) {
+  if (addCachedFriendUpdate && !isTerminated && !neverPlayed) {
     const friendDocRef = doc(db, 'users', myUid, 'friends', opponentUid);
     const friendSnap = await getDoc(friendDocRef);
     if (friendSnap.exists()) {

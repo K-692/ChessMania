@@ -164,15 +164,14 @@ const AppContent: React.FC = () => {
         const statuses = snapshot.val();
         let count = 0;
         const now = Date.now();
-        // Sliding timeout threshold of 1 minute for any stale/un-cleaned presence entries
-        const staleThreshold = 1 * 60 * 1000;
+        // Sliding timeout threshold of 45 seconds for any stale presence entries
+        const staleThreshold = 45 * 1000;
 
         for (const uid in statuses) {
           const s = statuses[uid];
           if (s.state === 'online') {
             const lastChanged = s.lastChanged || 0;
-            // Exclude entries that are older than 1 minute if they are stale and haven't had their sockets cleaned up
-            // but normally trust the socket connection state ('online')
+            // Exclude entries that are older than 45 seconds if they are stale
             if (lastChanged === 0 || (now - lastChanged) < staleThreshold) {
               count++;
             }

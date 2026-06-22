@@ -1,0 +1,40 @@
+{
+  "rules": {
+    "status": {
+      "$uid": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.uid == $uid"
+      }
+    },
+    "match_queue": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "matches": {
+      "$matchId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "challenges": {
+      "$challengeId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('challengerUid').val() == auth.uid || data.child('challengedUid').val() == auth.uid || newData.child('challengerUid').val() == auth.uid || newData.child('challengedUid').val() == auth.uid)"
+      }
+    },
+    "user_challenges": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        "$challengeId": {
+          ".write": "auth != null && (auth.uid == $uid || data.child('challengerUid').val() == auth.uid || data.child('challengedUid').val() == auth.uid || newData.child('challengerUid').val() == auth.uid || newData.child('challengedUid').val() == auth.uid)"
+        }
+      }
+    },
+    "chats": {
+      "$matchId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    }
+  }
+}

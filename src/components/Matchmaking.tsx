@@ -91,7 +91,12 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, timeContr
     if (!queueId || !user || !profile) return;
 
     const performSearch = async () => {
-      const currentBand = Math.floor(elapsedTime / 10) * 10;
+      let currentBand = 100;
+      if (elapsedTime >= 50) {
+        currentBand = 1000;
+      } else {
+        currentBand = 100 + Math.floor(elapsedTime / 10) * 100;
+      }
 
       setStatusText('Searching for opponent...');
 

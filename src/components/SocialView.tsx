@@ -59,6 +59,26 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
   const [isSendingChallenge, setIsSendingChallenge] = useState(false);
   const [isAcceptingChallenge, setIsAcceptingChallenge] = useState<string | null>(null);
 
+  // Real-time online statuses listener
+  const [onlineStatuses, setOnlineStatuses] = useState<Record<string, { state: string, lastChanged: number }>>({});
+
+  useEffect(() => {
+    const statusRef = rRef(rtdb, 'status');
+    const unsubscribe = rOnValue(statusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setOnlineStatuses(snapshot.val());
+      } else {
+        setOnlineStatuses({});
+      }
+    }, (err) => {
+      console.warn("Error listening to presence status in RTDB:", err);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   // Pending challenges alert expanded state
   const [challengesExpanded, setChallengesExpanded] = useState(true);
 
@@ -504,7 +524,14 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     }
   };
 
-  const isOnline = (lastLogin: number) => Date.now() - (lastLogin || 0) < 5 * 60 * 1000;
+  const isFriendOnline = (friendUid: string) => {
+    const status = onlineStatuses[friendUid];
+    if (!status) return false;
+    if (status.state !== 'online') return false;
+    const lastChanged = status.lastChanged || 0;
+    const now = Date.now();
+    return lastChanged === 0 || (now - lastChanged) < 45 * 1000; // 45 seconds sliding window
+  };
 
   // Pending sent challenge IDs (to avoid showing challenge button while one is pending)
   const pendingSentChallengeUids = new Set(sentChallenges.map((c) => c.challengedUid));
@@ -655,7 +682,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
               <div className="divide-y divide-white/5 max-h-[480px] overflow-y-auto pr-2 scrollbar-thin">
                 {friendsProfiles.map((fProfile) => {
                   const bestAch = getBestAchievement(fProfile.gameplayCounts);
-                  const online = isOnline(fProfile.lastLoginAt || 0);
+                  const online = isFriendOnline(fProfile.uid);
                   const hasPendingChallenge = pendingSentChallengeUids.has(fProfile.uid);
 
                   const record = h2hRecords[fProfile.uid] || { wins: 0, losses: 0, draws: 0 };

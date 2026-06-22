@@ -691,7 +691,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
         const timeSinceLastActivity = Date.now() - lastActivity;
 
-        const limitMinutes = gameConfig?.inactivityTimeoutMinutes ?? 5;
+        const limitMinutes = 2; // Hardcode to 2 minutes as requested
         if (lastActivity > 0 && timeSinceLastActivity > limitMinutes * 60 * 1000) {
           console.log(`Detected inactivity over ${limitMinutes} minutes on startup. Logging out...`);
           await writeBackToFirestore(firebaseUser.uid);
@@ -797,26 +797,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [gameConfig?.inactivityTimeoutMinutes]);
 
-  // Inactivity auto-logout after configured minutes and online reconnection logout
+  // Inactivity auto-logout after 2 minutes and online reconnection logout
   useEffect(() => {
     if (!user) return;
 
-    let timeoutId: any;
+    // Reset last activity timestamp on mount
+    localStorage.setItem('checkmate_last_activity', Date.now().toString());
 
-    const resetTimer = () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      localStorage.setItem('checkmate_last_activity', Date.now().toString());
+    // Continuous check running every 5 seconds
+    const checkInterval = setInterval(async () => {
+      const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
+      const timeSinceLastActivity = Date.now() - lastActivity;
+      const timeoutLimit = 2 * 60 * 1000; // 2 minutes in ms
 
-      const timeoutMins = gameConfig?.inactivityTimeoutMinutes ?? 5;
-      timeoutId = setTimeout(async () => {
-        console.log(`Inactivity timeout reached (${timeoutMins} minutes). Logging out...`);
+      if (lastActivity > 0 && timeSinceLastActivity >= timeoutLimit) {
+        console.log(`Inactivity timeout reached (2 minutes). Logging out...`);
+        clearInterval(checkInterval);
         try {
           await logout();
-          alert(`You have been logged out due to ${timeoutMins} minutes of inactivity.`);
+          alert("You have been logged out due to 2 minutes of inactivity. Please log in again.");
         } catch (e) {
           console.warn('Failed to logout on inactivity timeout:', e);
         }
-      }, timeoutMins * 60 * 1000); // configured timeout minutes
+      }
+    }, 5000); // Check every 5 seconds
+
+    const resetTimer = () => {
+      localStorage.setItem('checkmate_last_activity', Date.now().toString());
     };
 
     const activityEvents = [
@@ -842,19 +849,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     window.addEventListener('online', handleOnline);
 
     return () => {
-      if (timeoutId) clearTimeout(timeoutId);
+      clearInterval(checkInterval);
       activityEvents.forEach((event) => {
         window.removeEventListener(event, resetTimer);
       });
       window.removeEventListener('online', handleOnline);
     };
-  }, [user, gameConfig?.inactivityTimeoutMinutes]);
+  }, [user]);
 
-  // Realtime Database presence registration and onDisconnect setup
+  // Realtime Database presence registration and onDisconnect setup with a 30s heartbeat
   useEffect(() => {
     if (!user) return;
     
     const statusRef = rRef(rtdb, `status/${user.uid}`);
+    let heartbeatInterval: any;
     
     const setupPresence = async () => {
       try {
@@ -873,8 +881,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // When user disconnects, set status to offline automatically
         await onDisconnect(statusRef).set(isOfflineForDatabase);
         
-        // Set user to online
+        // Set user to online initially
         await rSet(statusRef, isOnlineForDatabase);
+
+        // Continuous heartbeat every 30 seconds to refresh active presence
+        heartbeatInterval = setInterval(async () => {
+          try {
+            await rSet(statusRef, {
+              state: 'online',
+              lastChanged: serverTimestamp(),
+              activeSessionId: localSessionId
+            });
+          } catch (e) {
+            console.warn("Heartbeat write failed:", e);
+          }
+        }, 30000);
       } catch (err) {
         console.warn("Failed to register presence in RTDB:", err);
       }
@@ -883,6 +904,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setupPresence();
 
     return () => {
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
       // Explicitly mark offline when user logs out or unmounts
       rSet(statusRef, {
         state: 'offline',
