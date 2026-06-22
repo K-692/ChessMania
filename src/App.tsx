@@ -13,7 +13,8 @@ import { AddFundsModal } from './components/AddFundsModal';
 import { ProfilePopup } from './components/ProfilePopup';
 import type { GameMode, UserProfile } from './types';
 import { collection, query, where, getDoc, getDocs, orderBy, onSnapshot, doc, setDoc, updateDoc, writeBatch } from 'firebase/firestore';
-import { db } from './firebase';
+import { ref as rRef, onValue, update as rUpdate } from 'firebase/database';
+import { db, rtdb } from './firebase';
 import { formatActiveCount } from './utils/format';
 import { getBestAchievement } from './utils/achievements';
 import { Edit2, X, Lock, Calendar, Plus } from 'lucide-react';
@@ -22,7 +23,7 @@ import { applyLazyHourlyRewardTx } from './wallet/walletService';
 
 
 const AppContent: React.FC = () => {
-  const { user, profile, loading, updateCachedProfile } = useAuth();
+  const { user, profile, loading, isLoggingOut, updateCachedProfile } = useAuth();
   const [view, setView] = useState<'dashboard' | 'ledger' | 'game' | 'leaderboard' | 'profile' | 'social' | 'settings'>('dashboard');
 
   // Settings sync state for dynamic piece style Knight image
@@ -155,35 +156,38 @@ const AppContent: React.FC = () => {
       setIsSavingName(false);
     }
   };
-  // 1b. Real-time sliding active players query listener (logged in in last 5 minutes)
+  // 1b. Real-time active players listener using Realtime Database presence status
   useEffect(() => {
-    const updateListener = () => {
-      const activeThreshold = Date.now() - 5 * 60 * 1000;
-      const q = query(
-        collection(db, 'users'),
-        where('lastLoginAt', '>=', activeThreshold)
-      );
+    const statusRef = rRef(rtdb, 'status');
+    const unsubscribe = onValue(statusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const statuses = snapshot.val();
+        let count = 0;
+        const now = Date.now();
+        // Sliding timeout threshold of 1 minute for any stale/un-cleaned presence entries
+        const staleThreshold = 1 * 60 * 1000;
 
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        setOnlineCount(snapshot.size || 1);
-      }, (err) => {
-        console.warn("Error listening to active players:", err);
-      });
-
-      return unsubscribe;
-    };
-
-    let unsubscribe = updateListener();
-
-    // Re-bind listener every 30 seconds to move sliding threshold forward
-    const interval = setInterval(() => {
-      unsubscribe();
-      unsubscribe = updateListener();
-    }, 30000);
+        for (const uid in statuses) {
+          const s = statuses[uid];
+          if (s.state === 'online') {
+            const lastChanged = s.lastChanged || 0;
+            // Exclude entries that are older than 1 minute if they are stale and haven't had their sockets cleaned up
+            // but normally trust the socket connection state ('online')
+            if (lastChanged === 0 || (now - lastChanged) < staleThreshold) {
+              count++;
+            }
+          }
+        }
+        setOnlineCount(Math.max(1, count));
+      } else {
+        setOnlineCount(1);
+      }
+    }, (err) => {
+      console.warn("Error listening to presence status in RTDB:", err);
+    });
 
     return () => {
       unsubscribe();
-      clearInterval(interval);
     };
   }, []);
 
@@ -227,29 +231,38 @@ const AppContent: React.FC = () => {
     return () => clearInterval(interval);
   }, [profile, view]);
 
-  // 1e. Real-time Friendly Challenge Accepted listener
+  // 1e. Real-time Friendly Challenge Accepted listener using Realtime Database
   useEffect(() => {
     if (!user) return;
 
-    const q = query(
-      collection(db, 'challenges'),
-      where('challengerUid', '==', user.uid),
-      where('status', '==', 'accepted')
-    );
-
-    const unsubscribe = onSnapshot(q, async (snap) => {
-      if (snap.empty) {
+    const userChallengesRef = rRef(rtdb, `user_challenges/${user.uid}`);
+    const unsubscribe = onValue(userChallengesRef, async (snap) => {
+      if (!snap.exists()) {
         setAcceptedChallenge(null);
         return;
       }
 
-      const chDoc = snap.docs[0];
-      const chData = { id: chDoc.id, ...chDoc.data() } as any;
-      setAcceptedChallenge(chData);
+      const challenges = snap.val();
+      let activeAcceptedChallenge: any = null;
+
+      for (const cid in challenges) {
+        const ch = challenges[cid];
+        if (ch.challengerUid === user.uid && ch.status === 'accepted') {
+          activeAcceptedChallenge = { id: cid, ...ch };
+          break;
+        }
+      }
+
+      if (!activeAcceptedChallenge) {
+        setAcceptedChallenge(null);
+        return;
+      }
+
+      setAcceptedChallenge(activeAcceptedChallenge);
 
       // Fetch profile details of challenged friend
       try {
-        const friendSnap = await getDoc(doc(db, 'users', chData.challengedUid));
+        const friendSnap = await getDoc(doc(db, 'users', activeAcceptedChallenge.challengedUid));
         if (friendSnap.exists()) {
           setAcceptedChallengerProfile({ uid: friendSnap.id, ...friendSnap.data() } as UserProfile);
         }
@@ -258,13 +271,22 @@ const AppContent: React.FC = () => {
       }
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, [user]);
 
   const handleJoinFriendlyMatch = async () => {
     if (!acceptedChallenge) return;
     try {
-      await setDoc(doc(db, 'challenges', acceptedChallenge.id), { status: 'completed' }, { merge: true });
+      const updates: Record<string, any> = {};
+      updates[`challenges/${acceptedChallenge.id}/status`] = 'completed';
+      updates[`user_challenges/${acceptedChallenge.challengerUid}/${acceptedChallenge.id}/status`] = 'completed';
+      updates[`user_challenges/${acceptedChallenge.challengedUid}/${acceptedChallenge.id}/status`] = 'completed';
+      
+      const dbRef = rRef(rtdb);
+      await rUpdate(dbRef, updates);
+
       handleNavigateToGame(acceptedChallenge.matchId);
       setAcceptedChallenge(null);
     } catch (err) {
@@ -417,6 +439,19 @@ const AppContent: React.FC = () => {
     setMatchmakingConfig(null);
     handleNavigateToGame(matchId);
   };
+
+  if (isLoggingOut) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen space-y-4 bg-slate-950 text-[#e2e8f0]">
+        <div className="relative flex items-center justify-center">
+          <div className="w-16 h-16 border-4 border-violet-500 border-t-transparent rounded-full animate-spin absolute" />
+          <img src="/game_logo.png" alt="Check & Mate" className="w-10 h-10 object-contain rounded-lg animate-pulse" />
+        </div>
+        <p className="text-sm text-violet-400 font-semibold tracking-wider uppercase animate-pulse">Securing Your Coins...</p>
+        <p className="text-xs text-slate-500 font-mono">Signing out of active session safely</p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -950,7 +985,13 @@ const AppContent: React.FC = () => {
               <button
                 onClick={async () => {
                   try {
-                    await setDoc(doc(db, 'challenges', acceptedChallenge.id), { status: 'completed' }, { merge: true });
+                    const updates: Record<string, any> = {};
+                    updates[`challenges/${acceptedChallenge.id}/status`] = 'completed';
+                    updates[`user_challenges/${acceptedChallenge.challengerUid}/${acceptedChallenge.id}/status`] = 'completed';
+                    updates[`user_challenges/${acceptedChallenge.challengedUid}/${acceptedChallenge.id}/status`] = 'completed';
+                    
+                    const dbRef = rRef(rtdb);
+                    await rUpdate(dbRef, updates);
                     setAcceptedChallenge(null);
                   } catch (e) { }
                 }}

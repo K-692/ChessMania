@@ -1,6 +1,6 @@
 import { db, rtdb } from '../firebase';
 import { doc, runTransaction, getDoc } from 'firebase/firestore';
-import { ref, set, runTransaction as rtdbTransaction } from 'firebase/database';
+import { ref, get, update, runTransaction as rtdbTransaction } from 'firebase/database';
 import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -399,50 +399,50 @@ export async function acceptFriendlyChallenge(
   mode: GameMode,
   stake: number
 ): Promise<string> {
-  const challengeDocRef = doc(db, 'challenges', challengeId);
-  const challengerUserRef = doc(db, 'users', challengerUid);
-  const challengedUserRef = doc(db, 'users', challengedUid);
-  
-  // We generate a match ID
   const mId = 'match_challenge_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
   const now = Date.now();
 
-  const res = await runTransaction(db, async (transaction) => {
-    const challengeSnap = await transaction.get(challengeDocRef);
-    if (!challengeSnap.exists()) {
-      return { error: 'Challenge does not exist' };
-    }
-    const challengeData = challengeSnap.data();
-    if (challengeData.status !== 'pending') {
-      return { error: 'Challenge is no longer pending' };
-    }
+  // Read challenge from RTDB
+  const challengeRef = ref(rtdb, `challenges/${challengeId}`);
+  const challengeSnap = await get(challengeRef);
+  if (!challengeSnap.exists()) {
+    throw new Error('Challenge does not exist');
+  }
+  const challengeData = challengeSnap.val();
+  if (challengeData.status !== 'pending') {
+    throw new Error('Challenge is no longer pending');
+  }
 
-    const challengerSnap = await transaction.get(challengerUserRef);
-    const challengedSnap = await transaction.get(challengedUserRef);
+  let challengerStake = 0;
+  let challengedStake = 0;
 
-    if (!challengerSnap.exists() || !challengedSnap.exists()) {
-      return { error: 'One of the player profiles was not found' };
-    }
+  // Staked arena clash
+  if (stake > 0) {
+    const challengerUserRef = doc(db, 'users', challengerUid);
+    const challengedUserRef = doc(db, 'users', challengedUid);
 
-    const challenger = challengerSnap.data() as UserProfile;
-    const challenged = challengedSnap.data() as UserProfile;
+    await runTransaction(db, async (transaction) => {
+      const challengerSnap = await transaction.get(challengerUserRef);
+      const challengedSnap = await transaction.get(challengedUserRef);
 
-    const challengerBalance = challenger.currentBalance !== undefined ? challenger.currentBalance : challenger.bankBalance;
-    const challengedBalance = challenged.currentBalance !== undefined ? challenged.currentBalance : challenged.bankBalance;
+      if (!challengerSnap.exists() || !challengedSnap.exists()) {
+        throw new Error('One of the player profiles was not found');
+      }
 
-    const challengerStake = mode === 'all_in' ? challengerBalance : stake;
-    const challengedStake = mode === 'all_in' ? challengedBalance : stake;
+      const challenger = challengerSnap.data() as UserProfile;
+      const challenged = challengedSnap.data() as UserProfile;
 
-    const isFriendly = stake === 0;
+      const challengerBalance = challenger.currentBalance !== undefined ? challenger.currentBalance : challenger.bankBalance;
+      const challengedBalance = challenged.currentBalance !== undefined ? challenged.currentBalance : challenged.bankBalance;
 
-    if (!isFriendly) {
+      challengerStake = mode === 'all_in' ? challengerBalance : stake;
+      challengedStake = mode === 'all_in' ? challengedBalance : stake;
+
       if (challengerBalance < challengerStake || challengerStake <= 0) {
-        transaction.update(challengeDocRef, { status: 'declined' });
-        return { error: `Challenger "${challenger.displayName}" has insufficient coins.` };
+        throw new Error(`Challenger "${challenger.displayName}" has insufficient coins.`);
       }
       if (challengedBalance < challengedStake || challengedStake <= 0) {
-        transaction.update(challengeDocRef, { status: 'declined' });
-        return { error: `You have insufficient coins to play this match.` };
+        throw new Error(`You have insufficient coins to play this match.`);
       }
 
       const updatedChallengerBalance = Math.round((challengerBalance - challengerStake) * 100) / 100;
@@ -494,85 +494,69 @@ export async function acceptFriendlyChallenge(
         createdAt: now,
         opponentUid: challengerUid,
       });
-    }
-
-    const colorChoice = challengeData?.colorChoice || 'random';
-    let isChallengerWhite = Math.random() < 0.5;
-    if (colorChoice === 'white') {
-      isChallengerWhite = true;
-    } else if (colorChoice === 'black') {
-      isChallengerWhite = false;
-    }
-    const whiteUid = isChallengerWhite ? challengerUid : challengedUid;
-    const blackUid = isChallengerWhite ? challengedUid : challengerUid;
-
-    let initialClockTime: number;
-    let matchTimeControl: string;
-    
-    if (mode === 'all_in') {
-      matchTimeControl = '10 | 5';
-      initialClockTime = parseTimeControl(matchTimeControl).initialTime;
-    } else {
-      matchTimeControl = STANDARD_TIME_CONTROLS[mode];
-      initialClockTime = parseTimeControl(matchTimeControl).initialTime;
-    }
-
-    const newMatch: Match = {
-      id: mId,
-      players: [challengerUid, challengedUid],
-      playerPair: [challengerUid, challengedUid].sort().join('_'),
-      challengeId,
-      whiteUid,
-      blackUid,
-      stake: mode === 'all_in' ? 0 : stake,
-      mode,
-      boardFEN: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
-      turn: 'w',
-      clocks: {
-        [whiteUid]: initialClockTime,
-        [blackUid]: initialClockTime,
-      },
-      status: 'active',
-      winnerUid: null,
-      createdAt: now,
-      finishedAt: null,
-      moves: [],
-      lastMoveAt: now,
-      timeControl: matchTimeControl,
-      ...(mode === 'all_in' ? { allInStakes: { [challengerUid]: challengerStake, [challengedUid]: challengedStake } } : {})
-    };
-
-    transaction.update(challengeDocRef, {
-      status: 'accepted',
-      matchId: mId,
-      acceptedAt: now
     });
-
-    const challengerFC = doc(db, 'users', challengerUid, 'friendlyChallenges', challengeId);
-    const challengedFC = doc(db, 'users', challengedUid, 'friendlyChallenges', challengeId);
-    const mirrorChallenge = {
-      challengeId,
-      challengerUid,
-      challengedUid,
-      mode,
-      stake,
-      status: 'accepted',
-      matchId: mId,
-      createdAt: challengeData.createdAt || now,
-      acceptedAt: now
-    };
-    transaction.set(challengerFC, mirrorChallenge, { merge: true });
-    transaction.set(challengedFC, mirrorChallenge, { merge: true });
-
-    return { matchId: mId, newMatch };
-  });
-
-  if ((res as any).error) {
-    throw new Error((res as any).error);
   }
 
-  const result = res as { matchId: string; newMatch: Match };
-  // Seed match room in RTDB
-  await set(ref(rtdb, `matches/${result.matchId}`), result.newMatch);
-  return result.matchId;
+  // Determine colors based on challenge choices
+  const colorChoice = challengeData?.colorChoice || 'random';
+  let isChallengerWhite = Math.random() < 0.5;
+  if (colorChoice === 'white') {
+    isChallengerWhite = true;
+  } else if (colorChoice === 'black') {
+    isChallengerWhite = false;
+  }
+  const whiteUid = isChallengerWhite ? challengerUid : challengedUid;
+  const blackUid = isChallengerWhite ? challengedUid : challengerUid;
+
+  let initialClockTime: number;
+  let matchTimeControl: string;
+  
+  if (mode === 'all_in') {
+    matchTimeControl = '10 | 5';
+    initialClockTime = parseTimeControl(matchTimeControl).initialTime;
+  } else {
+    matchTimeControl = STANDARD_TIME_CONTROLS[mode];
+    initialClockTime = parseTimeControl(matchTimeControl).initialTime;
+  }
+
+  const newMatch: Match = {
+    id: mId,
+    players: [challengerUid, challengedUid],
+    playerPair: [challengerUid, challengedUid].sort().join('_'),
+    challengeId,
+    whiteUid,
+    blackUid,
+    stake: mode === 'all_in' ? 0 : stake,
+    mode,
+    boardFEN: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+    turn: 'w',
+    clocks: {
+      [whiteUid]: initialClockTime,
+      [blackUid]: initialClockTime,
+    },
+    status: 'active',
+    winnerUid: null,
+    createdAt: now,
+    finishedAt: null,
+    moves: [],
+    lastMoveAt: now,
+    timeControl: matchTimeControl,
+    ...(mode === 'all_in' ? { allInStakes: { [challengerUid]: challengerStake, [challengedUid]: challengedStake } } : {})
+  };
+
+  const challengeObj = {
+    ...challengeData,
+    status: 'accepted',
+    matchId: mId,
+    acceptedAt: now
+  };
+
+  const updates: Record<string, any> = {};
+  updates[`challenges/${challengeId}`] = challengeObj;
+  updates[`user_challenges/${challengerUid}/${challengeId}`] = challengeObj;
+  updates[`user_challenges/${challengedUid}/${challengeId}`] = challengeObj;
+  updates[`matches/${mId}`] = newMatch;
+
+  await update(ref(rtdb), updates);
+  return mId;
 }

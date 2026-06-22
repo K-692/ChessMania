@@ -18,6 +18,7 @@ interface AuthContextType {
   user: FirebaseUser | null;
   profile: UserProfile | null;
   loading: boolean;
+  isLoggingOut: boolean;
   gameConfig: GameConfig | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
@@ -348,6 +349,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   const profileUnsubRef = useRef<(() => void) | null>(null);
 
@@ -445,8 +447,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Sign out
   const logout = async () => {
     try {
+      setIsLoggingOut(true);
       setLoading(true);
+      
+      // Delay logout slightly so user sees the "Securing Your Coins..." loading state
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
       if (auth.currentUser) {
+        // Mark user offline in RTDB explicitly
+        try {
+          const statusRef = rRef(rtdb, `status/${auth.currentUser.uid}`);
+          await rSet(statusRef, {
+            state: 'offline',
+            lastChanged: serverTimestamp(),
+            activeSessionId: ''
+          });
+        } catch (err) {
+          console.warn("Failed to mark user offline in RTDB on logout:", err);
+        }
+
         const timeoutPromise = new Promise<void>((_, reject) =>
           setTimeout(() => reject(new Error('Firestore write timeout')), 2000)
         );
@@ -480,8 +499,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearUnsavedCache();
     } catch (error) {
       console.error('Logout error:', error);
-      setLoading(false);
       throw error;
+    } finally {
+      setIsLoggingOut(false);
+      setLoading(false);
     }
   };
 
@@ -860,6 +881,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setupPresence();
+
+    return () => {
+      // Explicitly mark offline when user logs out or unmounts
+      rSet(statusRef, {
+        state: 'offline',
+        lastChanged: Date.now(),
+        activeSessionId: ''
+      }).catch(err => console.warn("Failed to clean up presence on logout/unmount:", err));
+    };
   }, [user]);
 
   return (
@@ -868,6 +898,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         loading,
+        isLoggingOut,
         gameConfig,
         login,
         logout,

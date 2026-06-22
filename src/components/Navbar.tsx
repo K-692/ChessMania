@@ -5,7 +5,8 @@ import { LogIn, LogOut, Volume2, VolumeX, Plus, Menu, X, Settings } from 'lucide
 import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref as rRef, onValue } from 'firebase/database';
+import { db, rtdb } from '../firebase';
 import { NetworkSignal } from './NetworkSignal';
 
 interface NavbarProps {
@@ -58,22 +59,27 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
     });
 
     let isChallengesInitial = true;
-    const qChallenges = query(
-      collection(db, 'users', user.uid, 'friendlyChallenges'),
-      where('status', '==', 'pending')
-    );
-    const unsubChallenges = onSnapshot(qChallenges, (snap) => {
-      setCCount(snap.size);
-      if (!isChallengesInitial) {
+    const userChallengesRef = rRef(rtdb, `user_challenges/${user.uid}`);
+    const unsubChallenges = onValue(userChallengesRef, (snap) => {
+      if (snap.exists()) {
+        const challenges = snap.val();
+        let count = 0;
         let hasNew = false;
-        snap.docChanges().forEach((change) => {
-          if (change.type === 'added') {
+        
+        for (const cid in challenges) {
+          const ch = challenges[cid];
+          if (ch.status === 'pending' && ch.challengedUid === user.uid) {
+            count++;
             hasNew = true;
           }
-        });
-        if (hasNew) {
+        }
+        
+        setCCount(count);
+        if (!isChallengesInitial && hasNew) {
           playNotifySound();
         }
+      } else {
+        setCCount(0);
       }
       isChallengesInitial = false;
     }, (err) => {

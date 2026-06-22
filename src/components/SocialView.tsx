@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { db } from '../firebase';
+import { db, rtdb } from '../firebase';
 import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { ref as rRef, update as rUpdate, onValue as rOnValue } from 'firebase/database';
 import { getBestAchievement } from '../utils/achievements';
 import { formatCoins } from '../utils/format';
 import { acceptFriendlyChallenge } from '../game/gameService';
@@ -196,26 +197,28 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       setFriendsProfiles(uProfiles);
     });
 
-    // Listen to friendly challenges mirrored under the user profile
-    const qChallenges = query(
-      collection(db, 'users', user.uid, 'friendlyChallenges'),
-      where('status', '==', 'pending')
-    );
-    const unsubChallenges = onSnapshot(qChallenges, async (snap) => {
+    // Listen to friendly challenges mirrored under the user profile in RTDB
+    const userChallengesRef = rRef(rtdb, `user_challenges/${user.uid}`);
+    const unsubChallenges = rOnValue(userChallengesRef, async (snap) => {
       const received: FriendlyChallenge[] = [];
       const sent: FriendlyChallenge[] = [];
       const neededUids: string[] = [];
 
-      for (const docSnap of snap.docs) {
-        const data = docSnap.data() as FriendlyChallenge;
-        data.id = docSnap.id;
+      if (snap.exists()) {
+        const dataMap = snap.val();
+        for (const cid in dataMap) {
+          const data = dataMap[cid] as FriendlyChallenge;
+          data.id = cid;
 
-        if (data.challengerUid === user.uid) {
-          sent.push(data);
-          neededUids.push(data.challengedUid);
-        } else {
-          received.push(data);
-          neededUids.push(data.challengerUid);
+          if (data.status === 'pending') {
+            if (data.challengerUid === user.uid) {
+              sent.push(data);
+              neededUids.push(data.challengedUid);
+            } else {
+              received.push(data);
+              neededUids.push(data.challengerUid);
+            }
+          }
         }
       }
 
@@ -437,9 +440,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     setChallengeError('');
 
     try {
-      const challengeCol = collection(db, 'challenges');
-      const newChallengeDocRef = doc(challengeCol);
-      const challengeId = newChallengeDocRef.id;
+      const challengeId = 'challenge_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
 
       const challengeObj = {
         challengeId,
@@ -453,15 +454,13 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
         ...(challengeType === 'friendly' ? { colorChoice: selectedColor } : {})
       };
 
-      await setDoc(newChallengeDocRef, challengeObj);
+      const updates: Record<string, any> = {};
+      updates[`challenges/${challengeId}`] = challengeObj;
+      updates[`user_challenges/${user.uid}/${challengeId}`] = challengeObj;
+      updates[`user_challenges/${activeChallengeFriend.uid}/${challengeId}`] = challengeObj;
 
-      const challengerFCDocRef = doc(db, 'users', user.uid, 'friendlyChallenges', challengeId);
-      const challengedFCDocRef = doc(db, 'users', activeChallengeFriend.uid, 'friendlyChallenges', challengeId);
-
-      await Promise.all([
-        setDoc(challengerFCDocRef, challengeObj),
-        setDoc(challengedFCDocRef, challengeObj)
-      ]);
+      const dbRef = rRef(rtdb);
+      await rUpdate(dbRef, updates);
 
       setActiveChallengeFriend(null);
     } catch (err: any) {
@@ -493,12 +492,13 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
   const handleDeclineChallenge = async (ch: FriendlyChallenge) => {
     try {
-      const batchUpdates = [
-        setDoc(doc(db, 'challenges', ch.id!), { status: 'declined' }, { merge: true }),
-        setDoc(doc(db, 'users', ch.challengerUid, 'friendlyChallenges', ch.id!), { status: 'declined' }, { merge: true }),
-        setDoc(doc(db, 'users', ch.challengedUid, 'friendlyChallenges', ch.id!), { status: 'declined' }, { merge: true })
-      ];
-      await Promise.all(batchUpdates);
+      const updates: Record<string, any> = {};
+      updates[`challenges/${ch.id}/status`] = 'declined';
+      updates[`user_challenges/${ch.challengerUid}/${ch.id}/status`] = 'declined';
+      updates[`user_challenges/${ch.challengedUid}/${ch.id}/status`] = 'declined';
+      
+      const dbRef = rRef(rtdb);
+      await rUpdate(dbRef, updates);
     } catch (err) {
       console.error('Failed to decline challenge:', err);
     }
@@ -518,7 +518,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
           className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-medium cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4" />
-          <span>Back to Play</span>
+          <span>Back to Dashboard</span>
         </button>
       </div>
 

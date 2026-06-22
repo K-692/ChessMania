@@ -102,7 +102,7 @@ export const LedgerHistory: React.FC<LedgerHistoryProps> = ({ onBack }) => {
           className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-medium"
         >
           <ChevronLeft className="w-4 h-4" />
-          <span>Back to Play</span>
+          <span>Back to Dashboard</span>
         </button>
 
         <button
