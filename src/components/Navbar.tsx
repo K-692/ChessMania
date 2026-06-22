@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
-import { LogIn, LogOut, Volume2, VolumeX, Plus, Menu, X } from 'lucide-react';
+import { LogIn, LogOut, Volume2, VolumeX, Plus, Menu, X, Settings } from 'lucide-react';
 
 import { getBestAchievement } from '../utils/achievements';
 import { getSoundSettings, updateSoundSettings, playNotifySound } from '../utils/sound';
@@ -124,7 +124,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                     currentView === 'dashboard' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Play
+                  Dashboard
                 </button>
                 <button
                   onClick={() => onNavigate('leaderboard')}
@@ -143,22 +143,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   Transactions
                 </button>
                 <button
-                  onClick={() => onNavigate('profile')}
-                  className={`text-sm font-medium transition-colors cursor-pointer ${
-                    currentView === 'profile' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Profile
-                </button>
-                <button
-                  onClick={() => onNavigate('settings')}
-                  className={`text-sm font-medium transition-colors cursor-pointer ${
-                    currentView === 'settings' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Settings
-                </button>
-                <button
                   onClick={() => onNavigate('social')}
                   className={`relative text-sm font-medium transition-colors cursor-pointer flex items-center ${
                     currentView === 'social' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
@@ -170,6 +154,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                       {pendingCount}
                     </span>
                   )}
+                </button>
+                <button
+                  onClick={() => onNavigate('settings')}
+                  className={`transition-colors cursor-pointer flex items-center ${
+                    currentView === 'settings' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Settings"
+                >
+                  <Settings className="w-4.5 h-4.5" />
                 </button>
 
                 {/* Wallet Info */}
@@ -338,7 +331,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   : 'text-slate-300 hover:bg-white/5 border border-transparent'
               }`}
             >
-              <span>Play Lounge</span>
+              <span>Dashboard</span>
             </button>
             <button
               onClick={() => {
@@ -368,32 +361,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
             </button>
             <button
               onClick={() => {
-                onNavigate('profile');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`text-left px-4 py-3 rounded-xl transition-all text-sm font-semibold flex items-center space-x-2 ${
-                currentView === 'profile'
-                  ? 'bg-violet-600/20 text-violet-300 border border-violet-500/25'
-                  : 'text-slate-300 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span>My Profile</span>
-            </button>
-            <button
-              onClick={() => {
-                onNavigate('settings');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`text-left px-4 py-3 rounded-xl transition-all text-sm font-semibold flex items-center space-x-2 ${
-                currentView === 'settings'
-                  ? 'bg-violet-600/20 text-violet-300 border border-violet-500/25'
-                  : 'text-slate-300 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              <span>Settings</span>
-            </button>
-            <button
-              onClick={() => {
                 onNavigate('social');
                 setIsMobileMenuOpen(false);
               }}
@@ -409,6 +376,20 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   {pendingCount}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => {
+                onNavigate('settings');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`text-left px-4 py-3 rounded-xl transition-all text-sm font-semibold flex items-center space-x-2 ${
+                currentView === 'settings'
+                  ? 'bg-violet-600/20 text-violet-300 border border-violet-500/25'
+                  : 'text-slate-300 hover:bg-white/5 border border-transparent'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              <span>Settings</span>
             </button>
           </div>
 

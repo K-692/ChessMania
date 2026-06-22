@@ -343,6 +343,6 @@ async function cleanExpiredMatchmaking() {
 setInterval(cleanExpiredMatchmaking, 5 * 60 * 1000);
 
 // Start Server
-app.listen(PORT, () => {
-  console.log(`Backend server is running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Backend server is running on http://127.0.0.1:${PORT}`);
 });

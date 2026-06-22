@@ -193,11 +193,11 @@ export const AddFundsModal: React.FC<AddFundsModalProps> = ({ isOpen, onClose })
 
     try {
       // Get base API URL. 
-      // If not configured, fall back to http://localhost:5001 when running on deployed hosting environment.
+      // If not configured, fall back to http://127.0.0.1:5001 when running on deployed hosting environment.
       let apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
       if (!apiBaseUrl) {
         const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        apiBaseUrl = isLocalhost ? '' : 'http://localhost:5001';
+        apiBaseUrl = isLocalhost ? '' : 'http://127.0.0.1:5001';
       }
 
       // 1. Call Express backend to create a Razorpay order
