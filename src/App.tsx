@@ -160,24 +160,34 @@ const AppContent: React.FC = () => {
   // Note: We count players whose state is explicitly 'online'. We avoid client-side
   // sliding timestamp threshold checks (e.g. comparing lastChanged to Date.now()) because
   // local client system clock skew can falsely mark active users as offline/stale.
-  // Firebase presence automatically handles setting state to 'offline' on disconnection
-  // and logout, making state checks robust and real-time.
+  // We guarantee that the current logged-in user is counted as active, even if their
+  // database status update is in-flight or delayed.
   useEffect(() => {
     const statusRef = rRef(rtdb, 'status');
     const unsubscribe = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
         const statuses = snapshot.val();
         let count = 0;
+        let isMeCounted = false;
 
         for (const uid in statuses) {
           const s = statuses[uid];
           if (s && s.state === 'online') {
             count++;
+            if (user && uid === user.uid) {
+              isMeCounted = true;
+            }
           }
         }
+
+        // If current user is logged in but not yet found as online in RTDB, count them
+        if (user && !isMeCounted) {
+          count++;
+        }
+
         setOnlineCount(Math.max(1, count));
       } else {
-        setOnlineCount(1);
+        setOnlineCount(user ? 1 : 0);
       }
     }, (err) => {
       console.warn("Error listening to presence status in RTDB:", err);
@@ -186,7 +196,7 @@ const AppContent: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [user]);
 
   // 1c. Monitor Hourly Reward countdown
   useEffect(() => {
