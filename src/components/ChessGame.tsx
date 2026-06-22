@@ -4,8 +4,9 @@ import { Chessboard } from 'react-chessboard';
 import { useAuth } from '../auth/AuthContext';
 import type { Match, UserProfile, MatchStatus } from '../types';
 import { makeMove, submitGameAction, settleMatchPayoutAndElo, calculateElo } from '../game/gameService';
-import { doc, onSnapshot, getDoc, updateDoc, collection, query, orderBy, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { ref, onValue, set, update, push, remove, onDisconnect } from 'firebase/database';
+import { db, rtdb } from '../firebase';
 import { Clock, ShieldAlert, Award, ArrowLeft, Settings, X, Send, Check, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatCoins } from '../utils/format';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playLoseSound, getSoundSettings, updateSoundSettings, playNotifySound, playIllegalMoveSound } from '../utils/sound';
@@ -189,33 +190,35 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => clearInterval(interval);
   }, []);
 
-  // Update client presence and heartbeat to Firestore (only if playing, not spectating)
+  // Update client presence and heartbeat to RTDB (only if playing, not spectating)
   useEffect(() => {
     if (!user || !match) return;
     const isSpectator = !match.players.includes(user.uid);
     if (isSpectator) return;
 
-    const matchRef = doc(db, 'matches', matchId);
+    const presenceRef = ref(rtdb, `matches/${matchId}/presence/${user.uid}`);
+    const heartbeatRef = ref(rtdb, `matches/${matchId}/heartbeats/${user.uid}`);
 
-    // Initial presence
-    updateDoc(matchRef, {
-      [`presence.${user.uid}`]: true,
-      [`heartbeats.${user.uid}`]: Date.now()
-    }).catch(console.warn);
+    // Initial presence and disconnect handler setup
+    const setupPresence = async () => {
+      try {
+        await onDisconnect(presenceRef).set(false);
+        await set(presenceRef, true);
+        await set(heartbeatRef, Date.now());
+      } catch (err) {
+        console.warn("RTDB presence setup in game failed:", err);
+      }
+    };
+    setupPresence();
 
     // 3-second heartbeat loops
     const heartbeatInterval = setInterval(() => {
-      updateDoc(matchRef, {
-        [`heartbeats.${user.uid}`]: Date.now()
-      }).catch(console.warn);
+      set(heartbeatRef, Date.now()).catch(console.warn);
     }, 3000);
 
     return () => {
       clearInterval(heartbeatInterval);
-      // Offline on cleanup
-      updateDoc(matchRef, {
-        [`presence.${user.uid}`]: false
-      }).catch(console.warn);
+      set(presenceRef, false).catch(console.warn);
     };
   }, [matchId, user, match?.players]);
 
@@ -271,13 +274,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     fetchProfiles();
   }, [match?.whiteUid, match?.blackUid, whiteProfile, blackProfile]);
 
-  // 2. Fetch match updates in real-time
+  // 2. Fetch match updates in real-time in RTDB
   useEffect(() => {
-    const matchRef = doc(db, 'matches', matchId);
+    const matchRef = ref(rtdb, `matches/${matchId}`);
 
-    const unsubscribe = onSnapshot(matchRef, async (docSnap) => {
-      if (!docSnap.exists()) return;
-      const matchData = docSnap.data() as Match;
+    const unsubscribe = onValue(matchRef, async (snapshot) => {
+      if (!snapshot.exists()) return;
+      const matchData = snapshot.val() as Match;
 
       // Track active transition to show result popup only when transitioning from active in-session
       if (matchData.status === 'active') {
@@ -391,22 +394,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
         if (!isOpponentStale) {
           if (matchData.disconnectedUid) {
-            updateDoc(matchRef, {
+            update(ref(rtdb, `matches/${matchId}`), {
               disconnectedUid: null,
               disconnectedAt: null,
               lastMoveAt: Date.now() // Offset clocks on reconnection
             }).catch(console.warn);
           }
           // Reset lastMoveAt when both join for the first time
-          if (matchData.moves.length === 0 && Math.abs(matchData.lastMoveAt - matchData.createdAt) < 5000) {
-            updateDoc(matchRef, {
+          if ((matchData.moves || []).length === 0 && Math.abs(matchData.lastMoveAt - matchData.createdAt) < 5000) {
+            update(ref(rtdb, `matches/${matchId}`), {
               lastMoveAt: Date.now()
             }).catch(console.warn);
           }
         } else {
           // Opponent detected as stale
           if (!matchData.disconnectedUid) {
-            updateDoc(matchRef, {
+            update(ref(rtdb, `matches/${matchId}`), {
               disconnectedUid: oppUid,
               disconnectedAt: Date.now()
             }).catch(console.warn);
@@ -557,7 +560,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               [user!.uid]: Math.max(0, match.clocks[user!.uid] - elapsed),
             };
 
-            updateDoc(doc(db, 'matches', matchId), {
+            update(ref(rtdb, `matches/${matchId}`), {
               boardFEN: nextFen,
               clocks: updatedClocks,
               status,
@@ -648,11 +651,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
       setReconnectCountdown(time);
 
       // Execute timeout victory if 1 minute limit exceeded
-      if (isOpponentStale && match.moves.length === 0) {
+      if (isOpponentStale && (match.moves || []).length === 0) {
         const elapsed = now - match.createdAt;
         if (elapsed > 60000) {
           if (user?.uid) {
-            updateDoc(doc(db, 'matches', matchId), {
+            update(ref(rtdb, `matches/${matchId}`), {
               status: 'timeout',
               winnerUid: user.uid,
               finishedAt: now,
@@ -666,7 +669,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
         if (elapsed > 60000) {
           const winnerUid = match.disconnectedUid === match.whiteUid ? match.blackUid : match.whiteUid;
           if (user?.uid === winnerUid) {
-            updateDoc(doc(db, 'matches', matchId), {
+            update(ref(rtdb, `matches/${matchId}`), {
               status: 'timeout',
               winnerUid: winnerUid,
               finishedAt: now,
@@ -679,34 +682,27 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     return () => clearInterval(interval);
   }, [match, user, matchId]);
 
-  // Subscribe to game messages
+  // Subscribe to game messages in RTDB
   useEffect(() => {
     let isInitial = true;
-    const q = query(
-      collection(db, 'matches', matchId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
-    const unsubscribe = onSnapshot(q, (snap) => {
+    const chatRef = ref(rtdb, `chats/${matchId}`);
+    const unsubscribe = onValue(chatRef, (snapshot) => {
       const msgs: any[] = [];
-      snap.forEach((docSnap) => {
-        msgs.push({ id: docSnap.id, ...docSnap.data() });
-      });
+      if (snapshot.exists()) {
+        snapshot.forEach((child) => {
+          msgs.push({ id: child.key, ...child.val() });
+        });
+      }
       setGameMessages(msgs);
 
       if (!isInitial) {
-        let hasNewFromOther = false;
-        snap.docChanges().forEach((change) => {
-          if (change.type === 'added') {
-            const data = change.doc.data();
-            if (data.senderUid !== user?.uid) {
-              hasNewFromOther = true;
+        if (msgs.length > 0) {
+          const lastMsg = msgs[msgs.length - 1];
+          if (lastMsg.senderUid !== user?.uid) {
+            playNotifySound();
+            if (activeRightTab !== 'chat') {
+              setUnreadGameMsgs((prev) => prev + 1);
             }
-          }
-        });
-        if (hasNewFromOther) {
-          playNotifySound();
-          if (activeRightTab !== 'chat') {
-            setUnreadGameMsgs((prev) => prev + 1);
           }
         }
       }
@@ -726,14 +722,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
 
   const deleteGameMessages = async (id: string) => {
     try {
-      const q = collection(db, 'matches', id, 'messages');
-      const snap = await getDocs(q);
-      const deletePromises = snap.docs.map((docSnap) =>
-        deleteDoc(doc(db, 'matches', id, 'messages', docSnap.id))
-      );
-      await Promise.all(deletePromises);
+      // Remove match and chat from RTDB
+      await remove(ref(rtdb, `chats/${id}`));
+      await remove(ref(rtdb, `matches/${id}`));
     } catch (err) {
-      console.warn("Failed to delete game messages:", err);
+      console.warn("Failed to delete RTDB game nodes:", err);
     }
   };
 
@@ -741,8 +734,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
     if (match) {
       if (match.status === 'active' && !isSpectator) {
         try {
-          const matchRef = doc(db, 'matches', matchId);
-          await updateDoc(matchRef, {
+          await update(ref(rtdb, `matches/${matchId}`), {
             status: 'terminated',
             finishedAt: Date.now()
           });
@@ -808,7 +800,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
               [user!.uid]: Math.max(0, match.clocks[user!.uid] - elapsed),
             };
 
-            updateDoc(doc(db, 'matches', matchId), {
+            update(ref(rtdb, `matches/${matchId}`), {
               boardFEN: nextFen,
               clocks: updatedClocks,
               status,
@@ -1687,7 +1679,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ matchId, onExit }) => {
                         const text = gameMsgInput.trim();
                         setGameMsgInput('');
                         try {
-                          await addDoc(collection(db, 'matches', matchId, 'messages'), {
+                          const msgRef = push(ref(rtdb, `chats/${matchId}`));
+                          await set(msgRef, {
                             senderUid: user.uid,
                             text,
                             createdAt: Date.now()

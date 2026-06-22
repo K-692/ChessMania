@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
+import { getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'dummy-api-key',
@@ -9,6 +10,7 @@ const firebaseConfig = {
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'check-mate-6e0a7.appspot.com',
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || 'dummy-sender-id',
   appId: import.meta.env.VITE_FIREBASE_APP_ID || 'dummy-app-id',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://check-mate-6e0a7-default-rtdb.firebaseio.com',
 };
 
 const app = initializeApp(firebaseConfig);
@@ -21,4 +23,5 @@ googleProvider.setCustomParameters({
 });
 
 export const db = getFirestore(app);
+export const rtdb = getDatabase(app);
 export default app;

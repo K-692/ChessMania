@@ -1,5 +1,6 @@
-import { db } from '../firebase';
-import { doc, runTransaction, collection, getDoc, writeBatch } from 'firebase/firestore';
+import { db, rtdb } from '../firebase';
+import { doc, runTransaction, getDoc } from 'firebase/firestore';
+import { ref, set, runTransaction as rtdbTransaction } from 'firebase/database';
 import type { Match, UserProfile, GameMode } from '../types';
 import { parseTimeControl, STANDARD_TIME_CONTROLS } from '../matchmaking/matchmakingService';
 
@@ -52,7 +53,7 @@ export function calculateElo(
 }
 
 /**
- * Executes a move, updating the board FEN, move log, active turn, and clocks.
+ * Executes a move in RTDB, updating the board FEN, move log, active turn, and clocks.
  */
 export async function makeMove(
   matchId: string,
@@ -60,143 +61,107 @@ export async function makeMove(
   newFen: string,
   sanMove: string
 ): Promise<void> {
-  const matchDocRef = doc(db, 'matches', matchId);
+  const matchRef = ref(rtdb, `matches/${matchId}`);
   const now = Date.now();
 
-  const matchSnap = await getDoc(matchDocRef);
-  if (!matchSnap.exists()) {
-    throw new Error('Match does not exist');
-  }
+  const txResult = await rtdbTransaction(matchRef, (matchData) => {
+    if (!matchData) return undefined;
+    if (matchData.status !== 'active') return undefined; // match not active
 
-  const matchData = matchSnap.data() as Match;
+    const expectedPlayer = matchData.turn === 'w' ? matchData.whiteUid : matchData.blackUid;
+    if (playerUid !== expectedPlayer) return undefined; // not player's turn
 
-  // Guard: Ensure match is still active
-  if (matchData.status !== 'active') {
-    throw new Error('Match has already finished');
-  }
+    // Compute clock elapsed time and add increment
+    const elapsed = now - matchData.lastMoveAt;
+    const increment = matchData.timeControl 
+      ? parseTimeControl(matchData.timeControl).increment 
+      : getIncrementForMode(matchData.mode);
+    const remainingTime = Math.max(0, matchData.clocks[playerUid] - elapsed) + increment;
 
-  // Guard: Ensure correct player turn
-  const expectedPlayer = matchData.turn === 'w' ? matchData.whiteUid : matchData.blackUid;
-  if (playerUid !== expectedPlayer) {
-    throw new Error('Not your turn');
-  }
+    const updatedClocks = {
+      ...matchData.clocks,
+      [playerUid]: remainingTime,
+    };
 
-  // Compute clock elapsed time and add timeControl increment
-  const elapsed = now - matchData.lastMoveAt;
-  const increment = matchData.timeControl 
-    ? parseTimeControl(matchData.timeControl).increment 
-    : getIncrementForMode(matchData.mode);
-  const remainingTime = Math.max(0, matchData.clocks[playerUid] - elapsed) + increment;
+    if (remainingTime <= 0) {
+      const opponentUid = playerUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
+      matchData.clocks = updatedClocks;
+      matchData.status = 'timeout';
+      matchData.winnerUid = opponentUid;
+      matchData.finishedAt = now;
+      return matchData;
+    }
 
-  const updatedClocks = {
-    ...matchData.clocks,
-    [playerUid]: remainingTime,
-  };
-
-  const batch = writeBatch(db);
-
-  // If clock hit 0, settle the match as a timeout
-  if (remainingTime <= 0) {
-    const opponentUid = playerUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
-    batch.update(matchDocRef, {
+    const nextTurn = matchData.turn === 'w' ? 'b' : 'w';
+    const updatedMoves = [...(matchData.moves || []), sanMove];
+    const newMoveDetail = {
+      san: sanMove,
+      playedBy: playerUid,
+      playedAt: now,
       clocks: updatedClocks,
-      status: 'timeout',
-      winnerUid: opponentUid,
-      finishedAt: now,
-    });
-    await batch.commit();
-    return;
+    };
+    const updatedMoveDetails = [...(matchData.moveDetails || []), newMoveDetail];
+
+    matchData.boardFEN = newFen;
+    matchData.turn = nextTurn;
+    matchData.moves = updatedMoves;
+    matchData.moveDetails = updatedMoveDetails;
+    matchData.clocks = updatedClocks;
+    matchData.lastMoveAt = now;
+
+    return matchData;
+  });
+
+  if (!txResult.committed) {
+    throw new Error('Failed to commit move: invalid turn or match inactive');
   }
-
-  // Update state for next turn
-  const nextTurn = matchData.turn === 'w' ? 'b' : 'w';
-  const updatedMoves = [...matchData.moves, sanMove];
-
-  const newMoveDetail = {
-    san: sanMove,
-    playedBy: playerUid,
-    playedAt: now,
-    clocks: updatedClocks,
-  };
-  const updatedMoveDetails = [...(matchData.moveDetails || []), newMoveDetail];
-
-  batch.update(matchDocRef, {
-    boardFEN: newFen,
-    turn: nextTurn,
-    moves: updatedMoves,
-    moveDetails: updatedMoveDetails,
-    clocks: updatedClocks,
-    lastMoveAt: now,
-  });
-
-  const nextMoveIndex = matchData.moves.length;
-  const moveDocRef = doc(collection(db, 'matches', matchId, 'moves'), String(nextMoveIndex));
-  batch.set(moveDocRef, {
-    san: sanMove,
-    fen: newFen,
-    playedBy: playerUid,
-    playedAt: now,
-    index: nextMoveIndex
-  });
-
-  await batch.commit();
 }
 
 /**
- * Offers a draw or handles resignation/draw agreements.
+ * Offers a draw or handles resignation/draw agreements in RTDB.
  */
 export async function submitGameAction(
   matchId: string,
   playerUid: string,
   action: 'resign' | 'offer-draw' | 'accept-draw'
 ): Promise<void> {
-  const matchDocRef = doc(db, 'matches', matchId);
+  const matchRef = ref(rtdb, `matches/${matchId}`);
+  const now = Date.now();
 
-  await runTransaction(db, async (transaction) => {
-    const matchSnap = await transaction.get(matchDocRef);
-    if (!matchSnap.exists()) {
-      throw new Error('Match does not exist');
-    }
-
-    const matchData = matchSnap.data() as Match;
-    if (matchData.status !== 'active') {
-      throw new Error('Match is not active');
-    }
+  const txResult = await rtdbTransaction(matchRef, (matchData) => {
+    if (!matchData) return undefined;
+    if (matchData.status !== 'active') return undefined;
 
     const opponentUid = playerUid === matchData.whiteUid ? matchData.blackUid : matchData.whiteUid;
-    const now = Date.now();
 
     if (action === 'resign') {
-      // Direct opponent win
-      transaction.update(matchDocRef, {
-        status: 'resigned',
-        winnerUid: opponentUid,
-        finishedAt: now,
-      });
+      matchData.status = 'resigned';
+      matchData.winnerUid = opponentUid;
+      matchData.finishedAt = now;
     } else if (action === 'offer-draw') {
       const currentOffers = matchData.drawOffers || [];
       if (!currentOffers.includes(playerUid)) {
-        transaction.update(matchDocRef, {
-          drawOffers: [...currentOffers, playerUid],
-        });
+        matchData.drawOffers = [...currentOffers, playerUid];
       }
     } else if (action === 'accept-draw') {
       const currentOffers = matchData.drawOffers || [];
       if (currentOffers.includes(opponentUid)) {
-        transaction.update(matchDocRef, {
-          status: 'draw',
-          winnerUid: null,
-          finishedAt: now,
-        });
+        matchData.status = 'draw';
+        matchData.winnerUid = null;
+        matchData.finishedAt = now;
       }
     }
+    return matchData;
   });
+
+  if (!txResult.committed) {
+    throw new Error('Failed to submit game action');
+  }
 }
 
 /**
  * Atomically settles the coin payouts and Elo updates of a completed game.
- * Guarantees idempotency by checking and switching match.status from active/resigned/timeout/etc.
- * to settled, or using a settled flag.
+ * Uses RTDB transaction for idempotency.
  */
 export async function settleMatchPayoutAndElo(
   matchId: string,
@@ -210,39 +175,31 @@ export async function settleMatchPayoutAndElo(
   practice?: boolean;
   matchRecord?: any;
 } | null> {
-  const matchDocRef = doc(db, 'matches', matchId);
+  const matchRef = ref(rtdb, `matches/${matchId}`);
   const now = Date.now();
 
   let matchData: any = null;
 
-  // Atomically mark match as settled
-  await runTransaction(db, async (transaction) => {
-    const matchSnap = await transaction.get(matchDocRef);
-    if (!matchSnap.exists()) return;
+  // Atomically mark match as settled in RTDB
+  const txResult = await rtdbTransaction(matchRef, (currentData) => {
+    if (!currentData) return undefined;
+    if (currentData.settled === true) return undefined; // already settled
 
-    const data = matchSnap.data() as Match;
-
-    // Guard: Only settle if ended and not yet settled
-    if ((data as any).settled === true) {
-      return;
-    }
-
-    const isDraw = data.status === 'draw' || data.status === 'stalemate';
-    const isTerminated = data.status === 'terminated';
-    const hasWinner = !isDraw && !isTerminated && !!data.winnerUid;
+    const isDraw = currentData.status === 'draw' || currentData.status === 'stalemate';
+    const isTerminated = currentData.status === 'terminated';
+    const hasWinner = !isDraw && !isTerminated && !!currentData.winnerUid;
 
     if (!isDraw && !isTerminated && !hasWinner) {
-      return;
+      return undefined; // game not ended yet
     }
 
-    matchData = data;
-    transaction.update(matchDocRef, {
-      settled: true,
-      finishedAt: now,
-    });
+    matchData = { ...currentData };
+    currentData.settled = true;
+    currentData.finishedAt = now;
+    return currentData;
   });
 
-  if (!matchData) return null;
+  if (!txResult.committed || !matchData) return null;
 
   if (matchData.mode === 'practice') {
     return { practice: true };
@@ -313,7 +270,6 @@ export async function settleMatchPayoutAndElo(
   const newBalance = Math.round((myBalance + myPayout) * 100) / 100;
   const newTotalCoins = Math.round(((currentUserProfile.totalCoinsEarned || myBalance) + myEarned) * 100) / 100;
 
-  // Increments: only increment play count if the match was won by current user AND is not a friendly challenge
   const myCounts = currentUserProfile.gameplayCounts || {};
   const wonMatch = matchData.winnerUid === myUid;
   const isFriendly = !!matchData.challengeId;
@@ -357,7 +313,6 @@ export async function settleMatchPayoutAndElo(
     updatedAt: now
   };
 
-  // Reset hourly reward timer if balance fell below 1000 from >= 1000
   if (newBalance < 1000 && myBalance >= 1000) {
     profileUpdates.lastHourlyRewardAt = now;
   }
@@ -398,7 +353,6 @@ export async function settleMatchPayoutAndElo(
     };
   }
 
-  // Handle H2H Friend Stats Update
   if (addCachedFriendUpdate && !isTerminated) {
     const friendDocRef = doc(db, 'users', myUid, 'friends', opponentUid);
     const friendSnap = await getDoc(friendDocRef);
@@ -436,7 +390,7 @@ export async function settleMatchPayoutAndElo(
 }
 
 /**
- * Accept a friendly challenge atomically. Deducts stakes, writes ledgers, and seeds match document.
+ * Accept a friendly challenge atomically. Deducts stakes, writes ledgers, and seeds match document in RTDB.
  */
 export async function acceptFriendlyChallenge(
   challengeId: string,
@@ -448,12 +402,12 @@ export async function acceptFriendlyChallenge(
   const challengeDocRef = doc(db, 'challenges', challengeId);
   const challengerUserRef = doc(db, 'users', challengerUid);
   const challengedUserRef = doc(db, 'users', challengedUid);
-  const matchesCol = collection(db, 'matches');
-  const newMatchDocRef = doc(matchesCol);
-  const mId = newMatchDocRef.id;
+  
+  // We generate a match ID
+  const mId = 'match_challenge_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
   const now = Date.now();
 
-  return await runTransaction(db, async (transaction) => {
+  const res = await runTransaction(db, async (transaction) => {
     const challengeSnap = await transaction.get(challengeDocRef);
     if (!challengeSnap.exists()) {
       return { error: 'Challenge does not exist' };
@@ -476,7 +430,6 @@ export async function acceptFriendlyChallenge(
     const challengerBalance = challenger.currentBalance !== undefined ? challenger.currentBalance : challenger.bankBalance;
     const challengedBalance = challenged.currentBalance !== undefined ? challenged.currentBalance : challenged.bankBalance;
 
-    // Check balances
     const challengerStake = mode === 'all_in' ? challengerBalance : stake;
     const challengedStake = mode === 'all_in' ? challengedBalance : stake;
 
@@ -495,19 +448,17 @@ export async function acceptFriendlyChallenge(
       const updatedChallengerBalance = Math.round((challengerBalance - challengerStake) * 100) / 100;
       const updatedChallengedBalance = Math.round((challengedBalance - challengedStake) * 100) / 100;
 
-      // Commit profile balances
       transaction.update(challengerUserRef, {
         currentBalance: updatedChallengerBalance,
-        bankBalance: updatedChallengerBalance, // compatibility
+        bankBalance: updatedChallengerBalance,
         zeroBalanceAt: updatedChallengerBalance <= 0 ? now : null,
       });
       transaction.update(challengedUserRef, {
         currentBalance: updatedChallengedBalance,
-        bankBalance: updatedChallengedBalance, // compatibility
+        bankBalance: updatedChallengedBalance,
         zeroBalanceAt: updatedChallengedBalance <= 0 ? now : null,
       });
 
-      // Write transaction entries
       const challengerLedgerRef = doc(db, 'transactions', challengerUid + '_' + mId + '_debit');
       transaction.set(challengerLedgerRef, {
         id: challengerUid + '_' + mId + '_debit',
@@ -545,7 +496,6 @@ export async function acceptFriendlyChallenge(
       });
     }
 
-    // Setup match room
     const colorChoice = challengeData?.colorChoice || 'random';
     let isChallengerWhite = Math.random() < 0.5;
     if (colorChoice === 'white') {
@@ -560,7 +510,7 @@ export async function acceptFriendlyChallenge(
     let matchTimeControl: string;
     
     if (mode === 'all_in') {
-      matchTimeControl = '10 | 5'; // Default for friendly All-In challenge
+      matchTimeControl = '10 | 5';
       initialClockTime = parseTimeControl(matchTimeControl).initialTime;
     } else {
       matchTimeControl = STANDARD_TIME_CONTROLS[mode];
@@ -592,16 +542,12 @@ export async function acceptFriendlyChallenge(
       ...(mode === 'all_in' ? { allInStakes: { [challengerUid]: challengerStake, [challengedUid]: challengedStake } } : {})
     };
 
-    transaction.set(newMatchDocRef, newMatch);
-
-    // Update challenge status
     transaction.update(challengeDocRef, {
       status: 'accepted',
       matchId: mId,
       acceptedAt: now
     });
 
-    // Mirror to subcollections users/{uid}/friendlyChallenges/{challengeId}
     const challengerFC = doc(db, 'users', challengerUid, 'friendlyChallenges', challengeId);
     const challengedFC = doc(db, 'users', challengedUid, 'friendlyChallenges', challengeId);
     const mirrorChallenge = {
@@ -618,11 +564,15 @@ export async function acceptFriendlyChallenge(
     transaction.set(challengerFC, mirrorChallenge, { merge: true });
     transaction.set(challengedFC, mirrorChallenge, { merge: true });
 
-    return { matchId: mId };
-  }).then((res) => {
-    if (res.error) {
-      throw new Error(res.error);
-    }
-    return res.matchId!;
+    return { matchId: mId, newMatch };
   });
+
+  if ((res as any).error) {
+    throw new Error((res as any).error);
+  }
+
+  const result = res as { matchId: string; newMatch: Match };
+  // Seed match room in RTDB
+  await set(ref(rtdb, `matches/${result.matchId}`), result.newMatch);
+  return result.matchId;
 }

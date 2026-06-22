@@ -5,8 +5,8 @@ import type { GameMode } from '../types';
 import { formatCoins } from '../utils/format';
 import { playMatchFoundSound } from '../utils/sound';
 import { joinQueue, leaveQueue, findMatch } from '../matchmaking/matchmakingService';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase';
+import { ref, onValue } from 'firebase/database';
+import { rtdb } from '../firebase';
 import { NetworkSignal } from './NetworkSignal';
 
 interface MatchmakingProps {
@@ -38,11 +38,11 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, timeContr
         setQueueId(id);
         setStatusText('Searching for opponent...');
 
-        // Listen for changes to our own queue entry in real-time
-        const queueRef = doc(db, 'matchQueues', id);
-        const unsubscribe = onSnapshot(queueRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
+        // Listen for changes to our own queue entry in real-time in RTDB
+        const queueRef = ref(rtdb, `match_queue/${id}`);
+        const unsubscribe = onValue(queueRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.val();
             if (data.status === 'matched' && data.matchId) {
               unsubscribe();
               playMatchFoundSound();

@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
-import { auth, googleProvider, db } from '../firebase';
+import { auth, googleProvider, db, rtdb } from '../firebase';
 import type { UserProfile } from '../types';
 import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
+import { ref as rRef, set as rSet, get as rGet, onDisconnect, serverTimestamp } from 'firebase/database';
 import { applyLazyHourlyRewardTx } from '../wallet/walletService';
 
 export interface GameConfig {
@@ -688,17 +689,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const userDocRef = doc(db, 'users', firebaseUser.uid);
+        // Check RTDB status to block double login
+        const statusRef = rRef(rtdb, `status/${firebaseUser.uid}`);
         try {
-          const docSnap = await getDoc(userDocRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            const sessionActive = data.sessionActive === true;
-            const activeSessionId = data.activeSessionId;
-            const lastActiveAt = data.lastActiveAt || 0;
-            const now = Date.now();
-
-            // Block session if another is active within the last 40 seconds
-            if (sessionActive && activeSessionId !== localSessionId && (now - lastActiveAt < 40000)) {
+          const statusSnap = await rGet(statusRef);
+          if (statusSnap.exists()) {
+            const statusData = statusSnap.val();
+            const isOnline = statusData.state === 'online';
+            const activeSessionId = statusData.activeSessionId;
+            
+            if (isOnline && activeSessionId !== localSessionId) {
               console.log('Blocked sign-in: Another active session detected on another device/browser.');
               if (profileUnsubRef.current) {
                 (profileUnsubRef.current as any)();
@@ -713,10 +713,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         } catch (err) {
-          console.warn("Failed to check active sessions on login:", err);
+          console.warn("Failed to check active sessions in RTDB on login:", err);
         }
 
-        // Set session active to true on login
+        // Set session active to true on login in Firestore
         try {
           await setDoc(userDocRef, {
             sessionActive: true,
@@ -829,28 +829,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, [user, gameConfig?.inactivityTimeoutMinutes]);
 
-  // Periodic Firestore presence heartbeat
+  // Realtime Database presence registration and onDisconnect setup
   useEffect(() => {
     if (!user) return;
     
-    const intervalId = setInterval(async () => {
-      const localSessionId = localStorage.getItem('checkmate_session_id');
-      if (!localSessionId) return;
-      
-      const userDocRef = doc(db, 'users', user.uid);
+    const statusRef = rRef(rtdb, `status/${user.uid}`);
+    
+    const setupPresence = async () => {
       try {
-        await setDoc(userDocRef, { 
-          lastActiveAt: Date.now(),
-          lastLoginAt: Date.now(),
-          sessionActive: true,
+        const localSessionId = localStorage.getItem('checkmate_session_id') || '';
+        const isOfflineForDatabase = {
+          state: 'offline',
+          lastChanged: serverTimestamp(),
+          activeSessionId: ''
+        };
+        const isOnlineForDatabase = {
+          state: 'online',
+          lastChanged: serverTimestamp(),
           activeSessionId: localSessionId
-        }, { merge: true });
-      } catch (err) {
-        console.warn("Heartbeat presence update failed:", err);
-      }
-    }, 20000);
+        };
 
-    return () => clearInterval(intervalId);
+        // When user disconnects, set status to offline automatically
+        await onDisconnect(statusRef).set(isOfflineForDatabase);
+        
+        // Set user to online
+        await rSet(statusRef, isOnlineForDatabase);
+      } catch (err) {
+        console.warn("Failed to register presence in RTDB:", err);
+      }
+    };
+
+    setupPresence();
   }, [user]);
 
   return (

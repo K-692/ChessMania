@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { initializeApp, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getDatabase } from 'firebase-admin/database';
 
 // Load environment variables
 dotenv.config();
@@ -43,22 +44,27 @@ app.use(express.json());
 
 // Initialize Firebase Admin SDK
 const serviceAccountPath = path.resolve('service-account.json');
+const databaseURL = process.env.FIREBASE_DATABASE_URL || 'https://check-mate-6e0a7-default-rtdb.firebaseio.com';
 if (fs.existsSync(serviceAccountPath)) {
   console.log('Found service-account.json. Initializing Firebase Admin...');
   const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf8'));
   initializeApp({
-    credential: cert(serviceAccount)
+    credential: cert(serviceAccount),
+    databaseURL
   });
 } else {
   console.log('service-account.json not found. Falling back to application default credentials...');
   try {
-    initializeApp();
+    initializeApp({
+      databaseURL
+    });
   } catch (error) {
     console.error('Failed to initialize Firebase Admin SDK. Webhook functionality will fail until authorized.', error);
   }
 }
 
 const db = getFirestore();
+const rtdb = getDatabase();
 
 // Coin packs metadata matching AddFundsModal.tsx configuration
 const COIN_PACKS = {
@@ -296,32 +302,37 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
-// Periodic matchmaking queue cleanup function
+// Periodic matchmaking queue cleanup function in RTDB
 async function cleanExpiredMatchmaking() {
   try {
     const now = Date.now();
     const oneMinAgo = now - 60000;
     const fiveMinsAgo = now - 300000;
-    const batch = db.batch();
+    
+    const dbRef = rtdb.ref('match_queue');
+    const snapshot = await dbRef.once('value');
+    if (!snapshot.exists()) return;
+
+    const queues = snapshot.val();
     let deleteCount = 0;
 
-    const statuses = ['waiting', 'matched', 'cancelled'];
-    for (const status of statuses) {
-      const snap = await db.collection('matchQueues').where('status', '==', status).get();
-      snap.forEach(doc => {
-        const data = doc.data();
-        const timestamp = data.createdAt || data.queuedAt || 0;
-        const limit = status === 'waiting' ? oneMinAgo : fiveMinsAgo;
+    for (const timeControl in queues) {
+      const entries = queues[timeControl];
+      for (const playerId in entries) {
+        const entry = entries[playerId];
+        const timestamp = entry.queuedAt || entry.createdAt || 0;
+        const status = entry.status || 'waiting';
+        const limit = (status === 'waiting') ? oneMinAgo : fiveMinsAgo;
+
         if (timestamp < limit) {
-          batch.delete(doc.ref);
+          await rtdb.ref(`match_queue/${timeControl}/${playerId}`).remove();
           deleteCount++;
         }
-      });
+      }
     }
 
     if (deleteCount > 0) {
-      await batch.commit();
-      console.log(`[Cleanup] Deleted ${deleteCount} expired matchmaking entries from firestore.`);
+      console.log(`[Cleanup] Deleted ${deleteCount} expired matchmaking entries from RTDB.`);
     }
   } catch (error) {
     console.error('[Cleanup] Failed to clean expired matchmaking entries:', error);
