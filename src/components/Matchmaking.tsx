@@ -92,10 +92,10 @@ export const Matchmaking: React.FC<MatchmakingProps> = ({ mode, stake, timeContr
 
     const performSearch = async () => {
       let currentBand = 100;
-      if (elapsedTime >= 50) {
-        currentBand = 1000;
+      if (elapsedTime >= 40) {
+        currentBand = 5000; // Virtually unlimited ELO difference to match any player (e.g. 0 Elo with 1200 Elo)
       } else {
-        currentBand = 100 + Math.floor(elapsedTime / 10) * 100;
+        currentBand = 100 + Math.floor(elapsedTime / 5) * 100;
       }
 
       setStatusText('Searching for opponent...');

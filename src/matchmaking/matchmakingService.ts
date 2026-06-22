@@ -133,7 +133,9 @@ export async function findMatch(
     const eligibleCandidates = mode === 'all_in'
       ? candidates
       : candidates.filter((c) => {
-          const ratingDiff = Math.abs(c.rating - myRating);
+          const candRating = c.rating !== undefined ? c.rating : 0;
+          const myRatingVal = myRating !== undefined ? myRating : 0;
+          const ratingDiff = Math.abs(candRating - myRatingVal);
           return ratingDiff <= ratingBand;
         });
 
