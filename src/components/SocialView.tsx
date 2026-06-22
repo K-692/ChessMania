@@ -523,16 +523,13 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       console.error('Failed to decline challenge:', err);
     }
   };
-
+  // Check if a friend is online by checking their RTDB status state directly.
+  // We avoid checking local computer vs server timestamps because client system clock
+  // skew can incorrectly flag an active friend as offline.
   const isFriendOnline = (friendUid: string) => {
     const status = onlineStatuses[friendUid];
-    if (!status) return false;
-    if (status.state !== 'online') return false;
-    const lastChanged = status.lastChanged || 0;
-    const now = Date.now();
-    return lastChanged === 0 || (now - lastChanged) < 45 * 1000; // 45 seconds sliding window
+    return status?.state === 'online';
   };
-
   // Pending sent challenge IDs (to avoid showing challenge button while one is pending)
   const pendingSentChallengeUids = new Set(sentChallenges.map((c) => c.challengedUid));
 

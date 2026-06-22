@@ -156,25 +156,23 @@ const AppContent: React.FC = () => {
       setIsSavingName(false);
     }
   };
-  // 1b. Real-time active players listener using Realtime Database presence status
+  // 1b. Real-time active players listener using Realtime Database presence status.
+  // Note: We count players whose state is explicitly 'online'. We avoid client-side
+  // sliding timestamp threshold checks (e.g. comparing lastChanged to Date.now()) because
+  // local client system clock skew can falsely mark active users as offline/stale.
+  // Firebase presence automatically handles setting state to 'offline' on disconnection
+  // and logout, making state checks robust and real-time.
   useEffect(() => {
     const statusRef = rRef(rtdb, 'status');
     const unsubscribe = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
         const statuses = snapshot.val();
         let count = 0;
-        const now = Date.now();
-        // Sliding timeout threshold of 45 seconds for any stale presence entries
-        const staleThreshold = 45 * 1000;
 
         for (const uid in statuses) {
           const s = statuses[uid];
-          if (s.state === 'online') {
-            const lastChanged = s.lastChanged || 0;
-            // Exclude entries that are older than 45 seconds if they are stale
-            if (lastChanged === 0 || (now - lastChanged) < staleThreshold) {
-              count++;
-            }
+          if (s && s.state === 'online') {
+            count++;
           }
         }
         setOnlineCount(Math.max(1, count));
