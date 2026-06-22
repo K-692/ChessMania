@@ -399,7 +399,7 @@ const AppContent: React.FC = () => {
 
             if (hasNewMessage && view !== 'game' && !isCurrentChatOpen) {
               const currentSettings = getSoundSettings();
-              if (!currentSettings.muted) {
+              if (currentSettings.effectsEnabled) {
                 playNotifySound();
               }
             }

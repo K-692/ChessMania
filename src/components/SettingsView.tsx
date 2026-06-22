@@ -148,7 +148,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   ? 'border-red-500/30 bg-red-500/10 text-red-400'
                   : 'border-white/5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5'
               }`}
-              title={settings.muted ? "Unmute All" : "Mute All"}
+              title={settings.muted ? "Unmute Music" : "Mute Music"}
             >
               {settings.muted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
             </button>

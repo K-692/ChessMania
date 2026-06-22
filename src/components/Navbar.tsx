@@ -250,7 +250,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                 <button
                   onClick={toggleMute}
                   className="p-2.5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5 rounded-xl border border-white/5 transition-all cursor-pointer flex items-center justify-center"
-                  title={muted ? "Unmute Sounds" : "Mute Sounds"}
+                  title={muted ? "Unmute Music" : "Mute Music"}
                 >
                   {muted ? <VolumeX className="w-4.5 h-4.5 text-red-400" /> : <Volume2 className="w-4.5 h-4.5" />}
                 </button>
@@ -305,7 +305,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               <button
                 onClick={toggleMute}
                 className="p-2.5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5 rounded-xl border border-white/5 transition-all cursor-pointer flex items-center justify-center"
-                title={muted ? "Unmute Sounds" : "Mute Sounds"}
+                title={muted ? "Unmute Music" : "Mute Music"}
               >
                 {muted ? <VolumeX className="w-4.5 h-4.5 text-red-400" /> : <Volume2 className="w-4.5 h-4.5" />}
               </button>
