@@ -195,7 +195,7 @@ const AppContent: React.FC = () => {
   // Loading indicator for authentication
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-[#0e0f12] text-[#f1f5f9]">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-transparent text-[#f1f5f9]">
         <div className="w-10 h-10 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
         <p className="mt-3 text-xs text-slate-500 font-mono animate-pulse">Initializing ChessMania...</p>
       </div>
@@ -205,7 +205,7 @@ const AppContent: React.FC = () => {
   // Not Authenticated: Landing Page
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#0d0e12] flex flex-col justify-between text-[#f1f5f9] select-none">
+      <div className="min-h-screen bg-transparent flex flex-col justify-between text-[#f1f5f9] select-none">
         <header className="px-6 py-5 border-b border-zinc-850 bg-zinc-950">
           <div className="max-w-6xl mx-auto flex items-center justify-between">
             <div className="flex items-center space-x-2">
@@ -252,8 +252,20 @@ const AppContent: React.FC = () => {
           </div>
         </main>
 
-        <footer className="w-full text-center py-5 text-[10px] text-slate-600 border-t border-white/5 bg-zinc-950/20">
-          <span>&copy; {new Date().getFullYear()} ChessMania. All rights reserved.</span>
+        <footer className="w-full text-center py-5 text-[10px] text-slate-600 border-t border-white/5 bg-zinc-950/40 backdrop-blur-sm space-y-1.5 animate-fade-in">
+          <div>&copy; {new Date().getFullYear()} ChessMania. All rights reserved.</div>
+          <div className="flex items-center justify-center gap-4 text-slate-500 font-medium">
+            <a 
+              href="https://github.com/K-692/ChessMania" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="hover:text-white transition-colors"
+            >
+              GitHub Repository
+            </a>
+            <span>•</span>
+            <span>Background music credit: <a href="https://suno.com" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Suno.AI</a></span>
+          </div>
         </footer>
       </div>
     );
@@ -264,7 +276,7 @@ const AppContent: React.FC = () => {
 
   // Authenticated Router
   return (
-    <div className="min-h-screen bg-[#0d0e12] flex flex-col">
+    <div className="min-h-screen bg-transparent flex flex-col">
       <Navbar
         onNavigate={(v) => {
           setView(v);
