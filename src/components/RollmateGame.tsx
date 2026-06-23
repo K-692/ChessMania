@@ -683,13 +683,33 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
             await finalizeGame(opponentUid, currentState.moveHistory ?? [], 'checkmate');
           }
         } else {
-          // Player remains in check, must roll again. We keep diceRolled = false so they can roll again.
-          setStatusMessage(`Invalid roll: ${getPieceTypeName(pieceType)} cannot resolve check. Roll again!`);
-          setTimeout(() => setStatusMessage(''), 4000);
+          // In check, but the rolled piece cannot resolve the check.
+          // Under the rules, the turn passes to the opponent immediately.
+          const skipRecord: RollmateMoveRecord = {
+            moveNumber: (currentState.moveCount ?? 0) + 1,
+            san: `(skip)`,
+            from: '',
+            to: '',
+            fen: currentState.fen,
+            diceRoll: faceIndex,
+            pieceType,
+            timestamp: Date.now(),
+            skipped: true,
+          };
+
+          const newHistory = [...(currentState.moveHistory ?? []), skipRecord];
+          setStatusMessage(`Cannot resolve check with ${getPieceTypeName(pieceType)} — turn skipped!`);
+          setTimeout(() => setStatusMessage(''), 3000);
+
+          const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
           await rSet(stateRef, {
             ...currentState,
+            fen: flipFenActiveColor(currentState.fen),
             diceRoll: faceIndex,
             diceRolled: false,
+            turn: nextTurn,
+            moveHistory: newHistory,
+            moveCount: (currentState.moveCount ?? 0) + 1,
           });
         }
       } else {
