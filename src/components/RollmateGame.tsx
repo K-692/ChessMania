@@ -403,6 +403,11 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
    * authoritative new state.
    */
   const [localBoardFen, setLocalBoardFen] = useState<string | null>(null);
+  
+  // ── Interaction flow control refs to prevent double move executions and double sounds ──────
+  const justDroppedRef = useRef(false);
+  const lastExecutedMoveCountRef = useRef(-1);
+
 
   // ── Replay mode ─────────────────────────────────────────────────────────────
   const [replayIndex, setReplayIndex] = useState<number>(-1); // -1 = live
@@ -469,6 +474,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
   // ── Load match data + profiles ─────────────────────────────────────────────
   useEffect(() => {
+    // Reset interaction guards on match change
+    lastExecutedMoveCountRef.current = -1;
+    justDroppedRef.current = false;
+
     const matchRef = rRef(rtdb, `matches/${matchId}`);
     const unsub = rOnValue(matchRef, async (snap) => {
       if (!snap.exists()) return;
@@ -566,6 +575,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   // ── Dice roll handler ─────────────────────────────────────────────────────
   const handleRollDice = useCallback(async () => {
     if (!isMyTurn || gameState?.diceRolled || rolling || !myColor) return;
+
+    // Reset interaction guards for this turn
+    lastExecutedMoveCountRef.current = -1;
+    justDroppedRef.current = false;
 
     setRolling(true);
     setLocalDiceResult(null);
@@ -752,6 +765,12 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     const currentState = gameStateRef.current;
     if (!currentState || !myColor || !diceRolledPieceType) return false;
 
+    // Check if we already executed a move for this turn count to prevent duplicate execution
+    const currentCount = currentState.moveCount ?? 0;
+    if (lastExecutedMoveCountRef.current === currentCount) {
+      return false;
+    }
+
     // Create a temporary chess instance with the correct active color.
     // This is the critical fix: if the stored FEN's active color differs from
     // myColor (due to a skip or other sync issue), the shared chess instance
@@ -793,6 +812,9 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       }
 
       if (tempChess.isCheck()) playCheckSound();
+
+      // Guard against double execution on the same turn
+      lastExecutedMoveCountRef.current = currentCount;
 
       setSelectedSquare(null);
       setCustomSquareStyles({});
@@ -1148,6 +1170,8 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                       return pColor === myColor && pType === diceRolledPieceType;
                     },
                     onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
+                      // Set the drop flag so that the subsequent onSquareClick click event is ignored
+                      justDroppedRef.current = true;
                       if (!targetSquare) return false;
                       // piece.pieceType is a string like "wP" or "bN" (react-chessboard v5)
                       const pColor = piece.pieceType[0].toLowerCase();
@@ -1159,6 +1183,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                       return executeMoveIfLegal(sourceSquare, targetSquare);
                     },
                     onSquareClick: isReplayMode ? undefined : ({ square }) => {
+                      if (justDroppedRef.current) {
+                        justDroppedRef.current = false;
+                        return;
+                      }
                       handleSquareClick(square);
                     },
                   }}
