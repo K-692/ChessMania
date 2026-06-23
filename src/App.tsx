@@ -7,7 +7,7 @@ import { ProfileView } from './components/ProfileView';
 import { RollmateGame } from './components/RollmateGame';
 import type { UserProfile } from './types';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { ref as rRef, onValue, update as rUpdate } from 'firebase/database';
+import { ref as rRef, onValue, update as rUpdate, get as rGet } from 'firebase/database';
 import { db, rtdb } from './firebase';
 import { Swords, Users, X, Sparkles, Volume2, VolumeX } from 'lucide-react';
 import { getSoundSettings, updateSoundSettings } from './utils/sound';
@@ -135,21 +135,52 @@ const AppContent: React.FC = () => {
       if (!snap.exists()) return;
       const challenges = snap.val();
       const now = Date.now();
-      for (const cid in challenges) {
-        const ch = challenges[cid];
-        // Skip if already processed in this session
-        if (processedChallengeIds.current.has(cid)) continue;
-        // Skip old challenges (older than 10 minutes) — prevents stale state leaks
-        if (ch.createdAt && now - ch.createdAt > TEN_MINUTES_MS) {
-          processedChallengeIds.current.add(cid);
-          continue;
+      
+      const processChallenges = async () => {
+        for (const cid in challenges) {
+          const ch = challenges[cid];
+          // Skip if already processed in this session
+          if (processedChallengeIds.current.has(cid)) continue;
+          // Skip old challenges (older than 10 minutes) — prevents stale state leaks
+          if (ch.createdAt && now - ch.createdAt > TEN_MINUTES_MS) {
+            processedChallengeIds.current.add(cid);
+            continue;
+          }
+          if (ch.status === 'accepted' && ch.matchId) {
+            // Defense-in-depth: check if match has already ended
+            try {
+              const matchStateRef = rRef(rtdb, `matches/${ch.matchId}/gameState`);
+              const matchStateSnap = await rGet(matchStateRef);
+              if (matchStateSnap.exists()) {
+                const mState = matchStateSnap.val();
+                if (mState && (mState.status === 'completed' || mState.status === 'terminated')) {
+                  processedChallengeIds.current.add(cid);
+                  // Update the challenge status to completed since the game has ended
+                  const updates: Record<string, any> = {};
+                  updates[`challenges/${cid}/status`] = 'completed';
+                  updates[`user_challenges/${user.uid}/${cid}/status`] = 'completed';
+                  if (ch.challengerUid) {
+                    updates[`user_challenges/${ch.challengerUid}/${cid}/status`] = 'completed';
+                  }
+                  if (ch.challengedUid) {
+                    updates[`user_challenges/${ch.challengedUid}/${cid}/status`] = 'completed';
+                  }
+                  await rUpdate(rRef(rtdb), updates);
+                  continue;
+                }
+              }
+            } catch (err) {
+              console.warn("Failed to verify match status in challenge listener:", err);
+            }
+
+            processedChallengeIds.current.add(cid);
+            setActiveMatchId(ch.matchId);
+            setView('game');
+          }
         }
-        if (ch.status === 'accepted' && ch.matchId) {
-          processedChallengeIds.current.add(cid);
-          setActiveMatchId(ch.matchId);
-          setView('game');
-        }
-      }
+      };
+
+      processChallenges().catch(console.error);
     });
 
     return () => unsubscribe();
@@ -188,12 +219,20 @@ const AppContent: React.FC = () => {
     }
   };
 
-  // Dynamic background image selection based on active tab/view
+  // Dynamic background image and scroll prevention based on active tab/view
   useEffect(() => {
     if (user && view === 'profile') {
       document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.6) 0%, rgba(13, 14, 18, 0.8) 100%), url('/chess_king_neon.png')";
     } else {
       document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.6) 0%, rgba(13, 14, 18, 0.8) 100%), url('/chess_cinematic_bg.png')";
+    }
+
+    if (view === 'game') {
+      document.body.style.overflow = 'hidden';
+      document.body.style.height = '100vh';
+    } else {
+      document.body.style.overflow = 'unset';
+      document.body.style.height = 'unset';
     }
   }, [user, view]);
 
@@ -288,18 +327,20 @@ const AppContent: React.FC = () => {
 
   // Authenticated Router
   return (
-    <div className="min-h-screen bg-transparent flex flex-col">
-      <Navbar
-        onNavigate={(v) => {
-          setView(v);
-          setActiveMatchId(null);
-        }}
-        currentView={view}
-        isGameActive={view === 'game'}
-        unreadChatsCount={totalUnreadChats}
-      />
+    <div className={`bg-transparent flex flex-col ${view === 'game' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
+      {view !== 'game' && (
+        <Navbar
+          onNavigate={(v) => {
+            setView(v);
+            setActiveMatchId(null);
+          }}
+          currentView={view}
+          isGameActive={false}
+          unreadChatsCount={totalUnreadChats}
+        />
+      )}
 
-      <main className="flex-grow">
+      <main className="flex-grow min-h-0">
         
         {view === 'social' && (
           <SocialView

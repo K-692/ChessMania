@@ -423,7 +423,8 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
         status: 'active',
         winnerUid: null,
         createdAt: now,
-        finishedAt: null
+        finishedAt: null,
+        challengeId: ch.id
       };
 
       const challengeObj = {

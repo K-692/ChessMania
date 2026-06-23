@@ -81,7 +81,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
         const q = query(
           collection(db, 'matches'),
           where('players', 'array-contains', user.uid),
-          orderBy('finishedAt', 'desc'),
+          orderBy('createdAt', 'desc'),
           limit(10)
         );
         const querySnap = await getDocs(q);

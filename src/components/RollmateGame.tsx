@@ -645,32 +645,65 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     });
   }, [isMyTurn, gameState?.diceRolled, myColor, chess, matchId, diceRolledPieceType]);
 
-  // ── Board square click handler ────────────────────────────────────────────
-  const handleSquareClick = useCallback((square: string) => {
-    // Read live gameState via the ref to avoid stale closure
-    const currentState = gameStateRef.current;
-    if (!currentState?.diceRolled || !myColor || isReplayMode) return;
-    if (!diceRolledPieceType) return;
-    // Only allow moves on my turn
-    if (currentState.turn !== myColor || currentState.status !== 'active') return;
+  // ── Finalize game in Firestore ────────────────────────────────────────────
+  const finalizeGame = useCallback(async (
+    winnerUid: string | null,
+    history: RollmateMoveRecord[],
+    reason: string
+  ) => {
+    if (!matchData) return;
+    const now = Date.now();
 
-    const piece = chess.get(square as any);
+    try {
+      // 1. Save full match + move history to Firestore
+      await setDoc(doc(db, 'matches', matchId), {
+        id: matchId,
+        players: matchData.players,
+        whiteUid: matchData.whiteUid,
+        blackUid: matchData.blackUid,
+        mode: 'Rollmate',
+        status: 'completed',
+        winnerUid,
+        createdAt: matchData.createdAt || now,
+        finishedAt: now,
+        moveHistory: history,
+        totalMoves: history.length,
+        endReason: reason,
+      });
 
-    // Selecting a piece of the correct type
-    if (piece && piece.color === myColor && piece.type === diceRolledPieceType) {
-      setSelectedSquare(square);
-      if (showLegalMoves) {
-        setCustomSquareStyles(getLegalMoveSquares(chess, square, diceRolledPieceType, myColor));
+      // 2. Update player stats
+      const updateStats = async (uid: string, won: boolean, drew: boolean, p: UserProfile | null) => {
+        if (!p) return;
+        await setDoc(doc(db, 'users', uid), {
+          wins: (p.wins || 0) + (won ? 1 : 0),
+          losses: (p.losses || 0) + (!won && !drew ? 1 : 0),
+          draws: (p.draws || 0) + (drew ? 1 : 0),
+          totalGamesPlayed: (p.totalGamesPlayed || 0) + 1,
+          updatedAt: now,
+        }, { merge: true });
+      };
+
+      const isDraw = winnerUid === null;
+      await Promise.all([
+        updateStats(matchData.whiteUid, winnerUid === matchData.whiteUid, isDraw, whiteProfile),
+        updateStats(matchData.blackUid, winnerUid === matchData.blackUid, isDraw, blackProfile),
+      ]);
+
+      // 3. Clean up challenge references
+      if (matchData.challengeId) {
+        await rSet(rRef(rtdb, `challenges/${matchData.challengeId}/status`), 'completed');
+        await rSet(rRef(rtdb, `user_challenges/${matchData.whiteUid}/${matchData.challengeId}/status`), 'completed');
+        await rSet(rRef(rtdb, `user_challenges/${matchData.blackUid}/${matchData.challengeId}/status`), 'completed');
       }
-      return;
-    }
 
-    // Attempting a move from selected square
-    if (selectedSquare) {
-      executeMoveIfLegal(selectedSquare, square);
-    }
-  }, [myColor, chess, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves]);
+      // 4. Delete session chat from RTDB (session-only)
+      await rRemove(rRef(rtdb, `matches/${matchId}/chat`));
 
+      setGameResult({ winnerUid, reason });
+    } catch (err) {
+      console.error('Failed to finalize game:', err);
+    }
+  }, [matchData, matchId, whiteProfile, blackProfile]);
 
   // ── Execute a legal move ──────────────────────────────────────────────────
   /**
@@ -798,7 +831,33 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       setCustomSquareStyles({});
       return false;
     }
-  }, [myColor, chess, matchId, diceRolledPieceType, user?.uid]);
+  }, [myColor, chess, matchId, diceRolledPieceType, user?.uid, finalizeGame]);
+
+  // ── Board square click handler ────────────────────────────────────────────
+  const handleSquareClick = useCallback((square: string) => {
+    // Read live gameState via the ref to avoid stale closure
+    const currentState = gameStateRef.current;
+    if (!currentState?.diceRolled || !myColor || isReplayMode) return;
+    if (!diceRolledPieceType) return;
+    // Only allow moves on my turn
+    if (currentState.turn !== myColor || currentState.status !== 'active') return;
+
+    const piece = chess.get(square as any);
+
+    // Selecting a piece of the correct type
+    if (piece && piece.color === myColor && piece.type === diceRolledPieceType) {
+      setSelectedSquare(square);
+      if (showLegalMoves) {
+        setCustomSquareStyles(getLegalMoveSquares(chess, square, diceRolledPieceType, myColor));
+      }
+      return;
+    }
+
+    // Attempting a move from selected square
+    if (selectedSquare) {
+      executeMoveIfLegal(selectedSquare, square);
+    }
+  }, [myColor, chess, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves, executeMoveIfLegal]);
 
   // ── Handle promotion choice ───────────────────────────────────────────────
   const handlePromotionSelect = useCallback((piece: 'q' | 'r' | 'b' | 'n') => {
@@ -807,66 +866,6 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     setPromotionPending(null);
     executeMoveIfLegal(from, to, piece);
   }, [promotionPending, executeMoveIfLegal]);
-
-  // ── Finalize game in Firestore ────────────────────────────────────────────
-  const finalizeGame = useCallback(async (
-    winnerUid: string | null,
-    history: RollmateMoveRecord[],
-    reason: string
-  ) => {
-    if (!matchData) return;
-    const now = Date.now();
-
-    try {
-      // 1. Save full match + move history to Firestore
-      await setDoc(doc(db, 'matches', matchId), {
-        id: matchId,
-        players: matchData.players,
-        whiteUid: matchData.whiteUid,
-        blackUid: matchData.blackUid,
-        mode: 'Rollmate',
-        status: 'completed',
-        winnerUid,
-        createdAt: matchData.createdAt || now,
-        finishedAt: now,
-        moveHistory: history,
-        totalMoves: history.length,
-        endReason: reason,
-      });
-
-      // 2. Update player stats
-      const updateStats = async (uid: string, won: boolean, drew: boolean, p: UserProfile | null) => {
-        if (!p) return;
-        await setDoc(doc(db, 'users', uid), {
-          wins: (p.wins || 0) + (won ? 1 : 0),
-          losses: (p.losses || 0) + (!won && !drew ? 1 : 0),
-          draws: (p.draws || 0) + (drew ? 1 : 0),
-          totalGamesPlayed: (p.totalGamesPlayed || 0) + 1,
-          updatedAt: now,
-        }, { merge: true });
-      };
-
-      const isDraw = winnerUid === null;
-      await Promise.all([
-        updateStats(matchData.whiteUid, winnerUid === matchData.whiteUid, isDraw, whiteProfile),
-        updateStats(matchData.blackUid, winnerUid === matchData.blackUid, isDraw, blackProfile),
-      ]);
-
-      // 3. Clean up challenge references
-      if (matchData.challengeId) {
-        await rSet(rRef(rtdb, `challenges/${matchData.challengeId}/status`), 'completed');
-        await rSet(rRef(rtdb, `user_challenges/${matchData.whiteUid}/${matchData.challengeId}/status`), 'completed');
-        await rSet(rRef(rtdb, `user_challenges/${matchData.blackUid}/${matchData.challengeId}/status`), 'completed');
-      }
-
-      // 4. Delete session chat from RTDB (session-only)
-      await rRemove(rRef(rtdb, `matches/${matchId}/chat`));
-
-      setGameResult({ winnerUid, reason });
-    } catch (err) {
-      console.error('Failed to finalize game:', err);
-    }
-  }, [matchData, matchId, whiteProfile, blackProfile]);
 
   // ── Resign handler ────────────────────────────────────────────────────────
   const handleResign = useCallback(async () => {
@@ -1019,13 +1018,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       </header>
 
       {/* ── Main Game Layout ──────────────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div className="flex-1 grid grid-cols-2 overflow-hidden min-h-0">
 
         {/* ── Left: Chess Board ───────────────────────────────────────────── */}
-        <div className="flex-1 flex items-center justify-center p-3 min-w-0 min-h-0">
-          <div className="flex flex-col w-full h-full max-w-[min(calc(100vh-120px),560px)] max-h-[calc(100vh-120px)] justify-center">
+        <div className="flex items-center justify-center p-6 min-w-0 min-h-0 bg-zinc-950/20">
+          <div className="flex flex-col w-full h-full justify-center items-center">
             {/* Opponent (top) */}
-            <div className="mb-1.5 shrink-0">
+            <div className="mb-2 shrink-0 w-full max-w-[calc(100vh-200px)]">
               <PlayerCard
                 profile={opponentProfile}
                 isActive={gameState?.turn !== myColor && !isGameOver}
@@ -1035,8 +1034,8 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
             </div>
 
             {/* Board */}
-            <div className="chessboard-container flex-1 min-h-0 relative" data-board-element>
-              <div className="w-full h-full">
+            <div className="chessboard-container flex-1 min-h-0 relative flex items-center justify-center w-full max-w-[calc(100vh-200px)] max-h-[calc(100vh-200px)]" data-board-element>
+              <div className="w-full aspect-square">
                 <Chessboard
                   options={{
                     position: boardFen,
@@ -1086,7 +1085,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
             </div>
 
             {/* My player (bottom) */}
-            <div className="mt-1.5 shrink-0">
+            <div className="mt-2 shrink-0 w-full max-w-[calc(100vh-200px)]">
               <PlayerCard
                 profile={myProfile}
                 isActive={isMyTurn && !isGameOver}
@@ -1098,7 +1097,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         </div>
 
         {/* ── Right Panel ─────────────────────────────────────────────────── */}
-        <div className="w-[280px] shrink-0 border-l border-zinc-800/60 flex flex-col bg-zinc-900/40 overflow-hidden min-h-0">
+        <div className="border-l border-zinc-800/60 flex flex-col bg-zinc-900/40 overflow-hidden min-h-0 w-full">
 
           {/* Panel Tab Switcher */}
           <div className="flex border-b border-zinc-800 shrink-0">
@@ -1340,26 +1339,24 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
           )}
 
           {/* Chat Panel */}
-          {activePanel === 'chat' && (
-            <div className="flex-1 flex flex-col p-2.5 min-h-0 overflow-hidden">
-              <div className="flex-1 overflow-y-auto min-h-0">
-                {user && (
-                  <GameChat
-                    matchId={matchId}
-                    currentUser={{ uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }}
-                    currentProfile={profile}
-                    disabled={isGameOver}
-                    onNewMessages={(count) => {
-                      // Only increment when chat panel is not active
-                      if (activePanel !== 'chat') {
-                        setUnreadChatCount(prev => prev + count);
-                      }
-                    }}
-                  />
-                )}
-              </div>
+          <div className={`flex-1 flex flex-col p-2.5 min-h-0 overflow-hidden ${activePanel !== 'chat' ? 'hidden' : ''}`}>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {user && (
+                <GameChat
+                  matchId={matchId}
+                  currentUser={{ uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }}
+                  currentProfile={profile}
+                  disabled={isGameOver}
+                  onNewMessages={(count) => {
+                    // Only increment when chat panel is not active
+                    if (activePanel !== 'chat') {
+                      setUnreadChatCount(prev => prev + count);
+                    }
+                  }}
+                />
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
