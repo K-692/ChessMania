@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db, rtdb } from '../firebase';
-import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDoc, getDocs, doc, setDoc, deleteDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import { ref as rRef, update as rUpdate, onValue as rOnValue } from 'firebase/database';
-import { getBestAchievement } from '../utils/achievements';
-import { formatCoins } from '../utils/format';
-import { acceptFriendlyChallenge } from '../game/gameService';
-import { UserPlus, UserCheck, ShieldAlert, Star, Gamepad2, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare, Eye } from 'lucide-react';
-import type { Friendship, UserProfile, FriendlyChallenge, Match, GameMode } from '../types';
+import { UserPlus, UserCheck, ShieldAlert, Star, Send, Check, X, ShieldCheck, ChevronLeft, Swords, Bell, MessageSquare } from 'lucide-react';
+import type { Friendship, UserProfile, FriendlyChallenge, Match } from '../types';
 import { ProfilePopup } from './ProfilePopup';
 
 interface SocialViewProps {
@@ -16,19 +13,6 @@ interface SocialViewProps {
   setOpenChatFriend: (friend: UserProfile | null) => void;
   unreadCounts: Record<string, number>;
 }
-
-const CHALLENGE_MODES = [
-  { id: 'beginner' as GameMode, label: 'Beginner', price: 100, tc: '15 min' },
-  { id: 'casual_rapid' as GameMode, label: 'Casual Rapid', price: 500, tc: '10 min' },
-  { id: 'standard_rapid' as GameMode, label: 'Standard Rapid', price: 2500, tc: '10 | 5' },
-  { id: 'competitive_rapid' as GameMode, label: 'Competitive Rapid', price: 10000, tc: '15 | 10' },
-  { id: 'classical_lite' as GameMode, label: 'Classical Lite', price: 25000, tc: '20 | 10' },
-  { id: 'blitz' as GameMode, label: 'Blitz', price: 50000, tc: '5 | 3' },
-  { id: 'competitive_blitz' as GameMode, label: 'Competitive Blitz', price: 100000, tc: '3 | 2' },
-  { id: 'bullet' as GameMode, label: 'Bullet', price: 500000, tc: '1 | 1' },
-  { id: 'arena_bullet' as GameMode, label: 'Arena Bullet', price: 1000000, tc: '1 min' },
-  { id: 'championship' as GameMode, label: 'Championship', price: 5000000, tc: '30 | 20' }
-];
 
 export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, setOpenChatFriend, unreadCounts }) => {
   const { user, profile } = useAuth();
@@ -52,9 +36,6 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
   // Active Challenge Modal State
   const [activeChallengeFriend, setActiveChallengeFriend] = useState<UserProfile | null>(null);
-  const [challengeType, setChallengeType] = useState<'friendly' | 'arena'>('friendly');
-  const [selectedColor, setSelectedColor] = useState<'white' | 'black' | 'random'>('random');
-  const [selectedModeIdx, setSelectedModeIdx] = useState(0);
   const [challengeError, setChallengeError] = useState('');
   const [isSendingChallenge, setIsSendingChallenge] = useState(false);
   const [isAcceptingChallenge, setIsAcceptingChallenge] = useState<string | null>(null);
@@ -82,56 +63,10 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
   // Pending challenges alert expanded state
   const [challengesExpanded, setChallengesExpanded] = useState(true);
 
-  // Active matches for spectating
-  const [friendActiveMatches, setFriendActiveMatches] = useState<Record<string, string>>({});
-
-  useEffect(() => {
-    if (!user || friendsProfiles.length === 0) {
-      setFriendActiveMatches({});
-      return;
-    }
-
-    const unsubscribers: (() => void)[] = [];
-
-    friendsProfiles.forEach((friend) => {
-      // Query friend's 5 most recent matches using players index
-      const q = query(
-        collection(db, 'matches'),
-        where('players', 'array-contains', friend.uid),
-        orderBy('createdAt', 'desc'),
-        limit(5)
-      );
-
-      const unsub = onSnapshot(q, (snapshot) => {
-        const activeMatch = snapshot.docs.find(d => d.data().status === 'active');
-        if (activeMatch) {
-          setFriendActiveMatches((prev) => ({
-            ...prev,
-            [friend.uid]: activeMatch.id,
-          }));
-        } else {
-          setFriendActiveMatches((prev) => {
-            const next = { ...prev };
-            delete next[friend.uid];
-            return next;
-          });
-        }
-      }, (err) => {
-        console.warn(`Error listening to active matches for friend ${friend.uid}:`, err);
-      });
-
-      unsubscribers.push(unsub);
-    });
-
-    return () => {
-      unsubscribers.forEach((unsub) => unsub());
-    };
-  }, [user, friendsProfiles]);
-
+  // Listen to all subcollection friends: users/{uid}/friends
   useEffect(() => {
     if (!user) return;
 
-    // Listen to all subcollection friends: users/{uid}/friends
     const qFriends = collection(db, 'users', user.uid, 'friends');
     const unsubFriends = onSnapshot(qFriends, async (snap) => {
       const listFriendships: Friendship[] = [];
@@ -148,8 +83,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
             requesterUid: user.uid,
             receiverUid: friendUid,
             status: 'accepted',
-            createdAt: data.friendSince || Date.now(),
-            stats: data.stats
+            createdAt: data.friendSince || Date.now()
           });
           profileIds.push(friendUid);
         } else if (data.status === 'pending_received') {
@@ -305,13 +239,12 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
             records[oppUid] = { wins: 0, losses: 0, draws: 0 };
           }
 
-          const isDraw = matchData.status === 'draw' || matchData.status === 'stalemate';
-          if (isDraw) {
-            records[oppUid].draws += 1;
-          } else if (matchData.winnerUid === user.uid) {
+          if (matchData.winnerUid === user.uid) {
             records[oppUid].wins += 1;
           } else if (matchData.winnerUid) {
             records[oppUid].losses += 1;
+          } else {
+            records[oppUid].draws += 1;
           }
         });
 
@@ -352,12 +285,6 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       const targetUser = uSnap.docs[0]?.data() as UserProfile | undefined;
       if (!targetUser) {
         setRequestError(`No user found with the username "${target}"`);
-        setIsSendingRequest(false);
-        return;
-      }
-
-      if (targetUser.uid && targetUser.uid.startsWith('bot_')) {
-        setRequestError('Bots cannot be added as friends');
         setIsSendingRequest(false);
         return;
       }
@@ -413,7 +340,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
         setDoc(docA, {
           status: 'accepted',
           friendSince: now,
-          displayName: friendData.displayName || 'Chess Player',
+          displayName: friendData.displayName || 'Player',
           photoURL: friendData.photoURL || ''
         }, { merge: true }),
         setDoc(docB, {
@@ -442,19 +369,9 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     }
   };
 
+  // Rollmate Challenge Submission
   const handleSendChallenge = async () => {
     if (!user || !profile || !activeChallengeFriend) return;
-
-    const modeConfig = CHALLENGE_MODES[selectedModeIdx];
-    const balance = profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance;
-    const stake = challengeType === 'friendly' ? 0 : modeConfig.price;
-
-    if (challengeType === 'arena') {
-      if (balance < stake || stake <= 0) {
-        setChallengeError(`You have insufficient coins (${formatCoins(stake)} needed).`);
-        return;
-      }
-    }
 
     setIsSendingChallenge(true);
     setChallengeError('');
@@ -466,12 +383,10 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
         challengeId,
         challengerUid: user.uid,
         challengedUid: activeChallengeFriend.uid,
-        mode: modeConfig.id,
-        stake,
+        mode: 'Rollmate',
         status: 'pending',
         matchId: null,
-        createdAt: Date.now(),
-        ...(challengeType === 'friendly' ? { colorChoice: selectedColor } : {})
+        createdAt: Date.now()
       };
 
       const updates: Record<string, any> = {};
@@ -495,14 +410,37 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
     setIsAcceptingChallenge(ch.id!);
 
     try {
-      const matchId = await acceptFriendlyChallenge(
-        ch.id!,
-        ch.challengerUid,
-        ch.challengedUid,
-        ch.mode,
-        ch.stake
-      );
-      onStartGame(matchId);
+      const mId = 'match_challenge_' + Math.random().toString(36).substring(2, 15) + '_' + Date.now();
+      const now = Date.now();
+
+      // Seed match document in RTDB
+      const newMatch: Match = {
+        id: mId,
+        players: [ch.challengerUid, ch.challengedUid],
+        whiteUid: ch.challengerUid,
+        blackUid: ch.challengedUid,
+        mode: 'Rollmate',
+        status: 'active',
+        winnerUid: null,
+        createdAt: now,
+        finishedAt: null
+      };
+
+      const challengeObj = {
+        ...ch,
+        status: 'accepted',
+        matchId: mId,
+        acceptedAt: now
+      };
+
+      const updates: Record<string, any> = {};
+      updates[`challenges/${ch.id}`] = challengeObj;
+      updates[`user_challenges/${ch.challengerUid}/${ch.id}`] = challengeObj;
+      updates[`user_challenges/${ch.challengedUid}/${ch.id}`] = challengeObj;
+      updates[`matches/${mId}`] = newMatch;
+
+      await rUpdate(rRef(rtdb), updates);
+      onStartGame(mId);
     } catch (err: any) {
       alert(err.message || 'Failed to accept challenge.');
     } finally {
@@ -523,18 +461,17 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       console.error('Failed to decline challenge:', err);
     }
   };
-  // Check if a friend is online by checking their RTDB status state directly.
-  // We avoid checking local computer vs server timestamps because client system clock
-  // skew can incorrectly flag an active friend as offline.
+
   const isFriendOnline = (friendUid: string) => {
     const status = onlineStatuses[friendUid];
     return status?.state === 'online';
   };
-  // Pending sent challenge IDs (to avoid showing challenge button while one is pending)
+
   const pendingSentChallengeUids = new Set(sentChallenges.map((c) => c.challengedUid));
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8 text-left animate-fade-in relative z-10">
+      
       {/* Header */}
       <div className="flex items-center justify-between">
         <button
@@ -542,31 +479,31 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
           className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-medium cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4" />
-          <span>Back to Dashboard</span>
+          <span>Back to Home</span>
         </button>
       </div>
 
       <div className="space-y-1">
         <h2 className="text-2xl font-bold text-slate-100 flex items-center space-x-2.5">
           <UserCheck className="w-6 h-6 text-violet-400" />
-          <span>Friends</span>
+          <span>Friends List</span>
         </h2>
         <p className="text-sm text-slate-500">
-          Manage your friends, send challenges, and track incoming battle invites.
+          Manage your friendships, chat in real-time, and challenge friends to Rollmate matches.
         </p>
       </div>
 
-      {/* Active Challenge Alerts — collapsible banner */}
+      {/* Active Challenge Alerts */}
       {receivedChallenges.length > 0 && (
-        <div className="glass rounded-xl border border-violet-500/30 overflow-hidden shadow-lg shadow-violet-900/20">
+        <div className="bg-zinc-900 border border-violet-500/30 rounded-xl overflow-hidden shadow-lg">
           <button
             onClick={() => setChallengesExpanded((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-3.5 bg-violet-950/30 cursor-pointer"
+            className="w-full flex items-center justify-between px-5 py-3.5 bg-violet-950/20 cursor-pointer"
           >
             <span className="flex items-center gap-2 text-sm font-bold text-violet-300">
               <Bell className="w-4 h-4 animate-pulse" />
-              <span>{receivedChallenges.length} Incoming Challenge{receivedChallenges.length > 1 ? 's' : ''}</span>
-              <span className="bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+              <span>Incoming Battle Invites</span>
+              <span className="bg-violet-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
                 {receivedChallenges.length}
               </span>
             </span>
@@ -574,29 +511,17 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
           </button>
 
           {challengesExpanded && (
-            <div className="divide-y divide-white/5">
+            <div className="divide-y divide-zinc-800 bg-zinc-950/20">
               {receivedChallenges.map((ch) => {
                 const challenger = challengerProfiles[ch.challengerUid];
                 return (
                   <div key={ch.id} className="px-5 py-4 flex items-center justify-between gap-4">
                     <div className="space-y-0.5 text-left">
                       <span className="text-xs font-bold text-violet-300">
-                        {ch.stake === 0 ? '🤝' : '⚔️'} {challenger?.displayName || 'Someone'} challenges you!
+                        ⚔️ {challenger?.displayName || 'Someone'} challenges you!
                       </span>
-                      <p className="text-[11px] text-slate-400 font-mono">
-                        {CHALLENGE_MODES.find((m) => m.id === ch.mode)?.label} ({CHALLENGE_MODES.find((m) => m.id === ch.mode)?.tc}) •{' '}
-                        {ch.stake === 0 ? (
-                          <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                            <span>Friendly Match (0</span>
-                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain inline" />
-                            <span>)</span>
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1">
-                            <strong className="text-amber-400">{formatCoins(ch.stake)}</strong>
-                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3.5 h-3.5 object-contain inline" />
-                          </span>
-                        )}
+                      <p className="text-[11px] text-slate-400">
+                        Game Mode: Rollmate • Friendly Match
                       </p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -610,7 +535,7 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                       <button
                         onClick={() => handleDeclineChallenge(ch)}
                         disabled={isAcceptingChallenge === ch.id}
-                        className="bg-red-500/10 hover:bg-red-600 hover:text-white text-red-400 border border-red-500/20 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
+                        className="bg-zinc-800 hover:bg-zinc-700 text-slate-300 border border-zinc-700 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer disabled:opacity-50"
                       >
                         Decline
                       </button>
@@ -624,22 +549,22 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-
-        {/* ── LEFT: Friends List ── */}
+        
+        {/* LEFT Friends List */}
         <div className="lg:col-span-8 space-y-5">
-
-          {/* Incoming friend requests */}
+          
+          {/* Incoming requests */}
           {incomingRequests.length > 0 && (
-            <div className="glass p-5 rounded-xl border border-emerald-500/20 space-y-3">
+            <div className="bg-zinc-900/60 p-5 rounded-xl border border-zinc-800 space-y-3">
               <h3 className="text-sm font-bold text-slate-300 flex items-center gap-2">
                 <UserCheck className="w-4 h-4 text-emerald-400" />
                 Incoming Friend Requests ({incomingRequests.length})
               </h3>
-              <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+              <div className="space-y-2">
                 {incomingRequests.map((req) => {
                   const sender = challengerProfiles[req.requesterUid];
                   return (
-                    <div key={req.id} className="flex items-center justify-between bg-slate-950/40 p-2.5 rounded-lg border border-white/5">
+                    <div key={req.id} className="flex items-center justify-between bg-zinc-955 p-2.5 rounded-lg border border-zinc-800/50">
                       <span className="text-xs font-semibold text-slate-300">{sender?.displayName || 'Loading…'}</span>
                       <div className="flex items-center space-x-1.5">
                         <button
@@ -664,112 +589,88 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
             </div>
           )}
 
-          {/* Friends list with inline challenge button */}
-          <div className="glass p-6 rounded-xl border border-white/5 space-y-4">
-            <h3 className="text-base font-bold text-slate-200 flex items-center gap-2 border-b border-white/5 pb-3">
+          {/* Friends list */}
+          <div className="bg-zinc-900/60 p-6 rounded-xl border border-zinc-800 space-y-4">
+            <h3 className="text-base font-bold text-slate-200 flex items-center gap-2 border-b border-zinc-800 pb-3">
               <Star className="w-5 h-5 text-amber-400" />
               <span>Your Friends ({friendsProfiles.length})</span>
             </h3>
 
             {friendsProfiles.length === 0 ? (
               <div className="py-10 text-center text-slate-500 text-sm italic">
-                No friends yet. Add someone by their unique username →
+                No friends added yet. Enter a username to send a request!
               </div>
             ) : (
-              <div className="divide-y divide-white/5 max-h-[480px] overflow-y-auto pr-2 scrollbar-thin">
+              <div className="divide-y divide-zinc-800 max-h-[480px] overflow-y-auto pr-2 scrollbar-thin">
                 {friendsProfiles.map((fProfile) => {
-                  const bestAch = getBestAchievement(fProfile.gameplayCounts);
                   const online = isFriendOnline(fProfile.uid);
                   const hasPendingChallenge = pendingSentChallengeUids.has(fProfile.uid);
-
                   const record = h2hRecords[fProfile.uid] || { wins: 0, losses: 0, draws: 0 };
 
                   return (
                     <div key={fProfile.uid} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
-                      {/* Avatar + Name */}
+                      
+                      {/* Avatar & Online status */}
                       <div className="flex items-center space-x-3.5">
                         <div className="relative">
                           <img
                             src={fProfile.photoURL}
                             alt={fProfile.displayName}
-                            className="w-10 h-10 rounded-full object-cover border border-white/10 cursor-pointer hover:opacity-85 transition-opacity"
+                            className="w-10 h-10 rounded-full object-cover border border-zinc-800 cursor-pointer hover:opacity-80 transition-opacity"
                             title="View Profile"
                             onClick={() => setSelectedProfile(fProfile)}
                           />
-                          <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121318] ${
-                            online ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]' : 'bg-slate-600'
-                          }`} title={online ? 'Online' : 'Offline'} />
+                          <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-black ${
+                            online ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.7)]' : 'bg-zinc-600'
+                          }`} />
                         </div>
 
                         <div className="text-left space-y-0.5">
-                          <p className="text-sm font-semibold text-slate-200 flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-slate-200 flex items-center gap-2">
                             <span>{fProfile.displayName}</span>
-                            {fProfile.rating >= 2500 && (
-                              <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent border border-amber-400/60 bg-amber-950/40 px-1.5 py-0.2 rounded text-[8px] uppercase select-none font-bold" title="Grandmaster">
-                                GM
-                              </span>
-                            )}
-                            {bestAch && (
-                              <span className={`px-1.5 py-0.2 rounded text-[8px] font-bold border ${bestAch.color.split(' ')[0]} ${bestAch.color.split(' ')[1]} ${bestAch.color.split(' ')[2]}`}>
-                                {bestAch.badge}
-                              </span>
-                            )}
                           </p>
                           <p className="text-[10px] text-slate-400 font-mono flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span>{fProfile.rating} Elo</span>
+                            <span className="text-amber-400 font-semibold">{fProfile.rating || 1200} Elo</span>
                             <span>•</span>
-                            <span className={online ? "text-emerald-400 font-medium" : "text-slate-500"}>
+                            <span className={online ? "text-emerald-400" : "text-slate-500"}>
                               {online ? 'Online' : 'Offline'}
                             </span>
                             <span>•</span>
                             <span>
-                              Record: <span className="text-emerald-400">{record.wins}W</span> - <span className="text-red-400">{record.losses}L</span> - <span className="text-amber-400">{record.draws}D</span>
+                              Record: <span className="text-emerald-400">{record.wins}W</span> - <span className="text-red-400">{record.losses}L</span> - <span className="text-zinc-500">{record.draws}D</span>
                             </span>
                           </p>
                         </div>
                       </div>
 
-                      {/* Inline Action Group */}
+                      {/* Inline Actions */}
                       <div className="flex items-center gap-2">
                         {/* Chat Button */}
                         <button
                           onClick={() => setOpenChatFriend(fProfile)}
-                          className="relative flex items-center justify-center bg-slate-900/60 hover:bg-violet-600 hover:text-white text-slate-400 hover:scale-105 border border-white/5 w-8 h-8 rounded-lg transition-all cursor-pointer"
+                          className="relative flex items-center justify-center bg-zinc-950 hover:bg-violet-600 text-slate-400 hover:text-white border border-zinc-800 w-8 h-8 rounded-lg transition-all cursor-pointer"
                           title="Chat with Friend"
                         >
                           <MessageSquare className="w-4 h-4" />
                           {unreadCounts[fProfile.uid] > 0 && (
-                            <span className="absolute -top-1.5 -right-1.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-1 ring-slate-950 animate-pulse">
+                            <span className="absolute -top-1.5 -right-1.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-red-500 text-[8px] font-bold text-white ring-1 ring-black">
                               {unreadCounts[fProfile.uid]}
                             </span>
                           )}
                         </button>
 
-                        {/* Spectate Button */}
-                        {friendActiveMatches[fProfile.uid] && (
-                          <button
-                            onClick={() => onStartGame(friendActiveMatches[fProfile.uid])}
-                            className="flex items-center justify-center bg-emerald-500/10 hover:bg-emerald-600 hover:text-white text-emerald-400 hover:scale-105 border border-emerald-500/20 w-8 h-8 rounded-lg transition-all cursor-pointer"
-                            title="Spectate ongoing game"
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                        )}
-
-                        {/* Inline Challenge Button */}
+                        {/* Challenge Button */}
                         {hasPendingChallenge ? (
-                          <span className="text-[10px] bg-slate-900 border border-white/5 px-2.5 py-1 rounded text-slate-400 font-medium animate-pulse">
-                            Pending…
+                          <span className="text-[10px] bg-zinc-950 border border-zinc-800 px-2.5 py-1.5 rounded text-slate-500 font-semibold animate-pulse">
+                            Sent...
                           </span>
                         ) : (
                           <button
                             onClick={() => {
                               setChallengeError('');
-                              setSelectedModeIdx(0);
-                              setChallengeType('friendly');
                               setActiveChallengeFriend(fProfile);
                             }}
-                            className="flex items-center gap-1.5 bg-violet-600/10 hover:bg-violet-600 hover:text-white text-violet-400 border border-violet-500/20 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                            className="flex items-center gap-1.5 bg-violet-600/10 hover:bg-violet-600 text-violet-400 hover:text-white border border-violet-500/20 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
                           >
                             <Swords className="w-3.5 h-3.5" />
                             Challenge
@@ -782,20 +683,20 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
               </div>
             )}
 
-            {/* Pending sent requests */}
+            {/* Sent pending requests */}
             {outgoingRequests.length > 0 && (
-              <div className="pt-4 border-t border-white/5 space-y-2">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  Sent Requests ({outgoingRequests.length})
+              <div className="pt-4 border-t border-zinc-800 space-y-2">
+                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                  Sent Invites ({outgoingRequests.length})
                 </h4>
                 {outgoingRequests.map((req) => {
                   const receiver = challengerProfiles[req.receiverUid];
                   return (
-                    <div key={req.id} className="flex items-center justify-between bg-slate-950/40 p-2.5 rounded-lg border border-white/5">
-                      <span className="text-xs font-semibold text-slate-400">{receiver?.displayName || 'Loading…'}</span>
+                    <div key={req.id} className="flex items-center justify-between bg-zinc-950/40 p-2.5 rounded-lg border border-zinc-800/40">
+                      <span className="text-xs text-slate-400">{receiver?.displayName || 'Loading…'}</span>
                       <button
                         onClick={() => handleDeclineRequest(req.id!)}
-                        className="text-[10px] font-bold text-red-400/70 hover:text-red-400 cursor-pointer"
+                        className="text-[10px] font-bold text-red-400/80 hover:text-red-400 cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -805,61 +706,27 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
               </div>
             )}
 
-            {/* Sent (pending) challenges list */}
-            {sentChallenges.length > 0 && (
-              <div className="pt-4 border-t border-white/5 space-y-2">
-                <h4 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <Gamepad2 className="w-3.5 h-3.5" />
-                  Outgoing Challenges ({sentChallenges.length})
-                </h4>
-                {sentChallenges.map((ch) => {
-                  const challenged = challengerProfiles[ch.challengedUid];
-                  return (
-                    <div key={ch.id} className="flex items-center justify-between bg-slate-950/40 border border-white/5 rounded-lg p-2.5">
-                      <div className="text-left space-y-0.5">
-                        <span className="text-[10px] text-slate-500 font-semibold block">→ {challenged?.displayName || 'Loading…'}</span>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {CHALLENGE_MODES.find((m) => m.id === ch.mode)?.label} •{' '}
-                          {ch.stake === 0 ? (
-                            <span className="text-emerald-400 font-semibold">Friendly Match</span>
-                          ) : (
-                            <span className="text-amber-400">{formatCoins(ch.stake)}</span>
-                          )}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleDeclineChallenge(ch)}
-                        className="p-1 hover:bg-white/5 rounded text-slate-500 hover:text-red-400 transition-all cursor-pointer"
-                        title="Cancel Invite"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         </div>
 
-        {/* ── RIGHT: Add Friend Panel ── */}
+        {/* RIGHT Add Friend Panel */}
         <div className="lg:col-span-4 space-y-5">
-          <div className="glass p-6 rounded-xl border border-white/5 space-y-4">
+          <div className="bg-zinc-900/60 p-6 rounded-xl border border-zinc-800 space-y-4 text-left">
             <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
               <UserPlus className="w-5 h-5 text-violet-400" />
               <span>Add Friend</span>
             </h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Enter the exact unique username of the player you want to add.
+              Enter the exact username of the player you wish to add.
             </p>
             <form onSubmit={handleSendFriendRequest} className="space-y-3">
               <div className="relative">
                 <input
                   type="text"
-                  placeholder="Enter unique username…"
+                  placeholder="Enter username…"
                   value={searchUsername}
                   onChange={(e) => setSearchUsername(e.target.value)}
-                  className="w-full bg-slate-950/60 border border-white/10 rounded-lg pl-3.5 pr-10 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
+                  className="w-full bg-zinc-950/80 border border-zinc-800 rounded-lg pl-3.5 pr-10 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 transition-colors"
                 />
                 <button
                   type="submit"
@@ -872,184 +739,64 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
 
               {requestError && (
                 <p className="text-[11px] text-red-400 font-medium flex items-center gap-1">
-                  <ShieldAlert className="w-3.5 h-3.5" />
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
                   <span>{requestError}</span>
                 </p>
               )}
               {requestSuccess && (
                 <p className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
-                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   <span>{requestSuccess}</span>
                 </p>
               )}
             </form>
           </div>
         </div>
+
       </div>
 
-      {/* ── Challenge Mode Selection Modal ── */}
+      {/* Challenge Confirmation Modal */}
       {activeChallengeFriend && (
         <div 
-          className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in"
-          style={{ zIndex: 9999 }}
+          className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 z-50 animate-fade-in"
         >
-          <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl max-h-[calc(100vh-120px)] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-5 border-b border-white/5 bg-slate-900/40">
-              <h3 className="text-base font-bold text-slate-200 flex items-center space-x-2">
+          <div className="bg-zinc-900 border border-zinc-850 w-full max-w-sm rounded-2xl overflow-hidden shadow-2xl flex flex-col p-6 text-left space-y-6">
+            <div className="space-y-2">
+              <h3 className="text-lg font-bold text-white flex items-center space-x-2">
                 <Swords className="w-5 h-5 text-violet-400" />
-                <span>Challenge {activeChallengeFriend.displayName}</span>
+                <span>Send Battle Invite</span>
               </h3>
-              <button
-                onClick={() => setActiveChallengeFriend(null)}
-                className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Are you sure you want to invite <strong className="text-white">{activeChallengeFriend.displayName}</strong> to a friendly match of **Rollmate**?
+              </p>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block text-left">
-                  Challenge Type
-                </label>
-                <div className="grid grid-cols-2 gap-2 p-1 bg-slate-950/60 rounded-xl border border-white/5">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChallengeType('friendly');
-                      setChallengeError('');
-                    }}
-                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      challengeType === 'friendly'
-                        ? 'bg-violet-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    🤝 Friendly (No Coins)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setChallengeType('arena');
-                      setChallengeError('');
-                    }}
-                    className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      challengeType === 'arena'
-                        ? 'bg-violet-600 text-white shadow-md'
-                        : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    ⚔️ Arena Clash (Staked)
-                  </button>
-                </div>
-              </div>
+            {challengeError && (
+              <p className="text-xs text-red-400 font-medium flex items-center gap-1.5">
+                <ShieldAlert className="w-4 h-4 text-red-500" />
+                <span>{challengeError}</span>
+              </p>
+            )}
 
-              {challengeType === 'friendly' && (
-                <div className="space-y-2 animate-fade-in">
-                  <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block text-left">
-                    Choose Your Color
-                  </label>
-                  <div className="grid grid-cols-3 gap-2 p-1 bg-slate-950/60 rounded-xl border border-white/5">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedColor('white')}
-                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        selectedColor === 'white'
-                          ? 'bg-violet-600 text-white shadow-md'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      White
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedColor('random')}
-                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        selectedColor === 'random'
-                          ? 'bg-violet-600 text-white shadow-md'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      Random
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedColor('black')}
-                      className={`py-2 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                        selectedColor === 'black'
-                          ? 'bg-violet-600 text-white shadow-md'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      Black
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider block text-left">
-                  Choose Game Mode
-                </label>
-                <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto pr-1 scrollbar-thin">
-                  {CHALLENGE_MODES.map((mode, idx) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      onClick={() => setSelectedModeIdx(idx)}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between gap-1 transition-all cursor-pointer ${
-                        selectedModeIdx === idx
-                          ? 'border-violet-500 bg-violet-500/10 text-violet-300 ring-1 ring-violet-500'
-                          : 'border-white/5 bg-slate-950/40 hover:bg-slate-900/40 text-slate-400'
-                      }`}
-                    >
-                      <span className="text-xs font-bold block">{mode.label}</span>
-                      <span className="text-[9px] font-mono text-slate-500 flex items-center flex-wrap gap-1">
-                        <span>{mode.tc} •</span>
-                        {challengeType === 'friendly' ? (
-                          <span className="flex items-center gap-0.5">
-                            <span>Free (0</span>
-                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
-                            <span>)</span>
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-0.5">
-                            <span>{formatCoins(mode.price)}</span>
-                            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-3 h-3 object-contain inline" />
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {challengeError && (
-                <p className="text-xs text-red-400 font-medium flex items-center gap-1.5">
-                  <ShieldAlert className="w-4 h-4" />
-                  <span>{challengeError}</span>
-                </p>
-              )}
-            </div>
-
-            <div className="p-6 bg-slate-950/40 border-t border-white/5 flex items-center justify-end space-x-3">
+            <div className="flex items-center justify-end space-x-3 pt-2">
               <button
                 onClick={() => setActiveChallengeFriend(null)}
-                className="bg-slate-900/60 hover:bg-slate-800/60 text-slate-300 border border-white/5 px-4 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                className="bg-zinc-800 hover:bg-zinc-700 text-slate-300 border border-zinc-700 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSendChallenge}
                 disabled={isSendingChallenge}
-                className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-lg text-xs font-semibold transition-all border border-violet-500/20 disabled:opacity-50 cursor-pointer"
+                className="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-lg text-xs font-semibold transition-all cursor-pointer"
               >
-                {isSendingChallenge ? 'Sending…' : 'Send Challenge Invite'}
+                {isSendingChallenge ? 'Sending…' : 'Challenge'}
               </button>
             </div>
           </div>
         </div>
       )}
+
       {selectedProfile && (
         <ProfilePopup 
           profile={selectedProfile} 
@@ -1076,7 +823,7 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
     return [uid1, uid2].sort().join('_');
   };
 
-  // Clean up messages older than configured historyExpiryHours limit on load
+  // Clean up messages older than 24 hours on load
   useEffect(() => {
     if (!user) return;
     const cleanup = async () => {
@@ -1084,19 +831,7 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
         const threadId = getThreadId(user.uid, friend.uid);
         const q = collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages');
         const snap = await getDocs(q);
-
-        // Fetch chat history expiry limit from configuration
-        let historyExpiryHours = 24;
-        try {
-          const configSnap = await getDoc(doc(db, 'config', 'chat'));
-          if (configSnap.exists()) {
-            historyExpiryHours = configSnap.data().historyExpiryHours ?? 24;
-          }
-        } catch (configErr) {
-          console.warn("Failed to fetch chat configuration:", configErr);
-        }
-
-        const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
         snap.docs.forEach((docSnap) => {
           const data = docSnap.data();
           if (data.createdAt < cutoff) {
@@ -1113,43 +848,25 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
   // Subscribe to messages
   useEffect(() => {
     if (!user) return;
-    let active = true;
-    let unsubscribe: (() => void) | null = null;
     const threadId = getThreadId(user.uid, friend.uid);
     const q = query(
       collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
       orderBy('createdAt', 'asc')
     );
 
-    let historyExpiryHours = 24;
-    getDoc(doc(db, 'config', 'chat'))
-      .then((configSnap) => {
-        if (configSnap.exists()) {
-          historyExpiryHours = configSnap.data().historyExpiryHours ?? 24;
+    const unsubscribe = onSnapshot(q, (snap) => {
+      const msgs: any[] = [];
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.createdAt >= cutoff) {
+          msgs.push({ id: docSnap.id, ...data });
         }
-      })
-      .catch(console.warn)
-      .finally(() => {
-        if (!active) return;
-        unsubscribe = onSnapshot(q, (snap) => {
-          const msgs: any[] = [];
-          const cutoff = Date.now() - historyExpiryHours * 60 * 60 * 1000;
-          snap.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (data.createdAt >= cutoff) {
-              msgs.push({ id: docSnap.id, ...data });
-            }
-          });
-          setMessages(msgs);
-        });
       });
+      setMessages(msgs);
+    });
 
-    return () => {
-      active = false;
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
+    return () => unsubscribe();
   }, [user, friend.uid]);
 
   // Auto-scroll
@@ -1186,24 +903,24 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
   };
 
   return (
-    <div className="fixed top-[77px] bottom-0 left-0 right-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="glass-card w-full max-w-md rounded-2xl overflow-hidden border border-white/10 flex flex-col shadow-2xl h-[500px]">
+    <div className="fixed top-[77px] bottom-0 left-0 right-0 z-45 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in text-xs">
+      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-md rounded-2xl overflow-hidden flex flex-col shadow-2xl h-[500px]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-slate-900/40">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950/20">
           <div className="flex items-center space-x-3 text-left">
-            <img src={friend.photoURL} alt={friend.displayName} className="w-8 h-8 rounded-full object-cover border border-white/10" />
+            <img src={friend.photoURL} alt={friend.displayName} className="w-8 h-8 rounded-full object-cover border border-zinc-800" />
             <div>
               <h3 className="text-sm font-bold text-slate-200">{friend.displayName}</h3>
-              <p className="text-[10px] text-slate-500">Messages auto-deleted after 24 hours</p>
+              <p className="text-[10px] text-slate-500 font-mono">Messages auto-deleted after 24 hours</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer">
-            <X className="w-4 h-4" />
+            <X className="w-4.5 h-4.5" />
           </button>
         </div>
 
         {/* Message area */}
-        <div className="flex-grow overflow-y-auto p-6 space-y-4 scrollbar-thin text-xs">
+        <div className="flex-grow overflow-y-auto p-6 space-y-4 scrollbar-thin text-xs text-left">
           {messages.length === 0 ? (
             <div className="h-full flex items-center justify-center text-slate-500 italic">
               No recent messages. Start the conversation!
@@ -1214,11 +931,11 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
               return (
                 <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                   <div className={`px-3 py-2 rounded-xl max-w-[85%] break-words shadow ${
-                    isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-slate-900 text-slate-200 rounded-tl-none border border-white/5'
+                    isMe ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-zinc-950 text-slate-200 rounded-tl-none border border-zinc-850'
                   }`}>
                     {msg.text}
                   </div>
-                  <span className="text-[8px] text-slate-600 mt-1">
+                  <span className="text-[8px] text-slate-500 font-mono mt-1 block">
                     {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
@@ -1229,13 +946,13 @@ export const FriendChatModal: React.FC<FriendChatModalProps> = ({ friend, onClos
         </div>
 
         {/* Input */}
-        <form onSubmit={handleSendMessage} className="p-4 bg-slate-950/40 border-t border-white/5 flex gap-2">
+        <form onSubmit={handleSendMessage} className="p-4 bg-zinc-950/20 border-t border-zinc-800 flex gap-2">
           <input
             type="text"
             placeholder="Type a message..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="flex-grow bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+            className="flex-grow bg-zinc-950 border border-zinc-850 rounded-xl px-4 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
           />
           <button type="submit" className="bg-violet-600 hover:bg-violet-500 text-white p-2.5 rounded-xl transition-all cursor-pointer shrink-0">
             <Send className="w-4 h-4" />

@@ -1,1059 +1,504 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
-import { collection, getDocs, query, where, orderBy, limit, getDoc, doc, updateDoc, addDoc } from 'firebase/firestore';
-import { ChevronLeft, Trophy, Calendar, Gamepad2, Award, Percent, Star, Lock, Globe, X, LineChart, UserPlus, Check } from 'lucide-react';
-
-import { ACHIEVEMENTS, getBestAchievement } from '../utils/achievements';
-import { formatCoins } from '../utils/format';
-import type { UserProfile, Match } from '../types';
-import { ProfilePopup } from './ProfilePopup';
-
-const isCountryChangeLocked = (lastChangedAt?: number | null) => {
-  if (!lastChangedAt) return false;
-  const lastDate = new Date(lastChangedAt);
-  const nowDate = new Date();
-  return lastDate.getFullYear() === nowDate.getFullYear() && lastDate.getMonth() === nowDate.getMonth();
-};
-
-const getNextCalendarMonthStart = (lastChangedAt: number) => {
-  const date = new Date(lastChangedAt);
-  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
-};
-
-const getCountryFlag = (countryName: string): string => {
-  const normalized = countryName.trim().toLowerCase();
-  const flagMap: Record<string, string> = {
-    india: '🇮🇳',
-    in: '🇮🇳',
-    'united states': '🇺🇸',
-    usa: '🇺🇸',
-    us: '🇺🇸',
-    'united kingdom': '🇬🇧',
-    uk: '🇬🇧',
-    gb: '🇬🇧',
-    england: '🇬🇧',
-    canada: '🇨🇦',
-    ca: '🇨🇦',
-    australia: '🇦🇺',
-    au: '🇦🇺',
-    germany: '🇩🇪',
-    de: '🇩🇪',
-    france: '🇫🇷',
-    fr: '🇫🇷',
-    italy: '🇮🇹',
-    it: '🇮🇹',
-    spain: '🇪🇸',
-    es: '🇪🇸',
-    japan: '🇯🇵',
-    jp: '🇯🇵',
-    china: '🇨🇳',
-    cn: '🇨🇳',
-    brazil: '🇧🇷',
-    br: '🇧🇷',
-    russia: '🇷🇺',
-    ru: '🇷🇺',
-    mexico: '🇲🇽',
-    mx: '🇲🇽',
-    netherlands: '🇳🇱',
-    nl: '🇳🇱',
-    switzerland: '🇨🇭',
-    ch: '🇨🇭',
-    sweden: '🇸🇪',
-    se: '🇸🇪',
-    norway: '🇳🇴',
-    no: '🇳🇴',
-    finland: '🇫🇮',
-    fi: '🇫🇮',
-    denmark: '🇩🇰',
-    dk: '🇩🇰',
-    singapore: '🇸🇬',
-    sg: '🇸🇬',
-    'new zealand': '🇳🇿',
-    nz: '🇳🇿',
-    'south africa': '🇿🇦',
-    za: '🇿🇦',
-    'south korea': '🇰🇷',
-    kr: '🇰🇷'
-  };
-  return flagMap[normalized] || '🏳️';
-};
+import { collection, getDocs, query, where, orderBy, limit, getDoc, doc } from 'firebase/firestore';
+import { ChevronLeft, Camera, User, Calendar, Trophy, Users, History, Edit2, Lock, X } from 'lucide-react';
+import type { UserProfile } from '../types';
 
 interface ProfileViewProps {
   onBack: () => void;
-  onStartGame: (matchId: string) => void;
+  onStartGame?: (matchId: string) => void;
 }
 
-const MODE_DETAILS: Record<string, { label: string; price: string; tc: string }> = {
-  beginner: { label: 'Beginner', price: '100 Coins', tc: '15 min' },
-  casual_rapid: { label: 'Casual Rapid', price: '500 Coins', tc: '10 min' },
-  standard_rapid: { label: 'Standard Rapid', price: '2.5K Coins', tc: '10 | 5' },
-  competitive_rapid: { label: 'Competitive Rapid', price: '10K Coins', tc: '15 | 10' },
-  classical_lite: { label: 'Classical Lite', price: '25K Coins', tc: '20 | 10' },
-  blitz: { label: 'Blitz', price: '50K Coins', tc: '5 | 3' },
-  competitive_blitz: { label: 'Competitive Blitz', price: '100K Coins', tc: '3 | 2' },
-  bullet: { label: 'Bullet', price: '500K Coins', tc: '1 | 1' },
-  arena_bullet: { label: 'Arena Bullet', price: '1M Coins', tc: '1 min' },
-  championship: { label: 'Championship', price: '5M Coins', tc: '30 | 20' }
-};
+const DEFAULT_AVATARS = [
+  { name: 'White King', url: '/pieces/neo/wk.png' },
+  { name: 'White Queen', url: '/pieces/neo/wq.png' },
+  { name: 'White Knight', url: '/pieces/neo/wn.png' },
+  { name: 'White Rook', url: '/pieces/neo/wr.png' },
+  { name: 'Black King', url: '/pieces/neo/bk.png' },
+  { name: 'Black Queen', url: '/pieces/neo/bq.png' },
+  { name: 'Black Knight', url: '/pieces/neo/bn.png' },
+  { name: 'Black Rook', url: '/pieces/neo/br.png' }
+];
 
-export const ProfileView: React.FC<ProfileViewProps> = ({ onBack, onStartGame }) => {
-  const { user, profile, updateCachedProfile, gameConfig } = useAuth();
-  const [isEditCountryOpen, setIsEditCountryOpen] = useState(false);
-  const [countryInput, setCountryInput] = useState('');
-  const [savingCountry, setSavingCountry] = useState(false);
-  const [countryError, setCountryError] = useState('');
-
-  // User matches history state (active or past games)
-  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
-  const [loadingMatches, setLoadingMatches] = useState(false);
+export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
+  const { user, profile, updateCachedProfile } = useAuth();
+  
+  // States
+  const [friendCount, setFriendCount] = useState(0);
+  const [recentMatches, setRecentMatches] = useState<any[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(true);
   const [opponentProfiles, setOpponentProfiles] = useState<Record<string, UserProfile>>({});
-  const [opponentFriendStatus, setOpponentFriendStatus] = useState<Record<string, 'sending' | 'sent' | 'friend'>>({});
-  const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
+  
+  // Photo modal states
+  const [isPhotoModalOpen, setIsPhotoModalOpen] = useState(false);
+  const [customPhotoUrl, setCustomPhotoUrl] = useState('');
+  const [photoError, setPhotoError] = useState('');
+  
+  // Username states
+  const [isNameModalOpen, setIsNameModalOpen] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
-  const fetchRecentMatches = async () => {
-    if (!user) return;
-    setLoadingMatches(true);
-    try {
-      const q = query(
-        collection(db, 'matches'),
-        where('players', 'array-contains', user.uid),
-        orderBy('createdAt', 'desc'),
-        limit(20)
-      );
-      const querySnap = await getDocs(q);
-      const matches: Match[] = [];
-      querySnap.forEach((docSnap) => {
-        matches.push({ id: docSnap.id, ...docSnap.data() } as Match);
-      });
-
-      // Close active practice matches older than configured expiry hours (default 24h)
-      const now = Date.now();
-      const expiryHours = gameConfig?.practiceExpiryHours ?? 24;
-      const expiryMs = expiryHours * 60 * 60 * 1000;
-      const cleanedMatches = await Promise.all(matches.map(async (m) => {
-        if (m.mode === 'practice' && m.status === 'active' && (now - m.createdAt > expiryMs)) {
-          try {
-            await updateDoc(doc(db, 'matches', m.id), {
-              status: 'terminated',
-              finishedAt: now
-            });
-            return { ...m, status: 'terminated', finishedAt: now } as Match;
-          } catch (err) {
-            console.warn("Failed to terminate old practice match:", err);
-          }
-        }
-        return m;
-      }));
-
-      setRecentMatches(cleanedMatches.slice(0, 15));
-
-      const uniqueOpponentUids = [...new Set(matches.map((m) =>
-        m.whiteUid === user.uid ? m.blackUid : m.whiteUid
-      ))];
-
-      const profileCache: Record<string, UserProfile> = {};
-      const statusCache: Record<string, 'sent' | 'friend'> = {};
-
-      for (const oppUid of uniqueOpponentUids) {
-        if (oppUid.startsWith('bot_')) {
-          const elo = parseInt(oppUid.split('_')[1]) || 800;
-          profileCache[oppUid] = {
-            uid: oppUid,
-            displayName: `Chess Bot (${elo})`,
-            photoURL: '/game_modes/practice.png',
-            rating: elo,
-            currentEloRating: elo,
-            bankBalance: 0,
-            currentBalance: 0,
-            createdAt: Date.now(),
-            lastLoginAt: Date.now(),
-            zeroBalanceAt: null
-          };
-          continue;
-        }
-
-        try {
-          const uSnap = await getDoc(doc(db, 'users', oppUid));
-          if (uSnap.exists()) {
-            profileCache[oppUid] = { uid: uSnap.id, ...uSnap.data() } as UserProfile;
-          }
-        } catch (err) {
-          console.warn("Failed to fetch opponent profile:", err);
-        }
-
-        const friendDocRef = doc(db, 'users', user.uid, 'friends', oppUid);
-        const fSnap = await getDoc(friendDocRef);
-        if (fSnap.exists()) {
-          const fData = fSnap.data();
-          statusCache[oppUid] = fData.status === 'accepted' ? 'friend' : 'sent';
-        }
-      }
-
-      setOpponentProfiles((prev) => ({ ...prev, ...profileCache }));
-      setOpponentFriendStatus((prev) => ({ ...prev, ...statusCache }));
-    } catch (e) {
-      console.warn('Error fetching recent matches:', e);
-    } finally {
-      setLoadingMatches(false);
-    }
-  };
-
-  const handleSendOpponentFriendRequest = async (oppUid: string) => {
-    if (!user) return;
-    setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sending' }));
-    try {
-      await addDoc(collection(db, 'friendships'), {
-        requesterUid: user.uid,
-        receiverUid: oppUid,
-        status: 'pending',
-        createdAt: Date.now()
-      });
-      setOpponentFriendStatus((prev) => ({ ...prev, [oppUid]: 'sent' }));
-    } catch (e) {
-      console.warn('Failed to send friend request to opponent:', e);
-      setOpponentFriendStatus((prev) => {
-        const next = { ...prev };
-        delete next[oppUid];
-        return next;
-      });
-    }
-  };
-
+  // Fetch Friend Count
   useEffect(() => {
-    if (user) {
-      fetchRecentMatches();
-    }
-  }, [user, gameConfig]);
-
-  // Elo rating history states
-  const [ratingHistory, setRatingHistory] = useState<{ date: string; elo: number }[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; date: string; elo: number } | null>(null);
-
-  useEffect(() => {
-    if (!user || !profile) return;
-    const fetchRatingHistory = async () => {
+    if (!user) return;
+    const fetchFriends = async () => {
       try {
-        const eloHistoryRef = collection(db, 'users', user.uid, 'eloHistory');
-        const snap = await getDocs(eloHistoryRef);
-
-        const entries = snap.docs.map(docSnap => docSnap.data() as any);
-        entries.sort((a, b) => a.createdAt - b.createdAt);
-
-        const history: { date: string; elo: number }[] = [];
-        const ratingVal = profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating;
-
-        // Base entry
-        history.push({
-          date: new Date(profile.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-          elo: 0 // Start Elo
-        });
-
-        entries.forEach(entry => {
-          const dateStr = new Date(entry.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-          history.push({
-            date: dateStr,
-            elo: entry.afterRating
-          });
-        });
-
-        if (entries.length > 0 && history[history.length - 1].elo !== ratingVal) {
-          history.push({
-            date: 'Now',
-            elo: ratingVal
-          });
-        }
-
-        setRatingHistory(history);
+        const q = query(
+          collection(db, 'users', user.uid, 'friends'),
+          where('status', '==', 'accepted')
+        );
+        const snap = await getDocs(q);
+        setFriendCount(snap.size);
       } catch (err) {
-        console.warn("Failed to fetch rating history:", err);
-      } finally {
-        setLoadingHistory(false);
+        console.warn("Failed to fetch friends count:", err);
       }
     };
+    fetchFriends();
+  }, [user]);
 
-    fetchRatingHistory();
-  }, [user, profile?.currentEloRating, profile?.rating, profile?.createdAt]);
+  // Fetch Match History
+  useEffect(() => {
+    if (!user) return;
+    const fetchMatches = async () => {
+      setLoadingMatches(true);
+      try {
+        const q = query(
+          collection(db, 'matches'),
+          where('players', 'array-contains', user.uid),
+          orderBy('finishedAt', 'desc'),
+          limit(10)
+        );
+        const querySnap = await getDocs(q);
+        const matches: any[] = [];
+        const oppUids = new Set<string>();
 
-  const handleOpenEditCountry = () => {
-    setCountryInput(profile?.country || '');
-    setCountryError('');
-    setIsEditCountryOpen(true);
-  };
+        querySnap.forEach((docSnap) => {
+          const m = docSnap.data();
+          if (m.status === 'completed' || m.status === 'terminated') {
+            matches.push({ id: docSnap.id, ...m });
+            const oppUid = m.players.find((p: string) => p !== user.uid);
+            if (oppUid) oppUids.add(oppUid);
+          }
+        });
 
-  const handleSaveCountry = async () => {
-    if (!user || !profile) return;
-    
-    if (isCountryChangeLocked(profile.lastCountryChangedAt)) {
-      setCountryError('Your represented country is currently locked this month.');
-      return;
-    }
+        setRecentMatches(matches);
 
-    const trimmed = countryInput.trim();
-    if (!trimmed) {
-      setCountryError('Country name cannot be empty.');
-      return;
-    }
-
-    setSavingCountry(true);
-    setCountryError('');
-
-    try {
-      updateCachedProfile({
-        country: trimmed,
-        lastCountryChangedAt: Date.now()
-      });
-      setIsEditCountryOpen(false);
-    } catch (err: any) {
-      console.error('Error saving country:', err);
-      setCountryError(err.message || 'Failed to update country. Please try again.');
-    } finally {
-      setSavingCountry(false);
-    }
-  };
+        // Fetch opponent usernames & photos
+        const oppsFetched: Record<string, UserProfile> = {};
+        for (const oId of Array.from(oppUids)) {
+          try {
+            const snap = await getDoc(doc(db, 'users', oId));
+            if (snap.exists()) {
+              oppsFetched[oId] = snap.data() as UserProfile;
+            }
+          } catch (e) {}
+        }
+        setOpponentProfiles(oppsFetched);
+      } catch (err) {
+        console.warn("Failed to fetch match history:", err);
+      } finally {
+        setLoadingMatches(false);
+      }
+    };
+    fetchMatches();
+  }, [user]);
 
   if (!user || !profile) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
-        <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
-        <p className="text-slate-400">Loading profile details...</p>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] bg-transparent text-slate-400">
+        <div className="w-10 h-10 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+        <p className="mt-3 text-xs">Loading profile...</p>
       </div>
     );
   }
 
-  // Calculate totals
-  const wins = profile.wins || 0;
-  const losses = profile.losses || 0;
-  const draws = profile.draws || 0;
-  const totalGames = wins + losses + draws;
-  const winRate = totalGames > 0 ? ((wins / totalGames) * 100).toFixed(1) : '0';
+  // Handle Photo Save
+  const handleSavePhoto = async (photoUrl: string) => {
+    if (!photoUrl.trim()) return;
+    try {
+      await updateCachedProfile({ photoURL: photoUrl.trim() });
+      setIsPhotoModalOpen(false);
+      setCustomPhotoUrl('');
+      setPhotoError('');
+    } catch (e: any) {
+      setPhotoError(e.message || 'Failed to update profile photo.');
+    }
+  };
 
-  // Get best achievement
-  const bestAch = getBestAchievement(profile.gameplayCounts);
+  // Handle Username Save
+  const handleSaveUsername = async () => {
+    const trimmed = newName.trim();
+    if (!trimmed) {
+      setNameError('Username cannot be empty');
+      return;
+    }
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      setNameError('Username must be between 3 and 20 characters');
+      return;
+    }
 
-  // Parse Join Date
-  const joinDate = new Date(profile.createdAt).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'long'
-  });
+    const alphaNumericRegex = /^[a-zA-Z0-9]+$/;
+    if (!alphaNumericRegex.test(trimmed)) {
+      setNameError('Username can only contain alphanumeric letters and numbers');
+      return;
+    }
+
+    setSavingName(true);
+    setNameError('');
+
+    try {
+      // Cooldown validation: 1 month (30 days)
+      const lastChanged = profile.lastUsernameChangedAt;
+      const cooldownMs = 30 * 24 * 60 * 60 * 1000;
+      if (lastChanged && (Date.now() - lastChanged < cooldownMs)) {
+        setNameError('You can only change your username once a month.');
+        setSavingName(false);
+        return;
+      }
+
+      // Unique check
+      const q = query(collection(db, 'users'), where('displayName', '==', trimmed));
+      const snap = await getDocs(q);
+      let taken = false;
+      snap.forEach((docSnap) => {
+        if (docSnap.id !== user.uid) taken = true;
+      });
+
+      if (taken) {
+        setNameError('Username is already taken by another player');
+        setSavingName(false);
+        return;
+      }
+
+      await updateCachedProfile({
+        displayName: trimmed,
+        lastUsernameChangedAt: Date.now()
+      });
+
+      setIsNameModalOpen(false);
+    } catch (e: any) {
+      setNameError(e.message || 'Failed to update username');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const hasNameCooldown = (() => {
+    const lastChanged = profile.lastUsernameChangedAt;
+    const cooldownMs = 30 * 24 * 60 * 60 * 1000;
+    return lastChanged && (Date.now() - lastChanged < cooldownMs);
+  })();
+
+  const nextChangeDate = profile.lastUsernameChangedAt 
+    ? new Date(profile.lastUsernameChangedAt + 30 * 24 * 60 * 60 * 1000) 
+    : null;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8 space-y-8 text-left animate-fade-in">
-      {/* Header Navigation */}
+    <div className="max-w-4xl mx-auto px-4 py-8 space-y-8 text-left animate-fade-in">
+      
+      {/* Header */}
       <div className="flex items-center justify-between">
         <button
           onClick={onBack}
           className="flex items-center space-x-2 text-slate-400 hover:text-white transition-colors text-sm font-medium cursor-pointer"
         >
           <ChevronLeft className="w-4 h-4" />
-          <span>Back to Dashboard</span>
+          <span>Back to Home</span>
         </button>
       </div>
 
-      {/* Profile Header Card */}
-      <div className="glass p-6 sm:p-8 rounded-2xl border border-white/5 relative overflow-hidden shadow-2xl">
-        {/* Glowing Background Glows */}
-        <div className="absolute top-0 right-0 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-amber-600/5 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
-
-        <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-8 relative z-10">
-          {/* Avatar with Glow based on best achievement */}
-          <div className="relative flex-shrink-0">
+      {/* Profile Header */}
+      <div className="bg-zinc-900 border border-zinc-800 p-6 sm:p-8 rounded-2xl relative shadow-xl">
+        <div className="flex flex-col sm:flex-row items-center gap-6 relative z-10">
+          
+          {/* Avatar Photo Selector */}
+          <div className="relative group shrink-0">
             <img
-              src={profile.photoURL || user.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=150&h=150&fit=crop'}
+              src={profile.photoURL}
               alt={profile.displayName}
-              className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover ring-4 ring-white/10 shadow-2xl relative z-10"
+              className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover border border-zinc-800 shadow-xl"
             />
-            <div className="absolute -bottom-2 -right-2 flex flex-col gap-1 items-end z-20">
-              {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
-                <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950 px-2 py-0.5 rounded text-[10px] font-bold shadow-md">
-                  GM
-                </span>
-              )}
-              {bestAch && (
-                <span className="bg-slate-900 border border-white/15 px-2 py-0.5 rounded-full text-xs font-bold text-slate-200 shadow-md flex items-center gap-1">
-                  {bestAch.badge.split(' ')[0]} {bestAch.badge.split(' ')[1]}
-                </span>
-              )}
-            </div>
+            <button
+              onClick={() => {
+                setCustomPhotoUrl('');
+                setPhotoError('');
+                setIsPhotoModalOpen(true);
+              }}
+              className="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer border border-white/10"
+              title="Edit Profile Photo"
+            >
+              <Camera className="w-6 h-6 text-white" />
+            </button>
           </div>
 
-          {/* User Meta Data */}
-          <div className="flex-grow space-y-3 text-center md:text-left">
+          {/* Profile details */}
+          <div className="flex-grow space-y-3 text-center sm:text-left">
             <div className="space-y-1">
-              <h2 className="text-3xl font-extrabold tracking-wide text-white flex flex-wrap items-center justify-center md:justify-start gap-3">
-                <span>{profile.displayName}</span>
-                {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
-                  <span className="font-serif font-extrabold tracking-wider bg-gradient-to-r from-amber-400 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.8)] border border-amber-400/60 bg-amber-950/40 px-2.5 py-0.5 rounded-lg text-xs font-bold select-none animate-pulse" title="Grandmaster (Rating 2500+)">
-                    GM
-                  </span>
-                )}
-                {bestAch && (
-                  <span className={`px-2.5 py-0.5 rounded-lg text-xs font-bold border ${bestAch.color.split(' ')[0]} ${bestAch.color.split(' ')[1]} ${bestAch.color.split(' ')[2]}`} title={bestAch.description}>
-                    {bestAch.name}
-                  </span>
-                )}
-              </h2>
-              <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-4 gap-y-1 text-sm text-slate-400">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="w-4 h-4 text-violet-400" />
-                  <span>Joined {joinDate}</span>
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
+                <h2 className="text-2xl font-extrabold text-white">{profile.displayName}</h2>
+                <button
+                  onClick={() => {
+                    setNewName(profile.displayName);
+                    setNameError('');
+                    setIsNameModalOpen(true);
+                  }}
+                  className="p-1 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer border border-zinc-750"
+                  title="Edit Username"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-x-4 gap-y-1.5 text-xs text-slate-400 font-medium">
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Joined {new Date(profile.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}</span>
                 </span>
-                <span className="text-slate-600 hidden sm:inline">•</span>
-                <span className="flex items-center gap-1.5">
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>Elo: <strong className="text-amber-300 font-mono">{profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating}</strong></span>
+                <span className="text-zinc-700 hidden sm:inline">•</span>
+                <span className="flex items-center gap-1 text-amber-400">
+                  <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="font-semibold font-mono">{profile.rating || 1200} Elo</span>
                 </span>
-                <span className="text-slate-600 hidden sm:inline">•</span>
-                <span className="flex items-center gap-1.5 bg-slate-900/40 px-2 py-0.5 rounded-lg border border-white/5 text-xs text-slate-300">
-                  <span className="text-sm select-none mr-1">{getCountryFlag(profile.country || '')}</span>
-                  <span>{profile.country || 'No Represented Country'}</span>
-                  <button
-                    onClick={handleOpenEditCountry}
-                    className="ml-2 text-xs text-violet-400 hover:text-violet-300 underline cursor-pointer"
-                  >
-                    Edit
-                  </button>
+                <span className="text-zinc-700 hidden sm:inline">•</span>
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Users className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+                  <span className="font-semibold font-mono">{friendCount} Friend{friendCount !== 1 ? 's' : ''}</span>
                 </span>
               </div>
             </div>
-
-            {bestAch ? (
-              <p className="text-sm text-slate-300 bg-white/5 border border-white/5 px-4 py-2 rounded-xl inline-block max-w-xl font-light">
-                🏆 <strong className="text-violet-300">Highest Accolade Unlocked:</strong> {bestAch.description}
-              </p>
-            ) : (
-              <p className="text-sm text-slate-400 italic">
-                Play 5 games in any format to unlock your first achievement milestone badge!
-              </p>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Main Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Elo Rating Card */}
-        <div className="glass p-5 rounded-xl border border-white/5 flex items-center space-x-4">
-          <div className="p-3 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400">
-            <Trophy className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Chess Rating</span>
-            <span className="text-2xl font-black font-mono text-violet-300">{profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating} Elo</span>
-          </div>
-        </div>
-
-        {/* Total Coins Earned Card */}
-        <div className="glass p-5 rounded-xl border border-white/5 flex items-center space-x-4">
-          <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400 flex items-center justify-center w-12 h-12">
-            <img src="/coin_pack/100 coins.png" alt="Coin" className="w-6 h-6 object-contain" />
-          </div>
-          <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Total Coins Earned</span>
-            <span className="text-2xl font-black font-mono text-amber-400 flex items-center gap-1.5 whitespace-nowrap">
-              <span>{(profile.totalCoinsEarned ?? (profile.currentBalance !== undefined ? profile.currentBalance : profile.bankBalance)).toLocaleString()}</span>
-              <img src="/coin_pack/100 coins.png" alt="Coin" className="w-5 h-5 object-contain" />
-            </span>
-          </div>
-        </div>
-
-        {/* Gameplay Summary Card */}
-        <div className="glass p-5 rounded-xl border border-white/5 flex items-center space-x-4">
-          <div className="p-3 bg-blue-500/10 rounded-xl border border-blue-500/20 text-blue-400">
-            <Gamepad2 className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Total Gameplays</span>
-            <span className="text-2xl font-black font-mono text-blue-300">{totalGames} Games</span>
-          </div>
-        </div>
-
-        {/* Win Rate Card */}
-        <div className="glass p-5 rounded-xl border border-white/5 flex items-center space-x-4">
-          <div className="p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400">
-            <Percent className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Win Rate Ratio</span>
-            <span className="text-2xl font-black font-mono text-emerald-300">{winRate}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Elo Rating History Chart */}
-      <div className="glass p-6 rounded-xl border border-white/5 space-y-5 relative">
-        <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
-          <LineChart className="w-5 h-5 text-violet-400" />
-          <span>Elo Evolution History</span>
-        </h3>
-
-        {loadingHistory ? (
-          <div className="h-[200px] flex items-center justify-center text-xs text-slate-500">
-            Reconstructing rating timeline...
-          </div>
-        ) : ratingHistory.length <= 1 ? (
-          <div className="h-[200px] flex flex-col items-center justify-center text-xs text-slate-500 italic space-y-2 text-center">
-            <span>Not enough matches played yet to chart Elo history.</span>
-            <span>Play rated matches to see your progress!</span>
-          </div>
-        ) : (
-          <div className="relative w-full h-[220px] bg-slate-950/20 rounded-xl border border-white/5 p-4 flex items-center justify-center">
-            {/* SVG Plot */}
-            {(() => {
-              const width = 500;
-              const height = 180;
-              const paddingLeft = 40;
-              const paddingRight = 20;
-              const paddingTop = 20;
-              const paddingBottom = 30;
-              const chartWidth = width - paddingLeft - paddingRight;
-              const chartHeight = height - paddingTop - paddingBottom;
-
-              const elos = ratingHistory.map((h) => h.elo);
-              const maxElo = Math.max(...elos);
-              const minElo = Math.min(...elos);
-              const yMax = maxElo + 25;
-              const yMin = Math.max(0, minElo - 25);
-              const eloRange = yMax - yMin || 100;
-
-              const points = ratingHistory.map((h, idx) => {
-                const x = paddingLeft + (idx * chartWidth) / (ratingHistory.length - 1 || 1);
-                const y = paddingTop + chartHeight - ((h.elo - yMin) * chartHeight) / eloRange;
-                return { x, y, ...h };
-              });
-
-              const pathD = points.reduce((acc, p, idx) => {
-                return idx === 0 ? `M ${p.x} ${p.y}` : `${acc} L ${p.x} ${p.y}`;
-              }, '');
-
-              const areaD = points.length > 0 
-                ? `${pathD} L ${points[points.length - 1].x} ${height - paddingBottom} L ${points[0].x} ${height - paddingBottom} Z` 
-                : '';
-
-              const gridValues = [yMin, Math.round(yMin + eloRange / 2), yMax];
-
-              return (
-                <div className="w-full h-full relative">
-                  <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
-                    <defs>
-                      <linearGradient id="chartLineGrad" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0%" stopColor="#8b5cf6" />
-                        <stop offset="100%" stopColor="#6366f1" />
-                      </linearGradient>
-                      <linearGradient id="chartAreaGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.2" />
-                        <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
-                      </linearGradient>
-                    </defs>
-
-                    {/* Horizontal Gridlines */}
-                    {gridValues.map((val, idx) => {
-                      const y = paddingTop + chartHeight - ((val - yMin) * chartHeight) / eloRange;
-                      return (
-                        <g key={idx} className="opacity-30">
-                          <line
-                            x1={paddingLeft}
-                            y1={y}
-                            x2={width - paddingRight}
-                            y2={y}
-                            stroke="#475569"
-                            strokeWidth="1"
-                            strokeDasharray="4 4"
-                          />
-                          <text
-                            x={paddingLeft - 8}
-                            y={y + 3}
-                            fill="#94a3b8"
-                            fontSize="8"
-                            textAnchor="end"
-                            className="font-mono"
-                          >
-                            {val}
-                          </text>
-                        </g>
-                      );
-                    })}
-
-                    {/* Timeline Line Path */}
-                    <path
-                      d={pathD}
-                      fill="none"
-                      stroke="url(#chartLineGrad)"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                    />
-
-                    {/* Area under the line */}
-                    <path d={areaD} fill="url(#chartAreaGrad)" />
-
-                    {/* Timeline Data Circles */}
-                    {points.map((p, idx) => {
-                      const isHovered = hoveredPoint?.date === p.date && hoveredPoint?.elo === p.elo;
-                      return (
-                        <circle
-                          key={idx}
-                          cx={p.x}
-                          cy={p.y}
-                          r={isHovered ? 5.5 : 3.5}
-                          fill={isHovered ? '#8b5cf6' : '#a78bfa'}
-                          stroke="#ffffff"
-                          strokeWidth={isHovered ? 2 : 1}
-                          className="transition-all cursor-pointer"
-                          onMouseEnter={() => setHoveredPoint(p)}
-                          onMouseLeave={() => setHoveredPoint(null)}
-                        />
-                      );
-                    })}
-                  </svg>
-
-                  {/* Tooltip Overlay */}
-                  {hoveredPoint && (
-                    <div
-                      className="absolute bg-slate-900/95 backdrop-blur border border-violet-500/30 text-white rounded-lg px-2.5 py-1.5 shadow-2xl pointer-events-none text-left z-20 animate-scale-up"
-                      style={{
-                        left: `${((hoveredPoint.x - paddingLeft) / chartWidth) * 100}%`,
-                        top: `${((hoveredPoint.y - paddingTop) / chartHeight) * 100 - 30}%`,
-                        transform: 'translate(-50%, -100%)',
-                      }}
-                    >
-                      <p className="text-[8px] text-slate-400 uppercase tracking-widest font-semibold">{hoveredPoint.date}</p>
-                      <p className="text-xs font-black text-violet-300 font-mono">{hoveredPoint.elo} Elo</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        )}
-      </div>
-
-      {/* Matchmaking Statistics details & Record */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Record Breakout */}
-        <div className="glass p-6 rounded-xl border border-white/5 space-y-4">
-          <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
-            <Star className="w-5 h-5 text-amber-400" />
-            <span>Match Outcome Records</span>
+      {/* Main Stats and Match History Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+        
+        {/* Left column: Quick Stats Card */}
+        <div className="md:col-span-1 bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4">
+          <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider border-b border-zinc-850 pb-2.5">
+            Battle Summary
           </h3>
           <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-sm text-slate-400">Wins</span>
-              <span className="text-sm font-bold text-emerald-400 font-mono">{wins}</span>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Wins</span>
+              <span className="font-bold text-emerald-400 font-mono">{profile.wins || 0}</span>
             </div>
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-sm text-slate-400">Losses</span>
-              <span className="text-sm font-bold text-red-400 font-mono">{losses}</span>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Losses</span>
+              <span className="font-bold text-red-400 font-mono">{profile.losses || 0}</span>
             </div>
-            <div className="flex items-center justify-between border-b border-white/5 pb-2">
-              <span className="text-sm text-slate-400">Draws</span>
-              <span className="text-sm font-bold text-slate-400 font-mono">{draws}</span>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-slate-400">Draws</span>
+              <span className="font-bold text-zinc-400 font-mono">{profile.draws || 0}</span>
             </div>
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-sm text-slate-300 font-semibold">Total Settled</span>
-              <span className="text-sm font-black text-violet-300 font-mono">{totalGames}</span>
+            <div className="flex items-center justify-between text-xs border-t border-zinc-850 pt-2 font-semibold">
+              <span className="text-slate-300">Total Played</span>
+              <span className="font-bold text-violet-400 font-mono">{profile.totalGamesPlayed || 0} Matches</span>
             </div>
           </div>
         </div>
 
-        {/* Gameplay counts by mode */}
-        <div className="glass p-6 rounded-xl border border-white/5 md:col-span-2 space-y-4">
-          <h3 className="text-base font-bold text-slate-200 flex items-center gap-2">
-            <Gamepad2 className="w-5 h-5 text-violet-400" />
-            <span>Arena Gameplay Frequency Counts</span>
+        {/* Right column: Recent Games List */}
+        <div className="md:col-span-2 bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-4 text-left">
+          <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider border-b border-zinc-850 pb-2.5 flex items-center gap-2">
+            <History className="w-4 h-4 text-violet-400" />
+            <span>Previous Games</span>
           </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[190px] overflow-y-auto scrollbar-thin pr-2">
-            {Object.keys(MODE_DETAILS).map((modeKey) => {
-              const details = MODE_DETAILS[modeKey];
-              const plays = profile.gameplayCounts?.[modeKey] || 0;
-              return (
-                <div key={modeKey} className="flex items-center justify-between bg-slate-950/35 border border-white/5 px-3.5 py-2.5 rounded-lg">
-                  <div>
-                    <span className="text-xs font-bold text-slate-300 block">{details.label}</span>
-                    <span className="text-[10px] text-slate-500 font-mono">{details.tc} • Entry: {details.price}</span>
-                  </div>
-                  <span className="text-xs font-bold font-mono bg-white/5 px-2 py-1 rounded text-violet-300">
-                    {plays} {plays === 1 ? 'play' : 'plays'}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
 
-      {/* Achievement Badges Showcase */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-            <Award className="w-5 h-5 text-violet-400" />
-            <span>Arena Milestone Achievements</span>
-          </h3>
-          <p className="text-xs text-slate-500">
-            Unlocking an achievement requires playing 5 matches in that specific game mode. Unlocked badges display next to your name.
-          </p>
-        </div>
-
-        {/* GM — Special Elo-Based Achievement Card */}
-        <div className={`relative glass p-5 rounded-xl border transition-all duration-300 overflow-hidden ${
-          (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
-            ? 'border-amber-500/50 bg-gradient-to-r from-amber-950/20 via-yellow-950/10 to-amber-950/20 shadow-lg shadow-amber-500/10'
-            : 'border-white/5 opacity-50'
-        }`}>
-          {/* Gold shimmer effect on unlock */}
-          {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 && (
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-amber-400/5 to-transparent animate-[shimmer_3s_ease-in-out_infinite]" />
+          {loadingMatches ? (
+            <div className="py-8 text-center text-xs text-slate-500">
+              Loading recent match logs...
             </div>
-          )}
-          <div className="relative flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              {/* GM badge preview */}
-              <div className={`flex items-center justify-center w-14 h-14 rounded-xl border text-2xl font-serif font-black tracking-widest select-none ${
-                (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
-                  ? 'border-amber-400/50 bg-amber-950/40 bg-gradient-to-br from-amber-400/10 to-yellow-500/5 shadow-[0_0_20px_rgba(251,191,36,0.3)]'
-                  : 'border-white/5 bg-white/3'
-              }`}>
-                {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 ? (
-                  <span className="bg-gradient-to-b from-amber-300 via-yellow-200 to-amber-500 bg-clip-text text-transparent drop-shadow-[0_0_8px_rgba(251,191,36,0.9)] animate-pulse">
-                    GM
-                  </span>
-                ) : (
-                  <span className="text-slate-600 text-lg">GM</span>
-                )}
-              </div>
-
-              <div className="space-y-0.5 text-left">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-bold text-slate-200">Grandmaster</span>
-                  {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500 ? (
-                    <span className="bg-amber-950/60 border border-amber-500/30 px-2 py-0.5 rounded text-[9px] font-bold text-amber-400 tracking-wider uppercase">
-                      UNLOCKED
-                    </span>
-                  ) : (
-                    <span className="bg-slate-900 border border-white/5 px-2 py-0.5 rounded text-[9px] font-bold text-slate-500 tracking-wider uppercase">
-                      LOCKED
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 font-light max-w-md">
-                  {(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
-                    ? 'You have reached the pinnacle of chess mastery. The GM title is displayed alongside your name everywhere.'
-                    : `Achieve a rating of 2500 Elo to unlock the Grandmaster title. Currently at ${profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating} Elo (${Math.max(0, 2500 - (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating))} to go).`}
-                </p>
-              </div>
+          ) : recentMatches.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-500 italic">
+              No completed matches found in history. Challenge a friend to play!
             </div>
+          ) : (
+            <div className="divide-y divide-zinc-850">
+              {recentMatches.map((m) => {
+                const oppUid = m.players.find((p: string) => p !== user.uid);
+                const opponent = opponentProfiles[oppUid] || { displayName: 'Challenger', photoURL: '' };
+                
+                const isDraw = m.status === 'draw' || !m.winnerUid;
+                const won = m.winnerUid === user.uid;
 
-            {/* Elo progress bar to 2500 */}
-            <div className="hidden sm:flex flex-col items-end gap-1.5 shrink-0 min-w-[100px]">
-              <span className="text-[10px] text-slate-500 font-mono font-semibold">{Math.min(profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating, 2500)} / 2500 Elo</span>
-              <div className="w-24 bg-slate-950 rounded-full h-1.5 overflow-hidden border border-white/5">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${
-                    (profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) >= 2500
-                      ? 'bg-gradient-to-r from-amber-500 to-yellow-300 shadow-[0_0_6px_rgba(251,191,36,0.7)]'
-                      : 'bg-violet-600'
-                  }`}
-                  style={{ width: `${Math.min(100, ((profile.currentEloRating !== undefined ? profile.currentEloRating : profile.rating) / 2500) * 100)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {ACHIEVEMENTS.map((ach) => {
-            const count = profile.gameplayCounts?.[ach.id] || 0;
-            const isUnlocked = count >= 5;
-            const remaining = Math.max(0, 5 - count);
-
-            return (
-              <div
-                key={ach.id}
-                className={`glass p-5 rounded-xl border flex flex-col justify-between transition-all duration-300 hover:scale-[1.01] ${
-                  isUnlocked
-                    ? `${ach.color} border-white/10`
-                    : 'border-white/5 opacity-60 hover:opacity-85'
-                }`}
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-sm text-slate-200">{ach.name}</span>
-                    {isUnlocked ? (
-                      <span className="bg-emerald-950/50 border border-emerald-500/20 px-2 py-0.5 rounded text-[9px] font-bold text-emerald-400 tracking-wider">
-                        UNLOCKED
-                      </span>
-                    ) : (
-                      <span className="bg-slate-900 border border-white/5 px-2 py-0.5 rounded text-[9px] font-bold text-slate-400 tracking-wider">
-                        LOCKED
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 leading-normal min-h-[32px] font-light">
-                    {ach.description}
-                  </p>
-                </div>
-
-                {/* Progress Tracks */}
-                <div className="mt-4 pt-3 border-t border-white/5 space-y-1.5">
-                  <div className="flex items-center justify-between text-[10px] text-slate-400">
-                    <span>Milestone Progress</span>
-                    <span className="font-mono font-semibold text-slate-300">{count}/5 games</span>
-                  </div>
-                  <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-white/5">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        isUnlocked ? 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]' : 'bg-violet-600'
-                      }`}
-                      style={{ width: `${Math.min(100, (count / 5) * 100)}%` }}
-                    />
-                  </div>
-                  {!isUnlocked && (
-                    <p className="text-[9px] text-slate-500 text-right font-medium">
-                      Need {remaining} more {remaining === 1 ? 'game' : 'games'} to unlock
-                    </p>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Active & Recent Matches */}
-      <div className="space-y-4">
-        <div className="space-y-1">
-          <h3 className="text-lg font-bold text-slate-200 flex items-center gap-2">
-            <Gamepad2 className="w-5 h-5 text-violet-400" />
-            <span>Recent & Active Matches</span>
-          </h3>
-          <p className="text-xs text-slate-500 text-left">
-            Review your recently finished matches, analyze your play move-by-move, or resume ongoing battles.
-          </p>
-        </div>
-
-        {loadingMatches ? (
-          <div className="py-10 text-center text-xs text-slate-500">
-            Scanning active game rooms...
-          </div>
-        ) : recentMatches.length === 0 ? (
-          <div className="glass p-8 rounded-xl text-center border border-white/5 text-slate-500 text-xs italic">
-            No match history found. Play games to populate your history!
-          </div>
-        ) : (
-          <div className="glass rounded-xl border border-white/5 divide-y divide-white/5 overflow-hidden shadow-xl">
-            {recentMatches.map((m) => {
-              const isMWhite = m.whiteUid === user.uid;
-              const oppUid = isMWhite ? m.blackUid : m.whiteUid;
-              const isActive = m.status === 'active';
-              const oppProfile = opponentProfiles[oppUid];
-              const friendStatus = opponentFriendStatus[oppUid];
-
-              const resultLabel = isActive ? null
-                : m.winnerUid === user.uid ? 'WON'
-                  : m.winnerUid ? 'LOST'
-                    : 'DRAW';
-
-              const resultColor = isActive ? ''
-                : m.winnerUid === user.uid ? 'text-emerald-400'
-                  : m.winnerUid ? 'text-red-400'
-                    : 'text-slate-500';
-
-              return (
-                <div
-                  key={m.id}
-                  className={`flex flex-col sm:flex-row sm:items-center justify-between px-5 py-4 gap-4 ${
-                    isActive ? 'bg-violet-950/15' : 'hover:bg-white/[0.02]'
-                  } transition-colors`}
-                >
-                  {/* Left: Status badge + opponent */}
-                  <div className="flex items-center gap-4 min-w-0">
-                    <span className={`shrink-0 px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider ${
-                      isActive ? 'bg-violet-500/25 text-violet-300 border border-violet-500/20' : 'bg-slate-800/80 text-slate-500 border border-white/5'
-                    }`}>
-                      {isActive ? 'LIVE' : m.status}
-                    </span>
-
-                    {oppProfile?.photoURL && (
-                      <img
-                        src={oppProfile.photoURL}
-                        alt={oppProfile.displayName}
-                        className="w-8 h-8 rounded-full object-cover border border-white/10 shrink-0 cursor-pointer hover:opacity-85 transition-opacity shadow-md"
-                        title="View Profile"
-                        onClick={() => setSelectedProfile(oppProfile)}
-                      />
-                    )}
-
-                    <div className="min-w-0 text-left">
-                      <p className="text-sm font-semibold text-slate-200 truncate flex items-center gap-1.5">
-                        <span>vs {oppProfile?.displayName || `${oppUid.substring(0, 8)}…`}</span>
-                        {oppProfile && !oppUid.startsWith('bot_') && (
-                          <span className="text-[10px] text-slate-500 font-mono">({oppProfile.rating} Elo)</span>
-                        )}
-                      </p>
-                      <p className="text-[10px] text-slate-500 capitalize truncate mt-0.5">
-                        {m.mode.replace(/_/g, ' ')} &bull; {
-                          m.mode === 'all_in' && m.allInStakes && user
-                            ? formatCoins(m.allInStakes[user.uid] || 0)
-                            : formatCoins(m.stake)
-                        } &bull; {new Date(m.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Right: friend action + result or resume/analyze */}
-                  <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
-                    <div className="flex items-center gap-2">
-                      {friendStatus === 'friend' ? (
-                        <span className="flex items-center gap-1 text-[10px] text-emerald-400 font-bold bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10">
-                          <Check className="w-3 h-3" /> Friends
-                        </span>
-                      ) : friendStatus === 'sent' || friendStatus === 'sending' ? (
-                        <span className="text-[10px] text-slate-400 font-medium animate-pulse bg-slate-900 border border-white/5 px-2 py-0.5 rounded">
-                          {friendStatus === 'sending' ? 'Sending…' : 'Sent'}
-                        </span>
-                      ) : oppProfile && !oppUid.startsWith('bot_') ? (
-                        <button
-                          onClick={() => handleSendOpponentFriendRequest(oppUid)}
-                          className="flex items-center gap-1 text-[10px] font-bold text-violet-400 hover:text-white bg-violet-600/10 hover:bg-violet-600 border border-violet-500/20 px-2.5 py-1 rounded-lg transition-all cursor-pointer shadow"
-                        >
-                          <UserPlus className="w-3 h-3" />
-                          Add Friend
-                        </button>
-                      ) : null}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {isActive ? (
-                        <button
-                          onClick={() => onStartGame(m.id)}
-                          className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-lg shadow-violet-600/10 transition-all cursor-pointer border border-violet-500/20"
-                        >
-                          Resume
-                        </button>
+                return (
+                  <div key={m.id} className="flex items-center justify-between py-3.5 first:pt-0 last:pb-0">
+                    <div className="flex items-center space-x-3 text-left">
+                      {opponent.photoURL ? (
+                        <img src={opponent.photoURL} alt={opponent.displayName} className="w-8 h-8 rounded-full object-cover border border-zinc-850" />
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs font-black tracking-wider ${resultColor} px-2 py-1 bg-slate-900/40 rounded border border-white/5`}>
-                            {resultLabel}
-                          </span>
-                          <button
-                            onClick={() => onStartGame(m.id)}
-                            className="bg-slate-900/80 hover:bg-slate-800 text-slate-200 text-xs font-bold px-4 py-2 rounded-xl border border-white/10 transition-all cursor-pointer hover:border-white/20 shadow-md"
-                          >
-                            Analyze
-                          </button>
+                        <div className="w-8 h-8 rounded-full bg-zinc-950 flex items-center justify-center text-zinc-500 text-xs">
+                          <User className="w-4 h-4" />
                         </div>
+                      )}
+                      <div>
+                        <span className="text-xs font-semibold text-white block">
+                          vs {opponent.displayName}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Rollmate Mode • {new Date(m.finishedAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      {isDraw ? (
+                        <span className="text-[10px] bg-zinc-800 text-zinc-400 font-semibold px-2 py-0.5 rounded uppercase">Draw</span>
+                      ) : won ? (
+                        <span className="text-[10px] bg-emerald-950/40 text-emerald-400 font-semibold px-2 py-0.5 rounded border border-emerald-500/10 uppercase">Victory</span>
+                      ) : (
+                        <span className="text-[10px] bg-red-950/40 text-red-400 font-semibold px-2 py-0.5 rounded border border-red-500/10 uppercase">Defeat</span>
                       )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
+
       </div>
 
-      {selectedProfile && (
-        <ProfilePopup
-          profile={selectedProfile}
-          onClose={() => setSelectedProfile(null)}
-        />
-      )}
-
-      {/* Edit Country Modal */}
-      {isEditCountryOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm px-4">
-          <div className="glass max-w-md w-full rounded-2xl border border-white/10 p-6 shadow-2xl relative flex flex-col text-left">
+      {/* 1. Photo selector Pop Up Modal */}
+      {isPhotoModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 z-50 animate-fade-in">
+          <div className="bg-zinc-900 border border-zinc-800 max-w-md w-full rounded-2xl shadow-2xl p-6 relative space-y-6 text-left">
             <button
-              onClick={() => setIsEditCountryOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              onClick={() => setIsPhotoModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="space-y-2">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <Globe className="w-5 h-5 text-violet-400" />
-                <span>Represent Country</span>
-              </h3>
-              <p className="text-xs text-slate-400">
-                Choose the country you want to represent. This can only be updated once per calendar month.
-              </p>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white">Update Profile Photo</h3>
+              <p className="text-xs text-slate-500">Choose from pre-set avatars or paste a custom image URL.</p>
             </div>
 
-            <div className="mt-4">
-              {(() => {
-                const isLocked = isCountryChangeLocked(profile.lastCountryChangedAt);
-                if (isLocked && profile.lastCountryChangedAt) {
-                  const unlockDate = getNextCalendarMonthStart(profile.lastCountryChangedAt);
-                  return (
-                    <div className="bg-amber-950/20 border border-amber-500/10 rounded-xl p-4 space-y-3">
-                      <div className="flex items-center space-x-2 text-amber-400 font-semibold text-xs">
-                        <Lock className="w-4 h-4 animate-pulse" />
-                        <span>Country Edit Locked</span>
-                      </div>
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        You have already set your country representation for this calendar month. You can update it again in the next month.
-                      </p>
-                      <div className="flex items-center space-x-2 text-[10px] text-slate-500">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>Available on: <strong className="text-slate-400">{unlockDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong></span>
-                      </div>
-                      <button
-                        onClick={() => setIsEditCountryOpen(false)}
-                        className="w-full mt-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2.5 rounded-lg transition-all cursor-pointer"
-                      >
-                        Close
-                      </button>
-                    </div>
-                  );
-                }
+            {/* Custom Photo URL Form */}
+            <div className="space-y-3">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Custom Image URL</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Paste direct URL (https://...)"
+                  value={customPhotoUrl}
+                  onChange={(e) => setCustomPhotoUrl(e.target.value)}
+                  className="flex-grow bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+                />
+                <button
+                  onClick={() => handleSavePhoto(customPhotoUrl)}
+                  className="bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                >
+                  Save
+                </button>
+              </div>
+              {photoError && <p className="text-xs text-red-400">{photoError}</p>}
+            </div>
 
-                return (
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                        Country Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. India, United States"
-                        value={countryInput}
-                        onChange={(e) => setCountryInput(e.target.value)}
-                        className="w-full bg-slate-900/60 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-violet-500"
-                        maxLength={50}
-                        disabled={savingCountry}
-                      />
-                    </div>
-
-                    {countryError && (
-                      <p className="text-xs text-red-400 font-semibold">{countryError}</p>
-                    )}
-
-                    <div className="flex gap-3">
-                      <button
-                        onClick={() => setIsEditCountryOpen(false)}
-                        className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-semibold py-2.5 rounded-lg transition-all border border-white/5 cursor-pointer text-center"
-                        disabled={savingCountry}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleSaveCountry}
-                        className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold py-2.5 rounded-lg transition-all border border-violet-500/20 cursor-pointer text-center shadow-lg shadow-violet-600/10"
-                        disabled={savingCountry}
-                      >
-                        {savingCountry ? 'Saving...' : 'Represent'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })()}
+            {/* Default Avatar Select Grid */}
+            <div className="space-y-3 pt-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Chess Avatar</label>
+              <div className="grid grid-cols-4 gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-850">
+                {DEFAULT_AVATARS.map((av) => (
+                  <button
+                    key={av.name}
+                    onClick={() => handleSavePhoto(av.url)}
+                    className="p-1 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-violet-500 hover:bg-zinc-900 transition-all flex items-center justify-center aspect-square shadow cursor-pointer group"
+                    title={av.name}
+                  >
+                    <img src={av.url} alt={av.name} className="w-10 h-10 object-contain group-hover:scale-110 transition-transform" />
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* 2. Username change Pop Up Modal */}
+      {isNameModalOpen && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 z-50 animate-fade-in">
+          <div className="bg-zinc-900 border border-zinc-800 max-w-sm w-full rounded-2xl shadow-2xl p-6 relative space-y-6 text-left">
+            <button
+              onClick={() => setIsNameModalOpen(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <User className="w-5 h-5 text-violet-400" />
+                <span>Change Username</span>
+              </h3>
+              <p className="text-xs text-slate-500">
+                Edit your display name. You can only change your username once a month.
+              </p>
+            </div>
+
+            {hasNameCooldown && nextChangeDate ? (
+              <div className="bg-amber-950/20 border border-amber-500/10 rounded-xl p-4 space-y-2">
+                <div className="flex items-center space-x-2 text-amber-400 font-semibold text-xs">
+                  <Lock className="w-4 h-4 animate-pulse" />
+                  <span>Username Locked</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  You updated your username recently. The change cooldown limits edits to once every 30 days.
+                </p>
+                <p className="text-[10px] text-slate-500">
+                  Available again on: {nextChangeDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
+                </p>
+                <button
+                  onClick={() => setIsNameModalOpen(false)}
+                  className="w-full mt-2 bg-zinc-800 hover:bg-zinc-700 text-slate-200 text-xs font-semibold py-2.5 rounded-lg cursor-pointer transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">New Username</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => {
+                      setNewName(e.target.value);
+                      setNameError('');
+                    }}
+                    placeholder="Enter unique username..."
+                    maxLength={20}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+                  />
+                  {nameError && <p className="text-[11px] text-red-400 font-semibold">{nameError}</p>}
+                </div>
+
+                <div className="flex items-center space-x-2 pt-2">
+                  <button
+                    onClick={() => setIsNameModalOpen(false)}
+                    className="flex-1 bg-zinc-850 hover:bg-zinc-800 text-slate-300 border border-zinc-800 py-2.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveUsername}
+                    disabled={savingName || !newName.trim()}
+                    className="flex-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white py-2.5 rounded-lg text-xs font-semibold cursor-pointer disabled:opacity-50 transition-all"
+                  >
+                    {savingName ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

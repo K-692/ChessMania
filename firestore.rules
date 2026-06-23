@@ -12,105 +12,35 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
     
+    // User profile document rules
     match /users/{uid} {
-      allow read: if true;
-      // Allow creation of own profile with starting parameters
-      allow create: if isOwner(uid) 
-        && (request.resource.data.currentBalance == 1000 || request.resource.data.bankBalance == 1000)
-        && (request.resource.data.currentEloRating == 0 || request.resource.data.rating == 0);
-      // Allow owner to update. In a client-side transaction, the owner is updating their own and/or other documents.
-      allow update: if isOwner(uid) || isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid);
 
-      // Nested subcollections
+      // Friends subcollection
       match /friends/{friendId} {
-        allow read, write: if isAuthenticated();
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
       }
-      match /friendlyChallenges/{challengeId} {
-        allow read, write: if isAuthenticated();
-      }
-      match /eloHistory/{entryId} {
-        allow read, write: if isAuthenticated();
-      }
+      
+      // Chat Threads messages subcollection
       match /chatThreads/{threadId}/messages/{msgId} {
         allow read, write: if isAuthenticated();
       }
     }
     
-    match /matchQueues/{id} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if isAuthenticated() && (
-        resource.data.uid == request.auth.uid || 
-        request.resource.data.status == 'matched'
-      );
-    }
-    
+    // Matches history records rules
     match /matches/{matchId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        request.auth.uid in resource.data.players || 
-        resource.data.players == null
-      );
-
-      match /messages/{messageId} {
-        allow read, write: if isAuthenticated();
-      }
-
-      match /moves/{moveId} {
-        allow read, write: if isAuthenticated();
-      }
+      allow update: if isAuthenticated();
     }
     
-    match /walletLedger/{entryId} {
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid);
-      allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
-    }
-    
-    match /transactions/{id} {
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.uid == request.auth.uid || resource.data.user_id == request.auth.uid);
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
-      allow update, delete: if false;
-    }
-    
-    match /leaderboards/{seasonId}/players/{uid} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    match /ratingLedger/{entryId} {
-      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid);
-      allow create: if isAuthenticated() && (request.resource.data.uid == request.auth.uid || request.resource.data.opponentUid == request.auth.uid);
-    }
-    
-    match /topups/{entryId} {
-      allow read, write: if isAuthenticated() && (request.resource.data.uid == request.auth.uid);
-    }
-    
-    match /friendships/{id} {
-      allow read, write: if isAuthenticated();
-
-      match /messages/{messageId} {
-        allow read, write: if isAuthenticated();
-      }
-    }
-    
+    // Challenges in RTDB (this is Firestore rules, so challenges collection in Firestore is not used, 
+    // but we can allow it just in case, or remove it. Let's keep it simple).
     match /challenges/{id} {
       allow read, write: if isAuthenticated();
-    }
-
-    match /supportQueries/{id} {
-      allow create: if isAuthenticated() && (request.resource.data.userId == request.auth.uid || request.resource.data.uid == request.auth.uid);
-      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.uid == request.auth.uid);
-    }
-
-    match /mail/{id} {
-      allow create: if isAuthenticated();
-    }
-
-    match /config/{id} {
-      allow read: if true;
-      allow create: if isAuthenticated();
     }
   }
 }

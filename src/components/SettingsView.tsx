@@ -85,14 +85,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     });
   };
 
-  const handleTogglePreMove = () => {
-    const preMoveEnabled = !(settings as any).preMoveEnabled;
-    setSettings(prev => ({ ...prev, preMoveEnabled } as any));
-    updateSoundSettings({ preMoveEnabled });
-    syncSettingsToFirestore({
-      preMovesEnabled: preMoveEnabled
-    });
-  };
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 space-y-8 text-left animate-fade-in">
@@ -195,29 +187,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
               type="checkbox"
               checked={!!settings.showLegalMoves}
               onChange={handleToggleLegalMoves}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
-          </label>
-        </div>
-
-        {/* Row 3.5: Enable Pre-move Toggle Setting */}
-        <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400 shrink-0">
-              <Volume2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Enable Pre-moves</h4>
-              <p className="text-xs text-slate-500">Allow up to 3 legal pre-moves during your opponent's turn</p>
-            </div>
-          </div>
-
-          <label className="relative inline-flex items-center cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              checked={!!(settings as any).preMoveEnabled}
-              onChange={handleTogglePreMove}
               className="sr-only peer"
             />
             <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>

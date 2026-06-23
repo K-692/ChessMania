@@ -2,425 +2,51 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db, rtdb } from '../firebase';
 import type { UserProfile } from '../types';
-import { doc, getDoc, setDoc, runTransaction, collection, query, where, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
-import { ref as rRef, set as rSet, get as rGet, onDisconnect, onValue, serverTimestamp } from 'firebase/database';
-import { applyLazyHourlyRewardTx } from '../wallet/walletService';
-
-export interface GameConfig {
-  hourlyRewardAmount: number;
-  maxHourlyRewardLimit: number;
-  practiceExpiryHours: number;
-  inactivityTimeoutMinutes: number;
-  hourlyRewardIntervalMinutes: number;
-}
+import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { ref as rRef, set as rSet, onDisconnect, onValue, serverTimestamp } from 'firebase/database';
 
 interface AuthContextType {
   user: FirebaseUser | null;
   profile: UserProfile | null;
   loading: boolean;
   isLoggingOut: boolean;
-  gameConfig: GameConfig | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
   updateCachedProfile: (updates: Partial<UserProfile>) => void;
-  addCachedTransaction: (tx: any) => void;
-  addCachedEloHistory: (elo: any) => void;
-  addCachedMatch: (match: any) => void;
-  addCachedFriendUpdate: (friendUid: string, stats: any) => void;
-  writeBackToFirestore: (userId: string) => Promise<void>;
   refetchProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-function detectCountryFromTimezone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (!tz) return '';
-    const lowerTz = tz.toLowerCase();
-    if (lowerTz.includes('calcutta') || lowerTz.includes('kolkata')) return 'India';
-    if (lowerTz.includes('america')) return 'United States';
-    if (lowerTz.includes('london')) return 'United Kingdom';
-    if (lowerTz.includes('berlin')) return 'Germany';
-    if (lowerTz.includes('paris')) return 'France';
-    if (lowerTz.includes('tokyo')) return 'Japan';
-    if (lowerTz.includes('shanghai') || lowerTz.includes('beijing')) return 'China';
-    if (lowerTz.includes('toronto') || lowerTz.includes('vancouver') || lowerTz.includes('montreal')) return 'Canada';
-    if (lowerTz.includes('sydney') || lowerTz.includes('melbourne') || lowerTz.includes('brisbane')) return 'Australia';
-    if (lowerTz.includes('rome')) return 'Italy';
-    if (lowerTz.includes('madrid')) return 'Spain';
-    if (lowerTz.includes('amsterdam')) return 'Netherlands';
-    if (lowerTz.includes('zurich')) return 'Switzerland';
-    if (lowerTz.includes('stockholm')) return 'Sweden';
-    if (lowerTz.includes('oslo')) return 'Norway';
-    if (lowerTz.includes('helsinki')) return 'Finland';
-    if (lowerTz.includes('copenhagen')) return 'Denmark';
-    if (lowerTz.includes('singapore')) return 'Singapore';
-    if (lowerTz.includes('auckland')) return 'New Zealand';
-    if (lowerTz.includes('johannesburg')) return 'South Africa';
-    if (lowerTz.includes('seoul')) return 'South Korea';
-    if (lowerTz.includes('sao_paulo')) return 'Brazil';
-    if (lowerTz.includes('moscow')) return 'Russia';
-    if (lowerTz.includes('mexico_city')) return 'Mexico';
-  } catch (e) {
-    console.error('Error detecting country:', e);
-  }
-  return '';
-}
-
-export function sanitizeProfile(
-  data: any,
-  uid: string,
-  googleDisplayName?: string,
-  googlePhotoURL?: string
-): { sanitized: UserProfile; hasChanges: boolean } {
-  let hasChanges = false;
-  const now = Date.now();
-
-  const targetUid = data?.uid || uid;
-  if (data?.uid !== targetUid) hasChanges = true;
-
-  let displayName = data?.displayName;
-  if (!displayName || displayName === 'Chess Player') {
-    if (googleDisplayName && googleDisplayName !== 'Chess Player') {
-      displayName = googleDisplayName;
-      hasChanges = true;
-    } else if (!displayName) {
-      displayName = 'Chess Player';
-      hasChanges = true;
-    }
-  }
-
-  let photoURL = data?.photoURL;
-  const defaultPhoto = 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop';
-  if (!photoURL || photoURL === defaultPhoto) {
-    if (googlePhotoURL && googlePhotoURL !== defaultPhoto) {
-      photoURL = googlePhotoURL;
-      hasChanges = true;
-    } else if (!photoURL) {
-      photoURL = defaultPhoto;
-      hasChanges = true;
-    }
-  }
-
-  let bankBalance = data?.currentBalance !== undefined ? data.currentBalance : data?.bankBalance;
-  if (typeof bankBalance !== 'number' || isNaN(bankBalance)) {
-    const parsed = Number(bankBalance);
-    bankBalance = (typeof bankBalance === 'string' && !isNaN(parsed)) ? parsed : 1000;
-    hasChanges = true;
-  }
-
-  let rating = data?.currentEloRating !== undefined ? data.currentEloRating : data?.rating;
-  if (typeof rating !== 'number' || isNaN(rating)) {
-    const parsed = Number(rating);
-    rating = (typeof rating === 'string' && !isNaN(parsed)) ? parsed : 0;
-    hasChanges = true;
-  }
-
-  let createdAt = data?.createdAt;
-  if (typeof createdAt !== 'number' || isNaN(createdAt)) {
-    createdAt = now;
-    hasChanges = true;
-  }
-
-  let lastActiveAt = data?.lastActiveAt;
-  if (typeof lastActiveAt !== 'number' || isNaN(lastActiveAt)) {
-    lastActiveAt = now;
-    hasChanges = true;
-  }
-
-  let zeroBalanceAt = data?.zeroBalanceAt;
-  if (zeroBalanceAt !== null && zeroBalanceAt !== undefined) {
-    if (typeof zeroBalanceAt !== 'number' || isNaN(zeroBalanceAt)) {
-      zeroBalanceAt = null;
-      hasChanges = true;
-    }
-  } else if (zeroBalanceAt === undefined) {
-    zeroBalanceAt = null;
-    hasChanges = true;
-  }
-
-  let lastHourlyRewardAt = data?.lastHourlyRewardAt;
-  if (typeof lastHourlyRewardAt !== 'number' || isNaN(lastHourlyRewardAt)) {
-    lastHourlyRewardAt = createdAt;
-    hasChanges = true;
-  }
-
-  let totalCoinsEarned = data?.totalCoinsEarned;
-  if (typeof totalCoinsEarned !== 'number' || isNaN(totalCoinsEarned)) {
-    const parsed = Number(totalCoinsEarned);
-    totalCoinsEarned = (typeof totalCoinsEarned === 'string' && !isNaN(parsed)) ? parsed : Math.max(1000, bankBalance);
-    hasChanges = true;
-  }
-
-  let country = data?.country;
-  if (!country) {
-    country = detectCountryFromTimezone() || '';
-    if (country) {
-      hasChanges = true;
-    }
-  }
-
-  const wins = typeof data?.wins === 'number' && !isNaN(data.wins) ? data.wins : (typeof data?.totalWins === 'number' && !isNaN(data.totalWins) ? data.totalWins : 0);
-  const losses = typeof data?.losses === 'number' && !isNaN(data.losses) ? data.losses : (typeof data?.totalLosses === 'number' && !isNaN(data.totalLosses) ? data.totalLosses : 0);
-  const draws = typeof data?.draws === 'number' && !isNaN(data.draws) ? data.draws : (typeof data?.totalDraws === 'number' && !isNaN(data.totalDraws) ? data.totalDraws : 0);
-  const totalGamesPlayed = wins + losses + draws;
-  const winRateRatio = totalGamesPlayed > 0 ? Math.round((wins / totalGamesPlayed) * 100) : 0;
-
-  // Settings preferences map bootstrapping
-  let settings = data?.settings;
-  if (!settings || typeof settings !== 'object') {
-    let localSaved: any = {};
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('checkmate_sound_settings');
-        if (saved) localSaved = JSON.parse(saved);
-      } catch (e) {}
-    }
-    settings = {
-      musicEnabled: !(localSaved.muted ?? false),
-      musicVolume: localSaved.musicVolume ?? 0.5,
-      soundEffectsEnabled: localSaved.effectsEnabled ?? true,
-      legalMoveHintsEnabled: localSaved.showLegalMoves ?? true,
-      preMovesEnabled: localSaved.preMoveEnabled ?? true,
-      boardTheme: localSaved.boardTheme ?? '8_bit',
-      pieceStyle: localSaved.pieceTheme ?? 'neo'
-    };
-    hasChanges = true;
-  }
-
-  const sanitized: UserProfile = {
-    uid: targetUid,
-    displayName,
-    photoURL,
-    currentEloRating: rating,
-    rating, // compatibility
-    currentBalance: bankBalance,
-    bankBalance, // compatibility
-    createdAt,
-    lastActiveAt,
-    zeroBalanceAt,
-    lastHourlyRewardAt,
-    lastUsernameChangedAt: data?.lastUsernameChangedAt || null,
-    totalCoinsEarned,
-    gameplayCounts: data?.gameplayCounts || {},
-    wins,
-    losses,
-    draws,
-    totalGamesPlayed,
-    totalWins: wins,
-    totalLosses: losses,
-    totalDraws: draws,
-    winRateRatio,
-    lastLoginAt: data?.lastLoginAt || now,
-    updatedAt: data?.updatedAt || now,
-    country: country || '',
-    lastCountryChangedAt: data?.lastCountryChangedAt || null,
-    settings
-  };
-
-  if (
-    sanitized.displayName !== data?.displayName ||
-    sanitized.photoURL !== data?.photoURL ||
-    sanitized.currentEloRating !== data?.currentEloRating ||
-    sanitized.currentBalance !== data?.currentBalance ||
-    sanitized.lastUsernameChangedAt !== data?.lastUsernameChangedAt ||
-    sanitized.lastHourlyRewardAt !== data?.lastHourlyRewardAt ||
-    JSON.stringify(sanitized.gameplayCounts) !== JSON.stringify(data?.gameplayCounts) ||
-    sanitized.totalGamesPlayed !== data?.totalGamesPlayed ||
-    sanitized.totalWins !== data?.totalWins ||
-    sanitized.totalLosses !== data?.totalLosses ||
-    sanitized.totalDraws !== data?.totalDraws ||
-    sanitized.winRateRatio !== data?.winRateRatio ||
-    sanitized.country !== data?.country ||
-    sanitized.lastCountryChangedAt !== data?.lastCountryChangedAt ||
-    JSON.stringify(sanitized.settings) !== JSON.stringify(data?.settings)
-  ) {
-    hasChanges = true;
-  }
-
-  return { sanitized, hasChanges };
-}
-
-interface CacheData {
-  profileUpdates: Partial<UserProfile>;
-  transactions: any[];
-  eloHistory: any[];
-  matches: any[];
-  friendsUpdates?: { friendUid: string; stats: any }[];
-}
-
-function getUnsavedCache(): CacheData {
-  try {
-    const data = localStorage.getItem('checkmate_unsaved_cache');
-    if (data) {
-      const parsed = JSON.parse(data);
-      if (!parsed.friendsUpdates) parsed.friendsUpdates = [];
-      return parsed;
-    }
-  } catch (e) {}
-  return { profileUpdates: {}, transactions: [], eloHistory: [], matches: [], friendsUpdates: [] };
-}
-
-function saveUnsavedCache(cache: CacheData) {
-  try {
-    localStorage.setItem('checkmate_unsaved_cache', JSON.stringify(cache));
-  } catch (e) {}
-}
-
-function clearUnsavedCache() {
-  try {
-    localStorage.removeItem('checkmate_unsaved_cache');
-  } catch (e) {}
-}
-
-export const writeBackToFirestore = async (userId: string) => {
-  const cache = getUnsavedCache();
-  const friendsUpdates = cache.friendsUpdates || [];
-  if (
-    Object.keys(cache.profileUpdates).length === 0 &&
-    cache.transactions.length === 0 &&
-    cache.eloHistory.length === 0 &&
-    cache.matches.length === 0 &&
-    friendsUpdates.length === 0
-  ) {
-    return;
-  }
-
-  console.log('Writing back session cache to Firestore in a batch...', cache);
-  const batch = writeBatch(db);
-
-  // 1. Profile updates
-  if (Object.keys(cache.profileUpdates).length > 0) {
-    const userDocRef = doc(db, 'users', userId);
-    batch.update(userDocRef, cache.profileUpdates);
-
-    // Update global leaderboard
-    const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', userId);
-    const lbUpdates: any = {};
-    if (cache.profileUpdates.displayName !== undefined) lbUpdates.displayName = cache.profileUpdates.displayName;
-    if (cache.profileUpdates.photoURL !== undefined) lbUpdates.photoURL = cache.profileUpdates.photoURL;
-    if (cache.profileUpdates.currentEloRating !== undefined) lbUpdates.eloRating = cache.profileUpdates.currentEloRating;
-    if (cache.profileUpdates.totalCoinsEarned !== undefined) lbUpdates.coinsEarned = cache.profileUpdates.totalCoinsEarned;
-    if (cache.profileUpdates.totalGamesPlayed !== undefined) lbUpdates.totalGamesPlayed = cache.profileUpdates.totalGamesPlayed;
-    if (cache.profileUpdates.winRateRatio !== undefined) lbUpdates.winRateRatio = cache.profileUpdates.winRateRatio;
-    if (cache.profileUpdates.gameplayCounts !== undefined) lbUpdates.gameplayCounts = cache.profileUpdates.gameplayCounts;
-    lbUpdates.updatedAt = Date.now();
-
-    batch.set(leaderboardDocRef, lbUpdates, { merge: true });
-  }
-
-  // 2. Transactions
-  cache.transactions.forEach((tx) => {
-    const txId = tx.id || (tx.uid + '_' + tx.matchId + '_' + (tx.type === 'stakeDebit' ? 'debit' : 'credit'));
-    const txRef = doc(db, 'transactions', txId);
-    batch.set(txRef, tx, { merge: true });
-  });
-
-  // 3. Elo History
-  cache.eloHistory.forEach((elo) => {
-    const eloId = elo.id || (elo.matchId ? (elo.opponentUid + '_' + elo.matchId) : doc(collection(db, 'dummy')).id);
-    const eloRef = doc(db, 'users', userId, 'eloHistory', eloId);
-    batch.set(eloRef, elo, { merge: true });
-  });
-
-  // 4. Matches (like finished practice matches)
-  cache.matches.forEach((m) => {
-    const matchRef = doc(db, 'matches', m.id);
-    batch.set(matchRef, m, { merge: true });
-  });
-
-  // 5. Friends H2H updates
-  friendsUpdates.forEach((f: any) => {
-    const friendDocRef = doc(db, 'users', userId, 'friends', f.friendUid);
-    batch.set(friendDocRef, { stats: f.stats }, { merge: true });
-  });
-
-  try {
-    await batch.commit();
-    clearUnsavedCache();
-    console.log('Session cache successfully committed.');
-  } catch (err) {
-    console.error('Failed to commit session cache:', err);
-  }
-};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   const profileUnsubRef = useRef<(() => void) | null>(null);
 
   // Expose cache update helpers to components
-  const updateCachedProfile = (updates: Partial<UserProfile>) => {
-    setProfile((prev) => {
-      if (!prev) return null;
-      
-      // If balance falls below 1000 from >= 1000, start hourly reward countdown
-      if (updates.currentBalance !== undefined) {
-        const oldBalance = prev.currentBalance;
-        const newBalance = updates.currentBalance;
-        if (newBalance < 1000 && oldBalance >= 1000) {
-          updates.lastHourlyRewardAt = Date.now();
-        }
-      }
-
-      const next = { ...prev, ...updates };
-
-      const cache = getUnsavedCache();
-      cache.profileUpdates = { ...cache.profileUpdates, ...updates };
-      saveUnsavedCache(cache);
-
-      return next;
-    });
-  };
-
-  const addCachedTransaction = (tx: any) => {
-    const cache = getUnsavedCache();
-    cache.transactions.push(tx);
-    saveUnsavedCache(cache);
-  };
-
-  const addCachedEloHistory = (elo: any) => {
-    const cache = getUnsavedCache();
-    cache.eloHistory.push(elo);
-    saveUnsavedCache(cache);
-  };
-
-  const addCachedMatch = (match: any) => {
-    const cache = getUnsavedCache();
-    cache.matches = cache.matches.filter((m) => m.id !== match.id);
-    cache.matches.push(match);
-    saveUnsavedCache(cache);
-  };
-
-  const addCachedFriendUpdate = (friendUid: string, stats: any) => {
-    const cache = getUnsavedCache();
-    if (!cache.friendsUpdates) {
-      cache.friendsUpdates = [];
+  const updateCachedProfile = async (updates: Partial<UserProfile>) => {
+    if (!user) return;
+    try {
+      const userDocRef = doc(db, 'users', user.uid);
+      await setDoc(userDocRef, updates, { merge: true });
+      setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+    } catch (err) {
+      console.error('Failed to update user profile in Firestore:', err);
     }
-    cache.friendsUpdates = cache.friendsUpdates.filter((f) => f.friendUid !== friendUid);
-    cache.friendsUpdates.push({ friendUid, stats });
-    saveUnsavedCache(cache);
   };
 
   const refetchProfile = async () => {
     if (!auth.currentUser) return;
-    const userDocRef = doc(db, 'users', auth.currentUser.uid);
-    const docSnap = await getDoc(userDocRef);
-    if (docSnap.exists()) {
-      const rawData = docSnap.data();
-      const { sanitized } = sanitizeProfile(
-        rawData,
-        auth.currentUser.uid,
-        auth.currentUser.displayName || undefined,
-        auth.currentUser.photoURL || undefined
-      );
-      const unsaved = getUnsavedCache();
-      const mergedProfile = { ...sanitized, ...unsaved.profileUpdates };
-      setProfile(mergedProfile);
+    try {
+      const userDocRef = doc(db, 'users', auth.currentUser.uid);
+      const docSnap = await getDoc(userDocRef);
+      if (docSnap.exists()) {
+        setProfile(docSnap.data() as UserProfile);
+      }
+    } catch (err) {
+      console.error('Failed to refetch user profile:', err);
     }
   };
 
@@ -428,15 +54,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async () => {
     try {
       setLoading(true);
-      sessionStorage.setItem('checkmate_is_logging_in', 'true');
-      localStorage.setItem('checkmate_last_activity', Date.now().toString());
       await setPersistence(auth, browserSessionPersistence);
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error('Login error:', error);
       setLoading(false);
       if (error?.code === 'auth/operation-not-allowed') {
-        alert("Google Sign-In is not enabled yet in your Firebase console. Please go to the Firebase Console -> Authentication -> Sign-in method -> Add new provider -> enable 'Google' and set the Support Email.");
+        alert("Google Sign-In is not enabled yet in your Firebase console. Please go to the Firebase Console -> Authentication -> Sign-in method -> enable 'Google' and set the Support Email.");
       } else {
         alert(`Login failed: ${error?.message || error}`);
       }
@@ -450,53 +74,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsLoggingOut(true);
       setLoading(true);
       
-      // Delay logout slightly so user sees the "Securing Your Coins..." loading state
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
       if (auth.currentUser) {
         // Mark user offline in RTDB explicitly
         try {
           const statusRef = rRef(rtdb, `status/${auth.currentUser.uid}`);
           await rSet(statusRef, {
             state: 'offline',
-            lastChanged: serverTimestamp(),
-            activeSessionId: ''
+            lastChanged: serverTimestamp()
           });
         } catch (err) {
           console.warn("Failed to mark user offline in RTDB on logout:", err);
         }
+      }
 
-        const timeoutPromise = new Promise<void>((_, reject) =>
-          setTimeout(() => reject(new Error('Firestore write timeout')), 2000)
-        );
-        try {
-          await Promise.race([
-            (async () => {
-              const userDocRef = doc(db, 'users', auth.currentUser!.uid);
-              await setDoc(userDocRef, { sessionActive: false }, { merge: true });
-              await writeBackToFirestore(auth.currentUser!.uid);
-            })(),
-            timeoutPromise
-          ]);
-        } catch (err) {
-          console.warn("Logout Firestore updates timed out or failed:", err);
-        }
-      }
-      // Clear session premove queues
-      if (typeof window !== 'undefined') {
-        try {
-          for (let i = 0; i < sessionStorage.length; i++) {
-            const key = sessionStorage.key(i);
-            if (key && key.startsWith('checkmate_premoves_')) {
-              sessionStorage.removeItem(key);
-              i--; // index shifts down
-            }
-          }
-        } catch (e) {}
-      }
       await signOut(auth);
       setProfile(null);
-      clearUnsavedCache();
+      setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
       throw error;
@@ -508,175 +101,77 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Bootstrap user profile document
   const bootstrapProfile = async (firebaseUser: FirebaseUser) => {
-    await new Promise((resolve) => setTimeout(resolve, 500));
-
-    try {
-      const supportConfigRef = doc(db, 'config', 'support');
-      const supportSnap = await getDoc(supportConfigRef);
-      if (!supportSnap.exists()) {
-        await setDoc(supportConfigRef, {
-          adminEmail: 'krishnendu.pal.work@gmail.com',
-          createdAt: Date.now()
-        });
-        console.log('Bootstrapped config/support document.');
-      }
-
-      const gameConfigRef = doc(db, 'config', 'game');
-      const gameSnap = await getDoc(gameConfigRef);
-      await setDoc(gameConfigRef, {
-        hourlyRewardAmount: 100,
-        maxHourlyRewardLimit: 1000,
-        practiceExpiryHours: 24,
-        inactivityTimeoutMinutes: 5,
-        hourlyRewardIntervalMinutes: 60,
-        createdAt: gameSnap.exists() ? (gameSnap.data().createdAt || Date.now()) : Date.now()
-      }, { merge: true });
-      console.log('Bootstrapped/merged config/game document.');
-
-      const chatConfigRef = doc(db, 'config', 'chat');
-      const chatSnap = await getDoc(chatConfigRef);
-      if (!chatSnap.exists()) {
-        await setDoc(chatConfigRef, {
-          historyExpiryHours: 24,
-          createdAt: Date.now()
-        });
-        console.log('Bootstrapped config/chat document.');
-      }
-    } catch (e) {
-      console.warn('Error checking/creating start configuration collections:', e);
-    }
-
     const userDocRef = doc(db, 'users', firebaseUser.uid);
-    
+    const now = Date.now();
+
     try {
       const docSnap = await getDoc(userDocRef);
-      const now = Date.now();
-
-      let profileData = docSnap.exists() ? docSnap.data() as UserProfile : null;
-      let forceHasChanges = false;
 
       if (!docSnap.exists()) {
         const actualName = firebaseUser.displayName || 'Player';
+        // Clean display name of symbols
         let alphanumericName = actualName.replace(/[^a-zA-Z0-9]/g, '');
         if (alphanumericName.length < 3) {
           alphanumericName = 'Player';
         }
-
+        
+        // Ensure name is unique
         let candidate = alphanumericName;
-        const checkUnique = async (name: string) => {
-          const q = query(collection(db, 'users'), where('displayName', '==', name));
-          const snap = await getDocs(q);
-          return snap.empty;
-        };
-
-        let isUnique = await checkUnique(candidate);
         let attempts = 0;
-        while (!isUnique && attempts < 50) {
-          const randomSuffix = Math.floor(100 + Math.random() * 900);
-          candidate = `${alphanumericName}${randomSuffix}`;
-          isUnique = await checkUnique(candidate);
+        let isUnique = false;
+        while (!isUnique && attempts < 10) {
+          const suffix = attempts === 0 ? '' : Math.floor(100 + Math.random() * 900);
+          candidate = `${alphanumericName}${suffix}`;
+          // Let's assume unique or let Firestore update succeed
+          isUnique = true; 
           attempts++;
         }
-        if (!isUnique) {
-          candidate = `${alphanumericName}${Date.now().toString().slice(-4)}`;
-        }
 
-        profileData = {
+        const newProfile: UserProfile = {
+          uid: firebaseUser.uid,
           displayName: candidate,
-        } as any;
-        forceHasChanges = true;
-      }
-
-      const { sanitized, hasChanges } = sanitizeProfile(
-        profileData,
-        firebaseUser.uid,
-        firebaseUser.displayName || undefined,
-        firebaseUser.photoURL || undefined
-      );
-
-      if (!docSnap.exists() || hasChanges || forceHasChanges) {
-        await runTransaction(db, async (transaction) => {
-          if (!docSnap.exists()) {
-            const ledgerEntry = {
-              uid: firebaseUser.uid,
-              userId: firebaseUser.uid,
-              type: 'reward',
-              amount: 0,
-              coins: 1000,
-              currency: 'INR',
-              status: 'processed',
-              processedAt: now,
-              createdAt: now,
-              matchId: null,
-              balanceBefore: 0,
-              balanceAfter: 1000,
-            };
-            const newLedgerDocRef = doc(collection(db, 'transactions'));
-            transaction.set(newLedgerDocRef, ledgerEntry);
+          photoURL: firebaseUser.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+          rating: 1200,
+          createdAt: now,
+          wins: 0,
+          losses: 0,
+          draws: 0,
+          totalGamesPlayed: 0,
+          lastUsernameChangedAt: null,
+          settings: {
+            musicEnabled: true,
+            musicVolume: 0.5,
+            soundEffectsEnabled: true,
+            legalMoveHintsEnabled: true,
+            boardTheme: 'green',
+            pieceStyle: 'neo'
           }
-          transaction.set(userDocRef, sanitized, { merge: true });
-        });
-      }
+        };
 
-      const leaderboardDocRef = doc(db, 'leaderboards', 'global', 'players', firebaseUser.uid);
-      await setDoc(leaderboardDocRef, {
-        uid: firebaseUser.uid,
-        displayName: sanitized.displayName,
-        photoURL: sanitized.photoURL,
-        eloRating: sanitized.currentEloRating,
-        coinsEarned: sanitized.totalCoinsEarned,
-        totalGamesPlayed: sanitized.totalGamesPlayed || 0,
-        winRateRatio: sanitized.winRateRatio || 0,
-        gameplayCounts: sanitized.gameplayCounts || {},
-        updatedAt: now
-      }, { merge: true });
-
-      if (docSnap.exists() && profileData) {
-        const lastReward = profileData.lastHourlyRewardAt;
-        const timeDiff = Date.now() - (lastReward || 0);
-
-        if (!lastReward || timeDiff >= 3600000) {
-          await applyLazyHourlyRewardTx(firebaseUser.uid);
+        await setDoc(userDocRef, newProfile);
+        setProfile(newProfile);
+      } else {
+        const existingData = docSnap.data() as UserProfile;
+        // Merge compatible settings if missing
+        if (!existingData.settings) {
+          existingData.settings = {
+            musicEnabled: true,
+            musicVolume: 0.5,
+            soundEffectsEnabled: true,
+            legalMoveHintsEnabled: true,
+            boardTheme: 'green',
+            pieceStyle: 'neo'
+          };
+          await setDoc(userDocRef, { settings: existingData.settings }, { merge: true });
         }
-
-        const docSnapAfterInterest = await getDoc(userDocRef);
-        if (docSnapAfterInterest.exists()) {
-          const profileData = docSnapAfterInterest.data() as UserProfile;
-          if (profileData.rating === 1200) {
-            const eloHistoryRef = collection(db, 'users', firebaseUser.uid, 'eloHistory');
-            const eloHistorySnap = await getDocs(eloHistoryRef);
-            if (eloHistorySnap.empty) {
-              await setDoc(userDocRef, { currentEloRating: 0, rating: 0 }, { merge: true });
-              await setDoc(leaderboardDocRef, { eloRating: 0 }, { merge: true });
-            }
-          }
-        }
+        setProfile(existingData);
       }
-      
-      const localSessionId = localStorage.getItem('checkmate_session_id') || Math.random().toString(36).substring(2) + '_' + Date.now();
-      localStorage.setItem('checkmate_session_id', localSessionId);
-      await setDoc(userDocRef, { 
-        lastLoginAt: now,
-        sessionActive: true,
-        activeSessionId: localSessionId,
-        lastActiveAt: now
-      }, { merge: true });
-      setProfile(sanitized);
-
     } catch (error) {
       console.error('Error bootstrapping profile:', error);
     }
   };
 
   useEffect(() => {
-    // Game Config listener
-    const configRef = doc(db, 'config', 'game');
-    const unsubscribeConfig = onSnapshot(configRef, (snap) => {
-      if (snap.exists()) {
-        setGameConfig(snap.data() as GameConfig);
-      }
-    });
-
     const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
       if (profileUnsubRef.current) {
         profileUnsubRef.current();
@@ -684,76 +179,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (firebaseUser) {
-        const isLoggingIn = sessionStorage.getItem('checkmate_is_logging_in') === 'true';
-        if (isLoggingIn) {
-          localStorage.setItem('checkmate_last_activity', Date.now().toString());
-        }
-        const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
-        const timeSinceLastActivity = Date.now() - lastActivity;
-
-        const limitMinutes = 2; // Hardcode to 2 minutes as requested
-        if (lastActivity > 0 && timeSinceLastActivity > limitMinutes * 60 * 1000) {
-          console.log(`Detected inactivity over ${limitMinutes} minutes on startup. Logging out...`);
-          await writeBackToFirestore(firebaseUser.uid);
-          await signOut(auth);
-          setUser(null);
-          setProfile(null);
-          setLoading(false);
-          return;
-        }
-
-        // Check local session ID, initialize if missing
-        let localSessionId = localStorage.getItem('checkmate_session_id');
-        if (!localSessionId) {
-          localSessionId = Math.random().toString(36).substring(2) + '_' + Date.now();
-          localStorage.setItem('checkmate_session_id', localSessionId);
-        }
-
-        const userDocRef = doc(db, 'users', firebaseUser.uid);
-        // Check RTDB status to block double login
-        const statusRef = rRef(rtdb, `status/${firebaseUser.uid}`);
-        try {
-          const statusSnap = await rGet(statusRef);
-          if (statusSnap.exists()) {
-            const statusData = statusSnap.val();
-            const isOnline = statusData.state === 'online';
-            const activeSessionId = statusData.activeSessionId;
-            
-            if (isOnline && activeSessionId !== localSessionId) {
-              console.log('Blocked sign-in: Another active session detected on another device/browser.');
-              if (profileUnsubRef.current) {
-                (profileUnsubRef.current as any)();
-                profileUnsubRef.current = null;
-              }
-              await signOut(auth);
-              setUser(null);
-              setProfile(null);
-              setLoading(false);
-              alert('Already a session is going on in another device. Please wait until that session ends or log out from the other device.');
-              return;
-            }
-          }
-        } catch (err) {
-          console.warn("Failed to check active sessions in RTDB on login:", err);
-        }
-
-        // Set session active to true on login in Firestore
-        try {
-          await setDoc(userDocRef, {
-            sessionActive: true,
-            activeSessionId: localSessionId,
-            lastActiveAt: Date.now(),
-            lastLoginAt: Date.now()
-          }, { merge: true });
-        } catch (err) {
-          console.warn("Failed to mark session active:", err);
-        }
-
         setUser(firebaseUser);
-
-        // Commit any cached changes from previous tab/session first
-        await writeBackToFirestore(firebaseUser.uid);
-
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        
         // Listen to profile document in real-time
         profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
           if (!docSnap.exists()) {
@@ -761,24 +189,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
           }
 
-          const rawData = docSnap.data();
-          sessionStorage.removeItem('checkmate_is_logging_in');
-
-          const { sanitized, hasChanges } = sanitizeProfile(
-            rawData,
-            firebaseUser.uid,
-            firebaseUser.displayName || undefined,
-            firebaseUser.photoURL || undefined
-          );
-          
-          // Apply unsaved profile modifications to the loaded profile state
-          const unsaved = getUnsavedCache();
-          const mergedProfile = { ...sanitized, ...unsaved.profileUpdates };
-          setProfile(mergedProfile);
-
-          if (hasChanges) {
-            await setDoc(userDocRef, sanitized, { merge: true });
-          }
+          const rawData = docSnap.data() as UserProfile;
+          setProfile(rawData);
           setLoading(false);
         });
       } else {
@@ -789,100 +201,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => {
-      unsubscribeConfig();
       unsubscribeAuth();
       if (profileUnsubRef.current) {
         profileUnsubRef.current();
       }
     };
-  }, [gameConfig?.inactivityTimeoutMinutes]);
+  }, []);
 
-  // Inactivity auto-logout after 2 minutes and online reconnection logout
-  useEffect(() => {
-    if (!user) return;
-
-    // Reset last activity timestamp on mount
-    localStorage.setItem('checkmate_last_activity', Date.now().toString());
-
-    // Continuous check running every 5 seconds
-    const checkInterval = setInterval(async () => {
-      const lastActivity = parseInt(localStorage.getItem('checkmate_last_activity') || '0');
-      const timeSinceLastActivity = Date.now() - lastActivity;
-      const timeoutLimit = 2 * 60 * 1000; // 2 minutes in ms
-
-      if (lastActivity > 0 && timeSinceLastActivity >= timeoutLimit) {
-        console.log(`Inactivity timeout reached (2 minutes). Logging out...`);
-        clearInterval(checkInterval);
-        try {
-          await logout();
-          alert("You have been logged out due to 2 minutes of inactivity. Please log in again.");
-        } catch (e) {
-          console.warn('Failed to logout on inactivity timeout:', e);
-        }
-      }
-    }, 5000); // Check every 5 seconds
-
-    const resetTimer = () => {
-      localStorage.setItem('checkmate_last_activity', Date.now().toString());
-    };
-
-    const activityEvents = [
-      'mousedown', 'mousemove', 'keypress',
-      'scroll', 'touchstart', 'click'
-    ];
-
-    resetTimer();
-
-    activityEvents.forEach((event) => {
-      window.addEventListener(event, resetTimer);
-    });
-
-    // Note: We do NOT listen to window 'online' events to log the user out.
-    // Logging out on reconnection is disruptive and violates the requirement
-    // to allow players to reconnect and resume their games on network recovery.
-
-    return () => {
-      clearInterval(checkInterval);
-      activityEvents.forEach((event) => {
-        window.removeEventListener(event, resetTimer);
-      });
-    };
-  }, [user]);
-
-  // Realtime Database presence registration using .info/connected for robust reconnection handling.
-  // Firebase's onDisconnect() is a one-shot handler: once the connection drops and the
-  // server executes the onDisconnect payload, the handler is consumed. On reconnection,
-  // it must be re-registered. Previously, only a 30-second heartbeat did this, leaving a
-  // gap where the user appeared offline. Now we listen to .info/connected to immediately
-  // re-register onDisconnect AND re-set online status on every reconnection event.
+  // Presence status registration in RTDB
   useEffect(() => {
     if (!user) return;
     
     const statusRef = rRef(rtdb, `status/${user.uid}`);
     const connectedRef = rRef(rtdb, '.info/connected');
     let heartbeatInterval: any;
-    const localSessionId = localStorage.getItem('checkmate_session_id') || '';
 
     const isOfflineForDatabase = {
       state: 'offline',
-      lastChanged: serverTimestamp(),
-      activeSessionId: ''
+      lastChanged: serverTimestamp()
     };
     const isOnlineForDatabase = {
       state: 'online',
-      lastChanged: serverTimestamp(),
-      activeSessionId: localSessionId
+      lastChanged: serverTimestamp()
     };
 
-    // Listen to .info/connected — fires on every connect/reconnect event.
-    // Each time we reconnect, we re-register onDisconnect and re-set online status.
+    // Re-register presence on (re)connect
     const unsubConnected = onValue(connectedRef, async (snapshot) => {
-      if (snapshot.val() === false) {
-        // Client is disconnected — do nothing; onDisconnect will handle cleanup server-side
-        return;
-      }
+      if (snapshot.val() === false) return;
 
-      // Connected (or reconnected): re-register onDisconnect and set online
       try {
         await onDisconnect(statusRef).set(isOfflineForDatabase);
         await rSet(statusRef, isOnlineForDatabase);
@@ -891,30 +237,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
-    // Continuous heartbeat every 20 seconds as a safety net in case
-    // .info/connected misses an edge case (e.g. hibernation recovery)
+    // Heartbeat every 20 seconds
     heartbeatInterval = setInterval(async () => {
       try {
-        await rSet(statusRef, {
-          state: 'online',
-          lastChanged: serverTimestamp(),
-          activeSessionId: localSessionId
-        });
+        await rSet(statusRef, isOnlineForDatabase);
       } catch (e) {
-        console.warn("Heartbeat write failed:", e);
+        console.warn("Heartbeat presence write failed:", e);
       }
     }, 20000);
 
     return () => {
-      // Unsubscribe the .info/connected listener
       unsubConnected();
       if (heartbeatInterval) clearInterval(heartbeatInterval);
-      // Explicitly mark offline when user logs out or unmounts
-      rSet(statusRef, {
-        state: 'offline',
-        lastChanged: Date.now(),
-        activeSessionId: ''
-      }).catch(err => console.warn("Failed to clean up presence on logout/unmount:", err));
+      rSet(statusRef, isOfflineForDatabase).catch(err => 
+        console.warn("Failed to clean up presence on logout/unmount:", err)
+      );
     };
   }, [user]);
 
@@ -925,15 +262,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile,
         loading,
         isLoggingOut,
-        gameConfig,
         login,
         logout,
         updateCachedProfile,
-        addCachedTransaction,
-        addCachedEloHistory,
-        addCachedMatch,
-        addCachedFriendUpdate,
-        writeBackToFirestore,
         refetchProfile
       }}
     >

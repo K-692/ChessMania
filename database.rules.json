@@ -6,10 +6,6 @@
         ".write": "auth != null && auth.uid == $uid"
       }
     },
-    "match_queue": {
-      ".read": "auth != null",
-      ".write": "auth != null"
-    },
     "matches": {
       "$matchId": {
         ".read": "auth != null",
