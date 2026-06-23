@@ -30,11 +30,16 @@ service cloud.firestore {
       }
     }
     
-    // Matches history records rules
+    // Matches history records rules — includes full move history for Rollmate replay
     match /matches/{matchId} {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
+
+      // Allow subcollections (e.g. moves) for replay data
+      match /{subcollection}/{docId} {
+        allow read, write: if isAuthenticated();
+      }
     }
     
     // Challenges in RTDB (this is Firestore rules, so challenges collection in Firestore is not used, 
