@@ -198,3 +198,27 @@ export function getLegalMoveSquares(
 
   return styles;
 }
+
+// ---------------------------------------------------------------------------
+// FEN active color flip (used for skip turns)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a new FEN string with the active color flipped.
+ * This is CRITICAL for skip turns: when a player skips, the board position
+ * stays the same but chess.js must know it is now the OTHER player's turn.
+ * Without this, chess.moves() would always return the previous player's moves,
+ * causing hasLegalMovesForRoll to incorrectly auto-skip every subsequent turn.
+ *
+ * @param fen - Current FEN string
+ * @returns   - New FEN with active color toggled ('w' <-> 'b') and en-passant reset
+ */
+export function flipFenActiveColor(fen: string): string {
+  const parts = fen.split(' ');
+  // parts[1] = active color ('w' or 'b')
+  parts[1] = parts[1] === 'w' ? 'b' : 'w';
+  // parts[3] = en passant target square; reset to '-' since no move was made
+  parts[3] = '-';
+  return parts.join(' ');
+}
+
