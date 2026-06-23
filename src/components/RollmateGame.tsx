@@ -640,15 +640,9 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
     const currentState = gameStateRef.current!;
 
-    // Verify there are actually no legal moves (skip must be valid).
-    // Use the FEN-based check so the active color is always correct.
-    const hasLegal = hasLegalMovesForRoll(currentState.fen, myColor, diceRolledPieceType);
-    if (hasLegal) {
-      playIllegalMoveSound();
-      setStatusMessage('You still have legal moves — you cannot skip!');
-      setTimeout(() => setStatusMessage(''), 2500);
-      return;
-    }
+    // It is the player's choice whether they want to move or just skip the turn.
+    // So we allow manual skipping even if hasLegal is true.
+
 
     const skipRecord: RollmateMoveRecord = {
       moveNumber: (currentState.moveCount ?? 0) + 1,
