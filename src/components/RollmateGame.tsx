@@ -572,119 +572,6 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     initState().catch(console.error);
   }, [matchData, matchId, user]);
 
-  // ── Dice roll handler ─────────────────────────────────────────────────────
-  const handleRollDice = useCallback(async () => {
-    if (!isMyTurn || gameState?.diceRolled || rolling || !myColor) return;
-
-    // Reset interaction guards for this turn
-    lastExecutedMoveCountRef.current = -1;
-    justDroppedRef.current = false;
-
-    setRolling(true);
-    setLocalDiceResult(null);
-
-    // Animate for 700ms
-    await new Promise((r) => setTimeout(r, 700));
-
-    const faceIndex = rollDice();
-    const pieceType = getPieceTypeForFace(faceIndex);
-    setLocalDiceResult(faceIndex);
-    setRolling(false);
-
-    // Always read from ref for latest state
-    const currentState = gameStateRef.current!;
-
-    // Check if this roll has any legal moves.
-    // IMPORTANT: Pass the FEN and myColor (not the chess instance) so that
-    // hasLegalMovesForRoll uses a temporary chess instance with the correct
-    // active color. This prevents false "no moves" when the stored FEN's
-    // active color doesn't match myColor due to skip/turn sync issues.
-    const hasLegal = hasLegalMovesForRoll(currentState.fen, myColor, pieceType);
-
-    // Write the dice roll to RTDB
-    const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-
-    if (!hasLegal) {
-      // Auto-skip: record a skip move, flip turn
-      const skipRecord: RollmateMoveRecord = {
-        moveNumber: (currentState.moveCount ?? 0) + 1,
-        san: `(skip)`,
-        from: '',
-        to: '',
-        fen: currentState.fen,
-        diceRoll: faceIndex,
-        pieceType,
-        timestamp: Date.now(),
-        skipped: true,
-      };
-
-      const newHistory = [...(currentState.moveHistory ?? []), skipRecord];
-      setStatusMessage(`No ${getPieceTypeName(pieceType)} moves — turn skipped!`);
-      setTimeout(() => setStatusMessage(''), 3000);
-
-      // CRITICAL: flip the FEN's active color so chess.js knows whose turn it is next.
-      // Without this, chess.moves() would return the wrong player's moves on the
-      // following turn, causing hasLegalMovesForRoll to falsely return 0 => infinite auto-skips.
-      const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
-      await rSet(stateRef, {
-        ...currentState,
-        fen: flipFenActiveColor(currentState.fen),
-        diceRoll: faceIndex,
-        diceRolled: false,
-        turn: nextTurn,
-        moveHistory: newHistory,
-        moveCount: (currentState.moveCount ?? 0) + 1,
-      });
-    } else {
-      // Update state with dice roll and wait for player to move
-      await rSet(stateRef, {
-        ...currentState,
-        diceRoll: faceIndex,
-        diceRolled: true,
-      });
-      setStatusMessage(`Roll: ${getPieceTypeName(pieceType)} — choose your move!`);
-    }
-  }, [isMyTurn, gameState?.diceRolled, rolling, myColor, matchId]);
-
-  // ── Manual skip handler ───────────────────────────────────────────────────
-  const handleSkip = useCallback(async () => {
-    if (!isMyTurn || !gameState?.diceRolled || !myColor) return;
-    if (!diceRolledPieceType) return;
-
-    const currentState = gameStateRef.current!;
-
-    // It is the player's choice whether they want to move or just skip the turn.
-    // So we allow manual skipping even if hasLegal is true.
-
-
-    const skipRecord: RollmateMoveRecord = {
-      moveNumber: (currentState.moveCount ?? 0) + 1,
-      san: '(skip)',
-      from: '',
-      to: '',
-      fen: currentState.fen,
-      diceRoll: currentState.diceRoll!,
-      pieceType: diceRolledPieceType,
-      timestamp: Date.now(),
-      skipped: true,
-    };
-
-    const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
-    const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-    // CRITICAL: flip FEN active color so the next player's chess.moves() returns
-    // the right moves. We flip from currentState.fen (not chess.fen()) to avoid
-    // any discrepancy caused by the chess instance being mutated elsewhere.
-    await rSet(stateRef, {
-      ...currentState,
-      fen: flipFenActiveColor(currentState.fen),
-      diceRoll: null,
-      diceRolled: false,
-      turn: nextTurn,
-      moveHistory: [...(currentState.moveHistory ?? []), skipRecord],
-      moveCount: (currentState.moveCount ?? 0) + 1,
-    });
-  }, [isMyTurn, gameState?.diceRolled, myColor, matchId, diceRolledPieceType]);
-
   // ── Finalize game in Firestore ────────────────────────────────────────────
   const finalizeGame = useCallback(async (
     winnerUid: string | null,
@@ -744,6 +631,159 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       console.error('Failed to finalize game:', err);
     }
   }, [matchData, matchId, whiteProfile, blackProfile]);
+
+  // ── Dice roll handler ─────────────────────────────────────────────────────
+  const handleRollDice = useCallback(async () => {
+    if (!isMyTurn || gameState?.diceRolled || rolling || !myColor) return;
+
+    // Reset interaction guards for this turn
+    lastExecutedMoveCountRef.current = -1;
+    justDroppedRef.current = false;
+
+    setRolling(true);
+    setLocalDiceResult(null);
+
+    // Animate for 700ms
+    await new Promise((r) => setTimeout(r, 700));
+
+    const faceIndex = rollDice();
+    const pieceType = getPieceTypeForFace(faceIndex);
+    setLocalDiceResult(faceIndex);
+    setRolling(false);
+
+    // Always read from ref for latest state
+    const currentState = gameStateRef.current!;
+
+    // Check if this roll has any legal moves.
+    // IMPORTANT: Pass the FEN and myColor (not the chess instance) so that
+    // hasLegalMovesForRoll uses a temporary chess instance with the correct
+    // active color. This prevents false "no moves" when the stored FEN's
+    // active color doesn't match myColor due to skip/turn sync issues.
+    const hasLegal = hasLegalMovesForRoll(currentState.fen, myColor, pieceType);
+
+    // Write the dice roll to RTDB
+    const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
+
+    const tempChess = chessWithCorrectTurn(currentState.fen, myColor);
+    const isInCheck = tempChess.isCheck();
+
+    if (isInCheck) {
+      if (!hasLegal) {
+        // If they are in check, and the rolled piece cannot resolve the check:
+        // Check if there is any checkmate (meaning no legal escape exists at all in the position)
+        if (tempChess.isCheckmate()) {
+          setStatusMessage("Checkmate! Game over.");
+          const opponentUid = myColor === 'w' ? matchData?.blackUid : matchData?.whiteUid;
+          await rSet(stateRef, {
+            ...currentState,
+            status: 'completed',
+            winnerUid: opponentUid || null,
+          });
+          if (opponentUid) {
+            await finalizeGame(opponentUid, currentState.moveHistory ?? [], 'checkmate');
+          }
+        } else {
+          // Player remains in check, must roll again. We keep diceRolled = false so they can roll again.
+          setStatusMessage(`Invalid roll: ${getPieceTypeName(pieceType)} cannot resolve check. Roll again!`);
+          setTimeout(() => setStatusMessage(''), 4000);
+          await rSet(stateRef, {
+            ...currentState,
+            diceRoll: faceIndex,
+            diceRolled: false,
+          });
+        }
+      } else {
+        // Rolled piece can resolve check: let them play
+        await rSet(stateRef, {
+          ...currentState,
+          diceRoll: faceIndex,
+          diceRolled: true,
+        });
+        setStatusMessage(`Roll: ${getPieceTypeName(pieceType)} — resolve the check!`);
+      }
+    } else {
+      // Normal state (not in check)
+      if (!hasLegal) {
+        // Auto-skip: record a skip move, flip turn
+        const skipRecord: RollmateMoveRecord = {
+          moveNumber: (currentState.moveCount ?? 0) + 1,
+          san: `(skip)`,
+          from: '',
+          to: '',
+          fen: currentState.fen,
+          diceRoll: faceIndex,
+          pieceType,
+          timestamp: Date.now(),
+          skipped: true,
+        };
+
+        const newHistory = [...(currentState.moveHistory ?? []), skipRecord];
+        setStatusMessage(`No ${getPieceTypeName(pieceType)} moves — turn skipped!`);
+        setTimeout(() => setStatusMessage(''), 3000);
+
+        // CRITICAL: flip the FEN's active color so chess.js knows whose turn it is next.
+        // Without this, chess.moves() would return the wrong player's moves on the
+        // following turn, causing hasLegalMovesForRoll to falsely return 0 => infinite auto-skips.
+        const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
+        await rSet(stateRef, {
+          ...currentState,
+          fen: flipFenActiveColor(currentState.fen),
+          diceRoll: faceIndex,
+          diceRolled: false,
+          turn: nextTurn,
+          moveHistory: newHistory,
+          moveCount: (currentState.moveCount ?? 0) + 1,
+        });
+      } else {
+        // Update state with dice roll and wait for player to move
+        await rSet(stateRef, {
+          ...currentState,
+          diceRoll: faceIndex,
+          diceRolled: true,
+        });
+        setStatusMessage(`Roll: ${getPieceTypeName(pieceType)} — choose your move!`);
+      }
+    }
+  }, [isMyTurn, gameState?.diceRolled, rolling, myColor, matchId, matchData, finalizeGame]);
+
+  // ── Manual skip handler ───────────────────────────────────────────────────
+  const handleSkip = useCallback(async () => {
+    if (!isMyTurn || !gameState?.diceRolled || !myColor) return;
+    if (!diceRolledPieceType) return;
+
+    const currentState = gameStateRef.current!;
+
+    // It is the player's choice whether they want to move or just skip the turn.
+    // So we allow manual skipping even if hasLegal is true.
+
+
+    const skipRecord: RollmateMoveRecord = {
+      moveNumber: (currentState.moveCount ?? 0) + 1,
+      san: '(skip)',
+      from: '',
+      to: '',
+      fen: currentState.fen,
+      diceRoll: currentState.diceRoll!,
+      pieceType: diceRolledPieceType,
+      timestamp: Date.now(),
+      skipped: true,
+    };
+
+    const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
+    const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
+    // CRITICAL: flip FEN active color so the next player's chess.moves() returns
+    // the right moves. We flip from currentState.fen (not chess.fen()) to avoid
+    // any discrepancy caused by the chess instance being mutated elsewhere.
+    await rSet(stateRef, {
+      ...currentState,
+      fen: flipFenActiveColor(currentState.fen),
+      diceRoll: null,
+      diceRolled: false,
+      turn: nextTurn,
+      moveHistory: [...(currentState.moveHistory ?? []), skipRecord],
+      moveCount: (currentState.moveCount ?? 0) + 1,
+    });
+  }, [isMyTurn, gameState?.diceRolled, myColor, matchId, diceRolledPieceType]);
 
   // ── Execute a legal move ──────────────────────────────────────────────────
   /**
@@ -1341,7 +1381,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                   {/* Skip */}
                   <button
                     onClick={handleSkip}
-                    disabled={!isMyTurn || !gameState?.diceRolled || isGameOver || isReplayMode}
+                    disabled={!isMyTurn || !gameState?.diceRolled || isGameOver || isReplayMode || chess.isCheck()}
                     className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-amber-600/20 border border-zinc-700 hover:border-amber-500/30 text-slate-400 hover:text-amber-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <SkipForward className="w-3.5 h-3.5" />
