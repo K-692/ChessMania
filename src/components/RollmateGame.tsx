@@ -572,6 +572,12 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     initState().catch(console.error);
   }, [matchData, matchId, user]);
 
+  // ── Reset selection when turn changes ──────────────────────────────────────
+  useEffect(() => {
+    setSelectedSquare(null);
+    setCustomSquareStyles({});
+  }, [gameState?.turn]);
+
   // ── Finalize game in Firestore ────────────────────────────────────────────
   const finalizeGame = useCallback(async (
     winnerUid: string | null,
@@ -990,6 +996,11 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
     // Selecting a piece of the correct type
     if (piece && piece.color === myColor && piece.type === diceRolledPieceType) {
+      if (selectedSquare === square) {
+        setSelectedSquare(null);
+        setCustomSquareStyles({});
+        return;
+      }
       setSelectedSquare(square);
       if (showLegalMoves) {
         // Pass the FEN (not chess instance) so getLegalMoveSquares uses the
@@ -999,9 +1010,24 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       return;
     }
 
-    // Attempting a move from selected square
+    // Clicking on any other piece of their own (different type) -> reset dots/selection and play illegal sound
+    if (piece && piece.color === myColor) {
+      setSelectedSquare(null);
+      setCustomSquareStyles({});
+      playIllegalMoveSound();
+      return;
+    }
+
+    // Attempting a move/capture to the clicked square
     if (selectedSquare) {
       executeMoveIfLegal(selectedSquare, square);
+    } else {
+      // Clicked empty square or opponent's piece without selection
+      setSelectedSquare(null);
+      setCustomSquareStyles({});
+      if (piece && piece.color !== myColor) {
+        playIllegalMoveSound();
+      }
     }
   }, [myColor, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves, executeMoveIfLegal]);
 

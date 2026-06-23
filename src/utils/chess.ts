@@ -37,8 +37,18 @@ export const PIECE_SYMBOLS: Record<string, string> = {
 /**
  * Returns a random dice face index (0-5).
  * Each index corresponds to a piece type in DICE_FACES.
+ * Uses cryptographically secure and mathematically unbiased randomness when available.
  */
 export function rollDice(): number {
+  if (typeof window !== 'undefined' && window.crypto) {
+    const array = new Uint32Array(1);
+    let val;
+    do {
+      window.crypto.getRandomValues(array);
+      val = array[0];
+    } while (val >= 4294967296 - (4294967296 % 6));
+    return val % 6;
+  }
   return Math.floor(Math.random() * 6);
 }
 
