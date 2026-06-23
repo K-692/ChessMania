@@ -37,17 +37,13 @@ const AppContent: React.FC = () => {
   const [isChallengePopupOpen, setIsChallengePopupOpen] = useState(false);
   const [onlineStatuses, setOnlineStatuses] = useState<Record<string, any>>({});
   const [challengeSuccessMsg, setChallengeSuccessMsg] = useState('');
-  // refreshTick increments when the popup opens to force onlineFriends re-evaluation (issue 1)
-  const [refreshTick, setRefreshTick] = useState(0);
-  // Track challenge IDs already processed so finished games never re-launch (issue 10)
+  // Track challenge IDs already processed so finished games never re-launch
   const processedChallengeIds = useRef<Set<string>>(new Set());
 
-  // Derive online friends list reactively.
-  // refreshTick is included so the memo re-evaluates when the popup opens (issue 1).
+  // Derive online friends list reactively from real-time RTDB onlineStatuses.
   const onlineFriends = React.useMemo(() => {
-    void refreshTick; // intentional dependency to force re-evaluation on popup open
     return friendsList.filter(f => onlineStatuses[f.uid]?.state === 'online');
-  }, [friendsList, onlineStatuses, refreshTick]);
+  }, [friendsList, onlineStatuses]);
 
   // 1. Monitor Friend list for chat subscriptions and challenge modal
   useEffect(() => {
@@ -78,7 +74,8 @@ const AppContent: React.FC = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 2. Fetch online status references from RTDB
+  // 2. Subscribe to the full RTDB status node for real-time online presence updates.
+  // This keeps the onlineStatuses state in sync at all times.
   useEffect(() => {
     const statusRef = rRef(rtdb, 'status');
     const unsubscribe = onValue(statusRef, (snapshot) => {
@@ -415,11 +412,20 @@ const AppContent: React.FC = () => {
 
                 <div className="flex items-center justify-end">
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setChallengeSuccessMsg('');
-                      // Increment refreshTick to force onlineFriends memo to re-evaluate
-                      // with the latest RTDB + Firestore data (issue 1: first-load fix)
-                      setRefreshTick(t => t + 1);
+                      // Perform a one-shot RTDB read immediately when the popup
+                      // opens so online friends are visible right away — without
+                      // waiting for the onValue listener to fire a new event.
+                      // (The persistent onValue subscription keeps it live after.)
+                      try {
+                        const statusSnap = await rGet(rRef(rtdb, 'status'));
+                        if (statusSnap.exists()) {
+                          setOnlineStatuses(statusSnap.val());
+                        }
+                      } catch (e) {
+                        console.warn('Failed to fetch online statuses on popup open:', e);
+                      }
                       setIsChallengePopupOpen(true);
                     }}
                     className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-all cursor-pointer border border-violet-500/25 shadow-lg shadow-violet-600/10 hover:shadow-violet-600/20 text-xs"

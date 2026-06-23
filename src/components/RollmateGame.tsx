@@ -1018,7 +1018,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       </header>
 
       {/* ── Main Game Layout ──────────────────────────────────────────────── */}
-      <div className="flex-1 grid grid-cols-2 overflow-hidden min-h-0">
+      <div className="flex-1 grid overflow-hidden min-h-0" style={{ gridTemplateColumns: '62% 38%' }}>
 
         {/* ── Left: Chess Board ───────────────────────────────────────────── */}
         <div className="flex items-center justify-center p-6 min-w-0 min-h-0 bg-zinc-950/20">
@@ -1053,16 +1053,22 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
                     animationDurationInMs: 180,
                     showAnimations: true,
+                    // react-chessboard v5: `piece` in canDragPiece/onPieceDrop is a string
+                    // like "wP", "bN" — NOT an object with a .pieceType field.
+                    // Index 0 = color ('w'/'b'), index 1 = type ('p','n','b','r','q','k').
                     canDragPiece: ({ piece, isSparePiece }) => {
                       if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
+                      // piece.pieceType is a string like "wP" or "bN" (react-chessboard v5)
+                      // [0] = color ('w'/'b'), [1] = piece letter (uppercase) -> lowercase for chess.js
                       const pColor = piece.pieceType[0].toLowerCase();
-                      const pType = piece.pieceType[1].toLowerCase();
+                      const pType  = piece.pieceType[1].toLowerCase();
                       return pColor === myColor && pType === diceRolledPieceType;
                     },
                     onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
                       if (!targetSquare) return false;
+                      // piece.pieceType is a string like "wP" or "bN" (react-chessboard v5)
                       const pColor = piece.pieceType[0].toLowerCase();
-                      const pType = piece.pieceType[1].toLowerCase();
+                      const pType  = piece.pieceType[1].toLowerCase();
                       if (pColor !== myColor || pType !== diceRolledPieceType) {
                         playIllegalMoveSound();
                         return false;
@@ -1267,7 +1273,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
               {(gameState?.moveHistory?.length ?? 0) > 0 && (
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5">
                   <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">Move History</p>
-                  <div className="max-h-36 overflow-y-auto scrollbar-thin">
+                  <div className="max-h-56 overflow-y-auto scrollbar-thin">
                     <table className="w-full text-[9px] border-collapse">
                       <thead>
                         <tr className="text-slate-600 uppercase tracking-wider border-b border-zinc-800">
