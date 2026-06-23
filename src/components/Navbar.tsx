@@ -115,15 +115,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                 </button>
 
                 <button
-                  onClick={() => onNavigate('profile')}
-                  className={`text-sm font-semibold transition-colors cursor-pointer ${
-                    currentView === 'profile' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  Profile
-                </button>
-
-                <button
                   onClick={() => onNavigate('settings')}
                   className={`transition-colors cursor-pointer flex items-center ${
                     currentView === 'settings' ? 'text-violet-400' : 'text-slate-400 hover:text-slate-200'
@@ -234,20 +225,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   {pendingCount}
                 </span>
               )}
-            </button>
-
-            <button
-              onClick={() => {
-                onNavigate('profile');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`text-left px-4 py-3 rounded-xl transition-all text-sm font-semibold ${
-                currentView === 'profile'
-                  ? 'bg-violet-600/10 text-violet-300 border border-violet-500/25'
-                  : 'text-slate-300 hover:bg-white/5 border border-transparent'
-              }`}
-            >
-              Profile
             </button>
 
             <button

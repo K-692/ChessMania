@@ -14,28 +14,20 @@
   }
 }
 
-/* Premium Glassmorphism styling */
+/* Premium Solid Theme styling */
 .glass {
-  background: rgba(23, 25, 35, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: #09090b; /* Solid zinc-950 */
+  border: 1px solid #18181b; /* Solid borders */
 }
 
 .glass-accent {
-  background: rgba(139, 92, 246, 0.08);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(139, 92, 246, 0.18);
-  box-shadow: 0 8px 32px 0 rgba(139, 92, 246, 0.05);
+  background: #2e1065; /* Solid violet-950 */
+  border: 1px solid #4c1d95;
 }
 
 .glass-card {
-  background: linear-gradient(135deg, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.8) 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+  background: #18181b; /* Solid zinc-900 */
+  border: 1px solid #27272a;
 }
 
 /* Custom Chessboard visual enhancement */

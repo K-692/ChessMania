@@ -9,14 +9,23 @@ import type { UserProfile } from './types';
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from 'firebase/firestore';
 import { ref as rRef, onValue, update as rUpdate } from 'firebase/database';
 import { db, rtdb } from './firebase';
-import { Swords, Users, X, Sparkles } from 'lucide-react';
+import { Swords, Users, X, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { getSoundSettings, updateSoundSettings } from './utils/sound';
+import { NetworkSignal } from './components/NetworkSignal';
 
 const AppContent: React.FC = () => {
   const { user, profile, loading, login } = useAuth();
+  const [isMuted, setIsMuted] = useState(() => getSoundSettings().muted);
   
   // Navigation states
   const [view, setView] = useState<'dashboard' | 'social' | 'profile' | 'settings' | 'game'>('dashboard');
   const [activeMatchId, setActiveMatchId] = useState<string | null>(null);
+
+  const toggleMute = () => {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    updateSoundSettings({ muted: nextMuted });
+  };
 
   // Chat/Notifications states
   const [openChatFriend, setOpenChatFriend] = useState<UserProfile | null>(null);
@@ -188,10 +197,22 @@ const AppContent: React.FC = () => {
   if (!user) {
     return (
       <div className="min-h-screen bg-[#0d0e12] flex flex-col justify-between text-[#f1f5f9] select-none">
-        <header className="px-6 py-5 border-b border-white/5 bg-zinc-950/20 backdrop-blur-sm">
-          <div className="max-w-6xl mx-auto flex items-center space-x-2">
-            <img src="/game_logo.png" alt="ChessMania Logo" className="w-8 h-8 rounded-lg" />
-            <span className="text-base font-extrabold tracking-wider">ChessMania</span>
+        <header className="px-6 py-5 border-b border-zinc-850 bg-zinc-950">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <img src="/game_logo.png" alt="ChessMania Logo" className="w-8 h-8 rounded-lg" />
+              <span className="text-base font-extrabold tracking-wider">ChessMania</span>
+            </div>
+            <div className="flex items-center space-x-3.5">
+              <NetworkSignal />
+              <button
+                onClick={toggleMute}
+                className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-slate-300 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                title={isMuted ? "Unmute Music" : "Mute Music"}
+              >
+                {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 animate-pulse" />}
+              </button>
+            </div>
           </div>
         </header>
 
@@ -287,14 +308,19 @@ const AppContent: React.FC = () => {
           <div className="max-w-4xl mx-auto px-4 py-12 space-y-8 text-left animate-fade-in">
             
             {/* Header Greeting */}
-            <div className="space-y-1 border-b border-zinc-800 pb-5">
-              <h2 className="text-2xl font-black text-white flex items-center gap-2">
-                <span>Welcome to ChessMania, {profile?.displayName}!</span>
-                <Sparkles className="w-5 h-5 text-violet-400 shrink-0" />
-              </h2>
-              <p className="text-xs text-slate-500 font-medium">
-                Sync status, message friends, and play friendly Rollmate chess invites.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-zinc-800 pb-5">
+              <div className="space-y-1">
+                <h2 className="text-2xl font-black text-white flex items-center gap-2">
+                  <span>Welcome to ChessMania, {profile?.displayName}!</span>
+                  <Sparkles className="w-5 h-5 text-violet-400 shrink-0" />
+                </h2>
+                <p className="text-xs text-slate-500 font-medium">
+                  Sync status, message friends, and play friendly Rollmate chess invites.
+                </p>
+              </div>
+              <div className="shrink-0">
+                <NetworkSignal />
+              </div>
             </div>
 
             {/* Main Dash Cards */}

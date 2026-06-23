@@ -10,21 +10,34 @@ interface ProfileViewProps {
   onStartGame?: (matchId: string) => void;
 }
 
-const DEFAULT_AVATARS = [
-  { name: 'White King', url: '/pieces/neo/wk.png' },
-  { name: 'White Queen', url: '/pieces/neo/wq.png' },
-  { name: 'White Knight', url: '/pieces/neo/wn.png' },
-  { name: 'White Rook', url: '/pieces/neo/wr.png' },
-  { name: 'Black King', url: '/pieces/neo/bk.png' },
-  { name: 'Black Queen', url: '/pieces/neo/bq.png' },
-  { name: 'Black Knight', url: '/pieces/neo/bn.png' },
-  { name: 'Black Rook', url: '/pieces/neo/br.png' }
+const PIECE_STYLES = [
+  { id: 'neon', name: 'Neon Glow' },
+  { id: '8_bit', name: '8-Bit Retro' },
+  { id: 'neo', name: 'Neo Modern' },
+  { id: 'glass', name: 'Glassic' },
+  { id: 'gothic', name: 'Gothic Dark' },
+  { id: 'wood', name: 'Classic Wood' },
+  { id: 'classic', name: 'Standard Classic' },
+  { id: 'graffiti', name: 'Street Art' },
+  { id: 'space', name: 'Cosmic Space' }
+];
+
+const PIECE_ROLES = [
+  { code: 'wk', name: 'White King' },
+  { code: 'wq', name: 'White Queen' },
+  { code: 'wn', name: 'White Knight' },
+  { code: 'wr', name: 'White Rook' },
+  { code: 'bk', name: 'Black King' },
+  { code: 'bq', name: 'Black Queen' },
+  { code: 'bn', name: 'Black Knight' },
+  { code: 'br', name: 'Black Rook' }
 ];
 
 export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
   const { user, profile, updateCachedProfile } = useAuth();
   
   // States
+  const [selectedAvatarStyle, setSelectedAvatarStyle] = useState('neon');
   const [friendCount, setFriendCount] = useState(0);
   const [recentMatches, setRecentMatches] = useState<any[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(true);
@@ -395,20 +408,60 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
               {photoError && <p className="text-xs text-red-400">{photoError}</p>}
             </div>
 
-            {/* Default Avatar Select Grid */}
+            {/* Gallery Upload Option */}
             <div className="space-y-3 pt-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Chess Avatar</label>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Upload from Gallery / Files</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    if (file.size > 700 * 1024) {
+                      setPhotoError("Image size exceeds 700KB. Please choose a smaller image.");
+                      return;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                      if (typeof reader.result === 'string') {
+                        handleSavePhoto(reader.result);
+                      }
+                    };
+                    reader.readAsDataURL(file);
+                  }
+                }}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-200 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-[11px] file:font-semibold file:bg-zinc-800 file:text-slate-200 hover:file:bg-zinc-700 cursor-pointer"
+              />
+            </div>
+
+            {/* Chess Avatar Select Grid */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Select Chess Avatar</label>
+                <select
+                  value={selectedAvatarStyle}
+                  onChange={(e) => setSelectedAvatarStyle(e.target.value)}
+                  className="bg-zinc-950 border border-zinc-800 rounded-md text-[10px] text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-500 font-semibold"
+                >
+                  {PIECE_STYLES.map((st) => (
+                    <option key={st.id} value={st.id}>{st.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-4 gap-3 bg-zinc-950/40 p-4 rounded-xl border border-zinc-850">
-                {DEFAULT_AVATARS.map((av) => (
-                  <button
-                    key={av.name}
-                    onClick={() => handleSavePhoto(av.url)}
-                    className="p-1 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-violet-500 hover:bg-zinc-900 transition-all flex items-center justify-center aspect-square shadow cursor-pointer group"
-                    title={av.name}
-                  >
-                    <img src={av.url} alt={av.name} className="w-10 h-10 object-contain group-hover:scale-110 transition-transform" />
-                  </button>
-                ))}
+                {PIECE_ROLES.map((role) => {
+                  const url = `/pieces/${selectedAvatarStyle}/${role.code}.png`;
+                  return (
+                    <button
+                      key={role.code}
+                      onClick={() => handleSavePhoto(url)}
+                      className="p-1 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-violet-500 hover:bg-zinc-900 transition-all flex items-center justify-center aspect-square shadow cursor-pointer group"
+                      title={role.name}
+                    >
+                      <img src={url} alt={role.name} className="w-10 h-10 object-contain group-hover:scale-110 transition-transform" />
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
