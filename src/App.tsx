@@ -171,9 +171,9 @@ const AppContent: React.FC = () => {
   // Dynamic background image selection based on active tab/view
   useEffect(() => {
     if (user && view === 'profile') {
-      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.45) 0%, rgba(13, 14, 18, 0.65) 100%), url('/chess_king_neon.png')";
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.6) 0%, rgba(13, 14, 18, 0.8) 100%), url('/chess_king_neon.png')";
     } else {
-      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.45) 0%, rgba(13, 14, 18, 0.65) 100%), url('/chess_cinematic_bg.png')";
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.6) 0%, rgba(13, 14, 18, 0.8) 100%), url('/chess_cinematic_bg.png')";
     }
   }, [user, view]);
 
@@ -415,7 +415,7 @@ const AppContent: React.FC = () => {
                       onClick={() => handleChallengeFriend(f.uid, f.displayName)}
                       className="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1.5 rounded-lg text-[10px] transition-all cursor-pointer border border-violet-500/25"
                     >
-                      Invite
+                      Challenge
                     </button>
                   </div>
                 ))

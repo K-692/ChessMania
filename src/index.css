@@ -5,7 +5,7 @@
     margin: 0;
     font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
     background-color: #0d0e12;
-    background-image: linear-gradient(to bottom, rgba(13, 14, 18, 0.4) 0%, rgba(13, 14, 18, 0.6) 100%), url('/chess_cinematic_bg.png');
+    background-image: linear-gradient(to bottom, rgba(13, 14, 18, 0.55) 0%, rgba(13, 14, 18, 0.75) 100%), url('/chess_cinematic_bg.png');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
@@ -98,7 +98,7 @@
 
 /* Divine Glow and Cinematic Background styles */
 .landing-bg {
-  background-image: linear-gradient(to bottom, rgba(13, 14, 18, 0.4) 0%, rgba(13, 14, 18, 0.6) 100%), url('/chess_cinematic_bg.png');
+  background-image: linear-gradient(to bottom, rgba(13, 14, 18, 0.55) 0%, rgba(13, 14, 18, 0.75) 100%), url('/chess_cinematic_bg.png');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
