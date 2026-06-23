@@ -6,7 +6,7 @@ import { SettingsView } from './components/SettingsView';
 import { ProfileView } from './components/ProfileView';
 import { RollmateGame } from './components/RollmateGame';
 import type { UserProfile } from './types';
-import { collection, query, where, getDocs, getDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref as rRef, onValue, update as rUpdate } from 'firebase/database';
 import { db, rtdb } from './firebase';
 import { Swords, Users, X, Sparkles, Volume2, VolumeX } from 'lucide-react';
@@ -30,29 +30,44 @@ const AppContent: React.FC = () => {
   // Chat/Notifications states
   const [openChatFriend, setOpenChatFriend] = useState<UserProfile | null>(null);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  const [friendsUids, setFriendsUids] = useState<string[]>([]);
+  const [friendsList, setFriendsList] = useState<UserProfile[]>([]);
+  const friendsUids = React.useMemo(() => friendsList.map(f => f.uid), [friendsList]);
   
   // Rollmate Friend Challenge Popup State
   const [isChallengePopupOpen, setIsChallengePopupOpen] = useState(false);
-  const [onlineFriends, setOnlineFriends] = useState<UserProfile[]>([]);
   const [onlineStatuses, setOnlineStatuses] = useState<Record<string, any>>({});
   const [challengeSuccessMsg, setChallengeSuccessMsg] = useState('');
 
-  // 1. Monitor Friend list for chat subscriptions
+  // Derive online friends list reactively
+  const onlineFriends = React.useMemo(() => {
+    return friendsList.filter(f => onlineStatuses[f.uid]?.state === 'online');
+  }, [friendsList, onlineStatuses]);
+
+  // 1. Monitor Friend list for chat subscriptions and challenge modal
   useEffect(() => {
     if (!user) {
-      setFriendsUids([]);
+      setFriendsList([]);
       return;
     }
-    const q = collection(db, 'users', user.uid, 'friends');
+    const q = query(
+      collection(db, 'users', user.uid, 'friends'),
+      where('status', '==', 'accepted')
+    );
     const unsubscribe = onSnapshot(q, (snap) => {
-      const uids: string[] = [];
+      const list: UserProfile[] = [];
       snap.forEach((docSnap) => {
-        if (docSnap.data().status === 'accepted') {
-          uids.push(docSnap.id);
-        }
+        const data = docSnap.data();
+        list.push({
+          uid: docSnap.id,
+          displayName: data.displayName || 'Player',
+          photoURL: data.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop',
+          rating: data.rating || 1200,
+          ...data
+        } as UserProfile);
       });
-      setFriendsUids(uids);
+      setFriendsList(list);
+    }, (err) => {
+      console.warn("Failed to listen to friends list:", err);
     });
     return () => unsubscribe();
   }, [user]);
@@ -120,37 +135,7 @@ const AppContent: React.FC = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // 5. Gather online friends list for the Challenge Modal
-  useEffect(() => {
-    if (!isChallengePopupOpen || !user) return;
-    const fetchFriends = async () => {
-      try {
-        const q = query(
-          collection(db, 'users', user.uid, 'friends'),
-          where('status', '==', 'accepted')
-        );
-        const snap = await getDocs(q);
-        const list: UserProfile[] = [];
-        
-        for (const docSnap of snap.docs) {
-          const friendUid = docSnap.id;
-          const status = onlineStatuses[friendUid];
-          const isOnline = status?.state === 'online';
-          
-          if (isOnline) {
-            const uSnap = await getDoc(doc(db, 'users', friendUid));
-            if (uSnap.exists()) {
-              list.push({ uid: friendUid, ...uSnap.data() } as UserProfile);
-            }
-          }
-        }
-        setOnlineFriends(list);
-      } catch (err) {
-        console.warn("Failed to fetch online friends:", err);
-      }
-    };
-    fetchFriends();
-  }, [isChallengePopupOpen, user, onlineStatuses]);
+  // 5. Removed async fetchFriends loop in favor of reactive useMemo above
 
   // Send a Rollmate Challenge to a selected online friend
   const handleChallengeFriend = async (friendUid: string, displayName: string) => {
@@ -186,9 +171,9 @@ const AppContent: React.FC = () => {
   // Dynamic background image selection based on active tab/view
   useEffect(() => {
     if (user && view === 'profile') {
-      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.85) 0%, rgba(13, 14, 18, 0.95) 100%), url('/chess_king_neon.png')";
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.45) 0%, rgba(13, 14, 18, 0.65) 100%), url('/chess_king_neon.png')";
     } else {
-      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.85) 0%, rgba(13, 14, 18, 0.95) 100%), url('/chess_cinematic_bg.png')";
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.45) 0%, rgba(13, 14, 18, 0.65) 100%), url('/chess_cinematic_bg.png')";
     }
   }, [user, view]);
 
@@ -206,12 +191,19 @@ const AppContent: React.FC = () => {
   if (!user) {
     return (
       <div className="min-h-screen bg-transparent flex flex-col justify-between text-[#f1f5f9] select-none">
-        <header className="px-6 py-5 border-b border-zinc-850 bg-zinc-950">
-          <div className="max-w-6xl mx-auto flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <img src="/game_logo.png" alt="ChessMania Logo" className="w-8 h-8 rounded-lg" />
-              <span className="text-base font-extrabold tracking-wider">ChessMania</span>
+        <header className="glass sticky top-0 z-50 px-6 py-4 border-b border-white/5 backdrop-blur-md">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            {/* Brand Logo & Name */}
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center justify-center bg-zinc-950 p-1 rounded-xl border border-white/5 overflow-hidden w-12 h-12 shrink-0">
+                <img src="/game_logo.png" alt="ChessMania Logo" className="w-full h-full object-cover rounded-lg" />
+              </div>
+              <div className="flex flex-col text-left font-black tracking-wider text-white select-none leading-none">
+                <span className="text-base font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-zinc-200 to-zinc-400">ChessMania</span>
+                <span className="text-[9px] text-zinc-500 font-mono mt-0.5">THE ULTIMATE MANIA</span>
+              </div>
             </div>
+            
             <div className="flex items-center space-x-3.5">
               <NetworkSignal />
               <button
@@ -338,9 +330,6 @@ const AppContent: React.FC = () => {
                 <p className="text-xs text-slate-500 font-medium">
                   Sync status, message friends, and play friendly Rollmate chess invites.
                 </p>
-              </div>
-              <div className="shrink-0">
-                <NetworkSignal />
               </div>
             </div>
 

@@ -4,6 +4,7 @@ import { LogIn, LogOut, Menu, X, Settings } from 'lucide-react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref as rRef, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
+import { NetworkSignal } from './NetworkSignal';
 
 interface NavbarProps {
   onNavigate: (view: 'dashboard' | 'social' | 'profile' | 'settings') => void;
@@ -124,6 +125,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                   <Settings className="w-4.5 h-4.5" />
                 </button>
 
+                <div className="flex items-center">
+                  <NetworkSignal />
+                </div>
+
                 {/* User Profile Card */}
                 <div 
                   className="flex items-center space-x-3 border-l border-white/10 pl-5 cursor-pointer hover:opacity-90 transition-opacity"
@@ -167,6 +172,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
 
         {/* Mobile Hamburger Button Controls */}
         <div className="flex lg:hidden items-center space-x-3">
+          <NetworkSignal />
           {!isGameActive && user && (
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
