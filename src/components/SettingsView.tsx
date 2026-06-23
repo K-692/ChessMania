@@ -17,16 +17,27 @@ const PIECE_THEMES = [
   '8_BIT', 'ALPHA', 'BASES', 'BLINDFOLD', 'BOOK', 'BUBBLEGUM', 'CASES', 'CLASSIC', 'CLUB', 'CONDAL', 'DASH', 'GAME_ROOM', 'GLASS', 'GOTHIC', 'GRAFFITI', 'ICY_SEA', 'LIGHT', 'LOLZ', 'MARBLE', 'MAYA', 'METAL', 'MODERN', 'NATURE', 'NEO', 'NEO_WOOD', 'NEON', 'NEWSPAPER', 'OCEAN', 'SKY', 'SPACE', 'TIGERS', 'TOURNAMENT', 'VINTAGE', 'WOOD'
 ];
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
+interface SettingsPanelContentProps {
+  /** Called after any setting changes so the parent can re-read getSoundSettings() */
+  onSettingsChange?: () => void;
+}
+
+/**
+ * Reusable settings panel that renders all game preference controls:
+ * music, sound effects, legal move hints, board theme, piece theme.
+ * Used both in the full SettingsView page and the in-game settings modal.
+ */
+export const SettingsPanelContent: React.FC<SettingsPanelContentProps> = ({ onSettingsChange }) => {
   const [settings, setSettings] = useState(getSoundSettings());
-  const { user, profile, updateCachedProfile } = useAuth();
-  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-  const [queryText, setQueryText] = useState('');
-  const [category, setCategory] = useState('bug');
-  const [subject, setSubject] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitSuccess, setSubmitSuccess] = useState<boolean | null>(null);
-  const [submitError, setSubmitError] = useState('');
+  const { profile, updateCachedProfile } = useAuth();
+
+  // Poll for settings changes from other sources (e.g. mute toggle in navbar)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSettings(getSoundSettings());
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
 
   const syncSettingsToFirestore = (updated: Record<string, any>) => {
     if (!profile) return;
@@ -38,53 +49,245 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
     });
   };
 
-  useEffect(() => {
-    // Sync external changes (e.g. if muted from landing page)
-    const interval = setInterval(() => {
-      setSettings(getSoundSettings());
-    }, 500);
-    return () => clearInterval(interval);
-  }, []);
-
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const musicVolume = parseFloat(e.target.value);
     const newMuted = musicVolume === 0 ? true : settings.muted;
     const updated = { musicVolume, muted: newMuted };
     setSettings(prev => ({ ...prev, ...updated }));
     updateSoundSettings(updated);
-    syncSettingsToFirestore({
-      musicVolume,
-      musicEnabled: !newMuted
-    });
+    syncSettingsToFirestore({ musicVolume, musicEnabled: !newMuted });
+    onSettingsChange?.();
   };
 
   const handleToggleEffects = () => {
     const effectsEnabled = !settings.effectsEnabled;
     setSettings(prev => ({ ...prev, effectsEnabled }));
     updateSoundSettings({ effectsEnabled });
-    syncSettingsToFirestore({
-      soundEffectsEnabled: effectsEnabled
-    });
+    syncSettingsToFirestore({ soundEffectsEnabled: effectsEnabled });
+    onSettingsChange?.();
   };
 
   const handleToggleMute = () => {
     const muted = !settings.muted;
     setSettings(prev => ({ ...prev, muted }));
     updateSoundSettings({ muted });
-    syncSettingsToFirestore({
-      musicEnabled: !muted
-    });
+    syncSettingsToFirestore({ musicEnabled: !muted });
+    onSettingsChange?.();
   };
 
   const handleToggleLegalMoves = () => {
     const showLegalMoves = !settings.showLegalMoves;
     setSettings(prev => ({ ...prev, showLegalMoves }));
     updateSoundSettings({ showLegalMoves });
-    syncSettingsToFirestore({
-      legalMoveHintsEnabled: showLegalMoves
-    });
+    syncSettingsToFirestore({ legalMoveHintsEnabled: showLegalMoves });
+    onSettingsChange?.();
   };
 
+  return (
+    <div className="glass rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden shadow-2xl">
+      {/* Row 1: Theme Music Volume Setting */}
+      <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+        <div className="flex items-center space-x-4">
+          <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0">
+            <Music className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">Theme Music</h4>
+            <p className="text-xs text-slate-500">Looping cinematic background soundtrack</p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-4 w-full md:w-auto md:justify-end">
+          <div className="flex items-center space-x-3 w-full md:w-48">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={settings.musicVolume}
+              onChange={handleVolumeChange}
+              className="w-full accent-violet-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
+            />
+            <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">
+              {Math.round(settings.musicVolume * 100)}%
+            </span>
+          </div>
+          <button
+            onClick={handleToggleMute}
+            className={`p-2.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
+              settings.muted
+                ? 'border-red-500/30 bg-red-500/10 text-red-400'
+                : 'border-white/5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5'
+            }`}
+            title={settings.muted ? "Unmute Music" : "Mute Music"}
+          >
+            {settings.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Row 2: Sound Effects Toggle */}
+      <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+        <div className="flex items-center space-x-4">
+          <div className="p-2.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400 shrink-0">
+            <Volume2 className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">Sound Effects</h4>
+            <p className="text-xs text-slate-500">Board moves, captures, check warnings, and click feedback</p>
+          </div>
+        </div>
+
+        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+          <input
+            type="checkbox"
+            checked={settings.effectsEnabled}
+            onChange={handleToggleEffects}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+        </label>
+      </div>
+
+      {/* Row 3: Show Legal Moves Toggle */}
+      <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
+        <div className="flex items-center space-x-4">
+          <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400 shrink-0">
+            <Eye className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">Legal Moves Hint</h4>
+            <p className="text-xs text-slate-500">Show available legal moves as dots on the board when selecting a piece</p>
+          </div>
+        </div>
+
+        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+          <input
+            type="checkbox"
+            checked={!!settings.showLegalMoves}
+            onChange={handleToggleLegalMoves}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
+        </label>
+      </div>
+
+      {/* Row 4: Board Theme Selection */}
+      <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors">
+        <div className="flex items-center space-x-4">
+          <div className="p-2.5 bg-pink-500/10 rounded-xl border border-pink-500/20 text-pink-400 shrink-0">
+            <Palette className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">Board Theme</h4>
+            <p className="text-xs text-slate-500">Customize the background design of the chessboard</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+          {BOARD_THEMES.map((theme) => {
+            const key = theme.toLowerCase();
+            const isActive = settings.boardTheme === key;
+            return (
+              <button
+                key={key}
+                onClick={() => {
+                  updateSoundSettings({ boardTheme: key });
+                  setSettings(s => ({ ...s, boardTheme: key }));
+                  syncSettingsToFirestore({ boardTheme: key });
+                  onSettingsChange?.();
+                }}
+                className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
+                  isActive
+                    ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
+                    : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
+                }`}
+              >
+                <div className="flex items-center space-x-4">
+                  <div
+                    className="w-12 h-12 rounded-lg border border-white/10 shrink-0 select-none shadow-md bg-cover bg-center"
+                    style={{ backgroundImage: `url('/boards/${key}.png')` }}
+                  />
+                  <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
+                    {theme.replace(/_/g, ' ').toUpperCase()}
+                  </span>
+                </div>
+                {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Row 5: Chess Piece Style Selection */}
+      <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors border-t border-white/5">
+        <div className="flex items-center space-x-4">
+          <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0 flex items-center justify-center">
+            <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-5 h-5 object-contain" />
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-200">Chess Piece Style</h4>
+            <p className="text-xs text-slate-500">Customize the design style of the chess pieces</p>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
+          {PIECE_THEMES.map((theme) => {
+            const key = theme.toLowerCase();
+            const isActive = (settings.pieceTheme || 'classic') === key;
+            return (
+              <button
+                key={key}
+                onClick={() => {
+                  updateSoundSettings({ pieceTheme: key });
+                  setSettings(s => ({ ...s, pieceTheme: key }));
+                  syncSettingsToFirestore({ pieceStyle: key });
+                  onSettingsChange?.();
+                }}
+                className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
+                  isActive
+                    ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
+                    : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
+                }`}
+              >
+                <div className="flex items-center space-x-4">
+                  <div className="w-12 h-12 rounded-lg bg-slate-950/40 border border-white/5 flex items-center justify-center p-2">
+                    <img
+                      src={`/pieces/${key}/wn.png`}
+                      alt="White Knight"
+                      className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
+                      }}
+                    />
+                  </div>
+                  <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
+                    {theme.replace(/_/g, ' ').toUpperCase()}
+                  </span>
+                </div>
+                {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SettingsView — Full page wrapper (includes support section)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
+  const { user } = useAuth();
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [queryText, setQueryText] = useState('');
+  const [category, setCategory] = useState('bug');
+  const [subject, setSubject] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccess, setSubmitSuccess] = useState<boolean | null>(null);
+  const [submitError, setSubmitError] = useState('');
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10 space-y-8 text-left animate-fade-in">
@@ -105,194 +308,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
         </div>
       </div>
 
-      <div className="glass rounded-2xl border border-white/10 divide-y divide-white/5 overflow-hidden shadow-2xl">
-        {/* Row 1: Theme Music Volume Setting */}
-        <div className="p-6 flex flex-col md:flex-row md:items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0">
-              <Music className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Theme Music</h4>
-              <p className="text-xs text-slate-500">Looping cinematic background soundtrack</p>
-            </div>
-          </div>
+      {/* All settings controls — shared with in-game settings modal */}
+      <SettingsPanelContent />
 
-          <div className="flex items-center space-x-4 w-full md:w-auto md:justify-end">
-            <div className="flex items-center space-x-3 w-full md:w-48">
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={settings.musicVolume}
-                onChange={handleVolumeChange}
-                className="w-full accent-violet-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
-              />
-              <span className="text-xs text-slate-400 font-mono w-8 text-right shrink-0">
-                {Math.round(settings.musicVolume * 100)}%
-              </span>
-            </div>
-            <button
-              onClick={handleToggleMute}
-              className={`p-2.5 rounded-xl border transition-all cursor-pointer shrink-0 ${
-                settings.muted
-                  ? 'border-red-500/30 bg-red-500/10 text-red-400'
-                  : 'border-white/5 bg-slate-900/60 text-slate-400 hover:text-white hover:bg-white/5'
-              }`}
-              title={settings.muted ? "Unmute Music" : "Mute Music"}
-            >
-              {settings.muted ? <VolumeX className="w-4.5 h-4.5" /> : <Volume2 className="w-4.5 h-4.5" />}
-            </button>
-          </div>
-        </div>
-
-        {/* Row 2: Sound Effects Checkbox Setting */}
-        <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-400 shrink-0">
-              <Volume2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Sound Effects</h4>
-              <p className="text-xs text-slate-500">Board moves, captures, check warnings, and click feedback</p>
-            </div>
-          </div>
-
-          <label className="relative inline-flex items-center cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              checked={settings.effectsEnabled}
-              onChange={handleToggleEffects}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
-          </label>
-        </div>
-
-        {/* Row 3: Show Legal Moves Toggle Setting */}
-        <div className="p-6 flex items-center justify-between gap-6 hover:bg-white/[0.01] transition-colors">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-400 shrink-0">
-              <Eye className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Legal Moves Hint</h4>
-              <p className="text-xs text-slate-500">Show available legal moves as dots on the board when selecting a piece</p>
-            </div>
-          </div>
-
-          <label className="relative inline-flex items-center cursor-pointer shrink-0">
-            <input
-              type="checkbox"
-              checked={!!settings.showLegalMoves}
-              onChange={handleToggleLegalMoves}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-600 peer-checked:after:bg-white peer-checked:after:border-white"></div>
-          </label>
-        </div>
-
-        {/* Row 4: Board Theme Selection */}
+      {/* Support Section */}
+      <div className="glass rounded-2xl border border-white/10 overflow-hidden shadow-2xl">
         <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-pink-500/10 rounded-xl border border-pink-500/20 text-pink-400 shrink-0">
-              <Palette className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Board Theme</h4>
-              <p className="text-xs text-slate-500">Customize the background design of the chessboard</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
-            {BOARD_THEMES.map((theme) => {
-              const key = theme.toLowerCase();
-              const isActive = settings.boardTheme === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => {
-                    updateSoundSettings({ boardTheme: key });
-                    setSettings(s => ({ ...s, boardTheme: key }));
-                    syncSettingsToFirestore({ boardTheme: key });
-                  }}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
-                    isActive
-                      ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
-                      : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center space-x-4">
-                    <div 
-                      className="w-12 h-12 rounded-lg border border-white/10 shrink-0 select-none shadow-md bg-cover bg-center"
-                      style={{ backgroundImage: `url('/boards/${key}.png')` }}
-                    />
-                    <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
-                      {theme.replace(/_/g, ' ').toUpperCase()}
-                    </span>
-                  </div>
-                  {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Row 5: Chess Piece Style Selection */}
-        <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors border-t border-white/5">
-          <div className="flex items-center space-x-4">
-            <div className="p-2.5 bg-violet-500/10 rounded-xl border border-violet-500/20 text-violet-400 shrink-0 flex items-center justify-center">
-              <img src={`/pieces/${settings.pieceTheme || 'classic'}/wn.png`} alt="Knight" className="w-5 h-5 object-contain" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-slate-200">Chess Piece Style</h4>
-              <p className="text-xs text-slate-500">Customize the design style of the chess pieces</p>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-2 pt-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin">
-            {PIECE_THEMES.map((theme) => {
-              const key = theme.toLowerCase();
-              const isActive = (settings.pieceTheme || 'classic') === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => {
-                    updateSoundSettings({ pieceTheme: key });
-                    setSettings(s => ({ ...s, pieceTheme: key }));
-                    syncSettingsToFirestore({ pieceStyle: key });
-                  }}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer text-left relative overflow-hidden ${
-                    isActive
-                      ? 'border-violet-500 bg-violet-500/15 text-white font-bold ring-2 ring-violet-500/55'
-                      : 'border-white/5 bg-slate-900/40 hover:bg-slate-900/60 text-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 rounded-lg bg-slate-950/40 border border-white/5 flex items-center justify-center p-2">
-                      <img 
-                        src={`/pieces/${key}/wn.png`} 
-                        alt="White Knight" 
-                        className="w-full h-full object-contain filter drop-shadow-[0px_2px_4px_rgba(0,0,0,0.5)]" 
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = '/pieces/classic/wn.png';
-                        }}
-                      />
-                    </div>
-                    <span className="text-sm font-semibold tracking-wide text-slate-200 uppercase">
-                      {theme.replace(/_/g, ' ').toUpperCase()}
-                    </span>
-                  </div>
-                  {isActive && <Check className="w-5 h-5 text-violet-400 shrink-0 mr-2" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Support Section */}
-        <div className="p-6 space-y-4 hover:bg-white/[0.01] transition-colors border-t border-white/5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center space-x-4">
               <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/20 text-amber-400 shrink-0">
@@ -367,7 +388,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                   setIsSubmitting(true);
                   setSubmitError('');
                   try {
-                    // 1. Add support query log with fields matching model
+                    // 1. Add support query log
                     const queryCol = collection(db, 'supportQueries');
                     const newQueryDocRef = doc(queryCol);
                     const queryId = newQueryDocRef.id;
@@ -387,7 +408,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
                     });
 
                     // 2. Fetch admin email from /config/support
-                    let adminEmail = 'krishnendu.pal.work@gmail.com'; // fallback placeholder
+                    let adminEmail = 'krishnendu.pal.work@gmail.com';
                     try {
                       const configDoc = await getDoc(doc(db, 'config', 'support'));
                       if (configDoc.exists() && configDoc.data().adminEmail) {
@@ -399,7 +420,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onBack }) => {
 
                     // 3. Write mail triggers to /mail
                     const mailCol = collection(db, 'mail');
-                    
+
                     // User notification
                     await addDoc(mailCol, {
                       to: user.email || 'unknown@gmail.com',

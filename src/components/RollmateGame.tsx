@@ -31,6 +31,7 @@ import {
 import { getSoundSettings } from '../utils/sound';
 import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playIllegalMoveSound } from '../utils/sound';
 import type { Match, UserProfile, RollmateMoveRecord, GameChatMessage, RollmateRTDBState } from '../types';
+import { SettingsPanelContent } from './SettingsView';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -126,7 +127,7 @@ interface PlayerCardProps {
 }
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ profile, isActive, color, label }) => (
-  <div className={`flex items-center gap-2.5 p-2.5 rounded-xl border transition-all ${
+  <div className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all ${
     isActive
       ? 'bg-violet-600/10 border-violet-500/40 shadow-lg shadow-violet-500/10'
       : 'bg-zinc-900/60 border-zinc-800'
@@ -135,9 +136,9 @@ const PlayerCard: React.FC<PlayerCardProps> = ({ profile, isActive, color, label
       <img
         src={profile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
         alt={profile?.displayName || '?'}
-        className="w-8 h-8 rounded-full object-cover border-2 border-zinc-700"
+        className="w-7 h-7 rounded-full object-cover border-2 border-zinc-700"
       />
-      <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-zinc-900 ${
+      <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-900 ${
         color === 'w' ? 'bg-white' : 'bg-zinc-900 border-zinc-600'
       }`} />
     </div>
@@ -167,7 +168,7 @@ interface CapturedPiecesProps {
 const CapturedPieces: React.FC<CapturedPiecesProps> = ({ label, pieces, pieceTheme }) => {
   if (pieces.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
+    <div className="flex items-center gap-1 flex-wrap">
       <span className="text-[9px] text-slate-600 uppercase tracking-wider font-semibold shrink-0">{label}:</span>
       {pieces.map((p, i) => (
         <img
@@ -191,26 +192,39 @@ interface GameChatProps {
   currentUser: { uid: string; displayName: string | null; photoURL: string | null };
   currentProfile: UserProfile | null;
   disabled: boolean;
+  onNewMessages?: (count: number) => void;
 }
 
-const GameChat: React.FC<GameChatProps> = ({ matchId, currentUser, currentProfile, disabled }) => {
+const GameChat: React.FC<GameChatProps> = ({ matchId, currentUser, currentProfile, disabled, onNewMessages }) => {
   const [messages, setMessages] = useState<GameChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Track the count of messages already seen so we can compute new arrivals
+  const seenCountRef = useRef(0);
 
   // Listen to RTDB chat node for this match session
   useEffect(() => {
     const chatRef = rRef(rtdb, `matches/${matchId}/chat`);
     const unsub = rOnValue(chatRef, (snap) => {
-      if (!snap.exists()) { setMessages([]); return; }
+      if (!snap.exists()) { setMessages([]); seenCountRef.current = 0; return; }
       const val = snap.val();
       const msgs: GameChatMessage[] = Object.keys(val).map((k) => ({ id: k, ...val[k] }));
       msgs.sort((a, b) => a.timestamp - b.timestamp);
+      // Notify parent about new messages from opponents (not from self)
+      const newCount = msgs.length - seenCountRef.current;
+      if (newCount > 0) {
+        const newMsgs = msgs.slice(seenCountRef.current);
+        const opponentNewMsgs = newMsgs.filter(m => m.senderUid !== currentUser.uid);
+        if (opponentNewMsgs.length > 0) {
+          onNewMessages?.(opponentNewMsgs.length);
+        }
+      }
+      seenCountRef.current = msgs.length;
       setMessages(msgs);
     });
     return () => unsub();
-  }, [matchId]);
+  }, [matchId, currentUser.uid, onNewMessages]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -363,6 +377,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
   // ── Game state (from RTDB) ─────────────────────────────────────────────────
   const [gameState, setGameState] = useState<RollmateRTDBState | null>(null);
+  /**
+   * gameStateRef always holds the most recent gameState value.
+   * This is critical for executeMoveIfLegal: the callback must read the
+   * freshest state when writing to RTDB, even if React hasn't re-rendered yet.
+   * Using a ref prevents stale-closure bugs in move execution (issues 6 & 11).
+   */
+  const gameStateRef = useRef<RollmateRTDBState | null>(null);
   const [chess] = useState(() => new Chess()); // Local chess engine instance
 
   // ── Dice state ─────────────────────────────────────────────────────────────
@@ -388,12 +409,25 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   } | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /**
+   * unreadChatCount tracks messages received while chat panel is not active.
+   * Resets to 0 when user opens the chat panel.
+   */
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
-  // ── Settings ──────────────────────────────────────────────────────────────
-  const soundSettings = getSoundSettings();
-  const boardTheme = soundSettings.boardTheme || 'green';
-  const pieceTheme = soundSettings.pieceTheme || 'classic';
-  const showLegalMoves = soundSettings.showLegalMoves !== false;
+  // ── Settings — re-read whenever settingsVersion bumps ─────────────────────
+  /**
+   * settingsVersion increments whenever SettingsPanelContent fires onSettingsChange.
+   * This forces the component to re-read localStorage and re-derive board/piece theme
+   * so changes made in the in-game settings modal apply to the board immediately.
+   */
+  const [settingsVersion, setSettingsVersion] = useState(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const boardTheme = React.useMemo(() => getSoundSettings().boardTheme || '8_bit', [settingsVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pieceTheme = React.useMemo(() => getSoundSettings().pieceTheme || 'neo', [settingsVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const showLegalMoves = React.useMemo(() => getSoundSettings().showLegalMoves !== false, [settingsVersion]);
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const myColor: 'w' | 'b' | null = matchData
@@ -415,7 +449,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   const capturedByWhiteFiles = capturedByWhite.map((p) => `b${p}`);
   const capturedByBlackFiles = capturedByBlack.map((p) => `w${p}`);
 
-  // Build custom pieces for react-chessboard
+  // Build custom pieces for react-chessboard — rebuilds when pieceTheme changes
   const customPieces = React.useMemo(() => buildCustomPieces(pieceTheme), [pieceTheme]);
 
   // Board style (theme)
@@ -454,11 +488,14 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
     const unsub = rOnValue(stateRef, (snap) => {
       if (!snap.exists()) {
-        // Initialize game state on first load if white player
+        // State not initialized yet — initialization handled below
         return;
       }
       const state = snap.val() as RollmateRTDBState;
+
+      // Always update both the React state and the ref simultaneously
       setGameState(state);
+      gameStateRef.current = state;
 
       // Sync local chess instance to current FEN
       try {
@@ -469,12 +506,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
       // Check if game just ended
       if (state.status === 'completed' || state.status === 'terminated') {
-        if (!gameResult) {
-          setGameResult({ winnerUid: state.winnerUid, reason: 'Game over' });
-        }
+        setGameResult(prev => prev ?? { winnerUid: state.winnerUid, reason: 'Game over' });
       }
 
-      // Check for incoming draw offer
+      // Check for incoming draw offer from opponent
       if (state.drawOffer && state.drawOffer.fromUid !== user?.uid) {
         setShowDrawOffer(true);
       }
@@ -526,12 +561,14 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     setLocalDiceResult(faceIndex);
     setRolling(false);
 
+    // Always read from ref for latest state
+    const currentState = gameStateRef.current!;
+
     // Check if this roll has any legal moves
     const hasLegal = hasLegalMovesForRoll(chess, myColor, pieceType);
 
     // Write the dice roll to RTDB
     const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-    const currentState = gameState!;
 
     if (!hasLegal) {
       // Auto-skip: record a skip move, flip turn
@@ -568,7 +605,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       });
       setStatusMessage(`Roll: ${getPieceTypeName(pieceType)} — choose your move!`);
     }
-  }, [isMyTurn, gameState, rolling, myColor, chess, matchId]);
+  }, [isMyTurn, gameState?.diceRolled, rolling, myColor, chess, matchId]);
 
   // ── Manual skip handler ───────────────────────────────────────────────────
   const handleSkip = useCallback(async () => {
@@ -584,7 +621,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       return;
     }
 
-    const currentState = gameState;
+    const currentState = gameStateRef.current!;
     const skipRecord: RollmateMoveRecord = {
       moveNumber: (currentState.moveCount ?? 0) + 1,
       san: '(skip)',
@@ -606,16 +643,20 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       moveHistory: [...(currentState.moveHistory ?? []), skipRecord],
       moveCount: (currentState.moveCount ?? 0) + 1,
     });
-  }, [isMyTurn, gameState, myColor, chess, matchId, diceRolledPieceType]);
+  }, [isMyTurn, gameState?.diceRolled, myColor, chess, matchId, diceRolledPieceType]);
 
   // ── Board square click handler ────────────────────────────────────────────
   const handleSquareClick = useCallback((square: string) => {
-    if (!isMyTurn || !gameState?.diceRolled || !myColor || isReplayMode) return;
+    // Read live gameState via the ref to avoid stale closure
+    const currentState = gameStateRef.current;
+    if (!currentState?.diceRolled || !myColor || isReplayMode) return;
     if (!diceRolledPieceType) return;
+    // Only allow moves on my turn
+    if (currentState.turn !== myColor || currentState.status !== 'active') return;
 
     const piece = chess.get(square as any);
 
-    // Selecting a piece
+    // Selecting a piece of the correct type
     if (piece && piece.color === myColor && piece.type === diceRolledPieceType) {
       setSelectedSquare(square);
       if (showLegalMoves) {
@@ -628,12 +669,19 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     if (selectedSquare) {
       executeMoveIfLegal(selectedSquare, square);
     }
-  }, [isMyTurn, gameState, myColor, chess, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves]);
+  }, [myColor, chess, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves]);
 
 
   // ── Execute a legal move ──────────────────────────────────────────────────
+  /**
+   * Attempts to execute a chess move. Reads game state from the ref (not closure)
+   * to guarantee we always write the freshest state to RTDB — preventing
+   * the critical bug where moves appeared local-only and turns never advanced.
+   */
   const executeMoveIfLegal = useCallback((from: string, to: string, promotionPiece?: string): boolean => {
-    if (!gameState || !myColor || !diceRolledPieceType) return false;
+    // Always read from ref for latest state — critical fix for issues 6 & 11
+    const currentState = gameStateRef.current;
+    if (!currentState || !myColor || !diceRolledPieceType) return false;
 
     // Check for pawn promotion
     const piece = chess.get(from as any);
@@ -642,7 +690,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       if ((myColor === 'w' && toRank === '8') || (myColor === 'b' && toRank === '1')) {
         if (!promotionPiece) {
           setPromotionPending({ from, to });
-          return true; // Don't return false — we'll complete after user picks
+          return true; // Will complete after user picks promotion piece
         }
       }
     }
@@ -704,12 +752,12 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
       // Build move record for history
       const moveRecord: RollmateMoveRecord = {
-        moveNumber: (gameState.moveCount ?? 0) + 1,
+        moveNumber: (currentState.moveCount ?? 0) + 1,
         san: moveResult.san,
         from,
         to,
         fen: newFen,
-        diceRoll: gameState.diceRoll!,
+        diceRoll: currentState.diceRoll!,
         pieceType: moveResult.piece,
         timestamp: Date.now(),
         skipped: false,
@@ -717,25 +765,31 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         promotion: promotionPiece,
       };
 
-      const newHistory = [...(gameState.moveHistory ?? []), moveRecord];
+      const newHistory = [...(currentState.moveHistory ?? []), moveRecord];
 
-      // Write new state to RTDB
-      const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-      rSet(stateRef, {
-        ...gameState,
+      // Write new state to RTDB using the freshest currentState from ref
+      const newRTDBState: RollmateRTDBState = {
+        ...currentState,
         fen: newFen,
-        turn: gameState.turn === 'w' ? 'b' : 'w',
+        turn: currentState.turn === 'w' ? 'b' : 'w',
         diceRoll: null,
         diceRolled: false,
         status: newStatus,
         winnerUid: newWinnerUid,
         moveHistory: newHistory,
-        moveCount: (gameState.moveCount ?? 0) + 1,
-      }).then(() => {
+        moveCount: (currentState.moveCount ?? 0) + 1,
+      };
+
+      const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
+      rSet(stateRef, newRTDBState).then(() => {
         if (newStatus === 'completed') {
           finalizeGame(newWinnerUid, newHistory, endReason);
         }
       });
+
+      // Exit replay mode if we were somehow in it
+      setReplayIndex(-1);
+      setReplayFen(null);
 
       return true;
     } catch (e) {
@@ -744,7 +798,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       setCustomSquareStyles({});
       return false;
     }
-  }, [gameState, myColor, chess, matchId, diceRolledPieceType, user?.uid]);
+  }, [myColor, chess, matchId, diceRolledPieceType, user?.uid]);
 
   // ── Handle promotion choice ───────────────────────────────────────────────
   const handlePromotionSelect = useCallback((piece: 'q' | 'r' | 'b' | 'n') => {
@@ -861,19 +915,31 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   }, [gameState, matchId]);
 
   // ── Replay navigation ─────────────────────────────────────────────────────
+  /**
+   * Replay index convention:
+   *   -1   = live game view (gameState.fen)
+   *    N   = show board after move N was applied (history[N].fen)
+   *
+   * Back: -1 → enter at maxIdx, N → N-1 (or initial FEN if N=0)
+   * Next: N → N+1, maxIdx → exit replay (-1)
+   */
   const handleReplayBack = useCallback(() => {
     const history = gameState?.moveHistory ?? [];
     const maxIdx = history.length - 1;
+    if (maxIdx < 0) return;
 
     if (replayIndex === -1) {
-      // Enter replay at last move
+      // Enter replay at the last move
       setReplayIndex(maxIdx);
-      const prevFen = maxIdx > 0 ? history[maxIdx - 1].fen : new Chess().fen();
-      setReplayFen(maxIdx > 0 ? prevFen : new Chess().fen());
-    } else if (replayIndex > 0) {
+      setReplayFen(history[maxIdx].fen);
+    } else if (replayIndex === 0) {
+      // Go before the first move: show initial FEN
+      setReplayIndex(0);
+      setReplayFen(new Chess().fen());
+    } else {
       const newIdx = replayIndex - 1;
       setReplayIndex(newIdx);
-      setReplayFen(newIdx > 0 ? history[newIdx - 1].fen : new Chess().fen());
+      setReplayFen(history[newIdx].fen);
     }
   }, [replayIndex, gameState]);
 
@@ -881,11 +947,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     const history = gameState?.moveHistory ?? [];
     const maxIdx = history.length - 1;
 
+    if (replayIndex < 0 || replayIndex > maxIdx) return;
+
     if (replayIndex === maxIdx) {
-      // Exit replay mode
+      // Exit replay mode — return to live board
       setReplayIndex(-1);
       setReplayFen(null);
-    } else if (replayIndex >= 0 && replayIndex < maxIdx) {
+    } else {
       const newIdx = replayIndex + 1;
       setReplayIndex(newIdx);
       setReplayFen(history[newIdx].fen);
@@ -895,7 +963,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   // ── Loading screen ────────────────────────────────────────────────────────
   if (loading || !matchData) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-zinc-950 text-slate-200 p-6">
+      <div className="flex flex-col items-center justify-center h-screen bg-zinc-950 text-slate-200 p-6">
         <div className="flex flex-col items-center gap-5">
           <div className="relative w-16 h-16">
             <div className="absolute inset-0 border-4 border-violet-500 border-t-transparent rounded-full animate-spin" />
@@ -911,6 +979,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   }
 
   const isGameOver = gameState?.status === 'completed' || gameState?.status === 'terminated';
+  // Live board always shows gameState.fen; replay mode shows the selected history FEN
   const boardFen = isReplayMode && replayFen ? replayFen : (gameState?.fen ?? new Chess().fen());
   const boardOrientation = myColor === 'b' ? 'black' : 'white';
 
@@ -920,13 +989,18 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     : null;
   const displayReplayDice = replayRecord?.diceRoll ?? null;
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="min-h-screen bg-zinc-950 text-slate-200 flex flex-col overflow-hidden">
+    /**
+     * Root: h-screen + overflow-hidden ensures the game never scrolls (issue 2).
+     * All child flex containers use min-h-0 so they shrink correctly.
+     */
+    <div className="h-screen bg-zinc-950 text-slate-200 flex flex-col overflow-hidden">
 
       {/* ── Slim In-Game Top Bar ───────────────────────────────────────────── */}
-      <header className="glass sticky top-0 z-40 px-4 py-2.5 border-b border-white/5 flex items-center justify-between shrink-0">
+      <header className="glass sticky top-0 z-40 px-4 py-2 border-b border-white/5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
-          <img src="/game_logo.png" alt="ChessMania" className="w-7 h-7 rounded-lg object-cover border border-white/10" />
+          <img src="/game_logo.png" alt="ChessMania" className="w-6 h-6 rounded-lg object-cover border border-white/10" />
           <div>
             <p className="text-xs font-bold text-white leading-none">Rollmate</p>
             <p className="text-[9px] text-slate-500 font-mono leading-none mt-0.5">{matchId.slice(0, 12)}…</p>
@@ -945,13 +1019,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       </header>
 
       {/* ── Main Game Layout ──────────────────────────────────────────────── */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
         {/* ── Left: Chess Board ───────────────────────────────────────────── */}
-        <div className="flex-1 flex items-center justify-center p-4 min-w-0">
-          <div className="w-full max-w-[min(calc(100vh-140px),600px)] aspect-square">
+        <div className="flex-1 flex items-center justify-center p-3 min-w-0 min-h-0">
+          <div className="flex flex-col w-full h-full max-w-[min(calc(100vh-120px),560px)] max-h-[calc(100vh-120px)] justify-center">
             {/* Opponent (top) */}
-            <div className="mb-2">
+            <div className="mb-1.5 shrink-0">
               <PlayerCard
                 profile={opponentProfile}
                 isActive={gameState?.turn !== myColor && !isGameOver}
@@ -961,45 +1035,47 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
             </div>
 
             {/* Board */}
-            <div className="chessboard-container w-full aspect-square relative" data-board-element>
-              <Chessboard
-                options={{
-                  position: boardFen,
-                  boardOrientation: boardOrientation,
-                  pieces: customPieces,
-                  boardStyle: {
-                    ...boardStyle,
-                    backgroundImage: `url('/boards/${boardTheme}.png')`,
-                    backgroundSize: 'cover',
-                  },
-                  squareStyles: {
-                    ...(selectedSquare ? { [selectedSquare]: { background: 'rgba(139,92,246,0.4)' } } : {}),
-                    ...customSquareStyles,
-                  },
-                  allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
-                  animationDurationInMs: 180,
-                  showAnimations: true,
-                  canDragPiece: ({ piece, isSparePiece }) => {
-                    if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
-                    const pColor = piece.pieceType[0].toLowerCase();
-                    const pType = piece.pieceType[1].toLowerCase();
-                    return pColor === myColor && pType === diceRolledPieceType;
-                  },
-                  onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
-                    if (!targetSquare) return false;
-                    const pColor = piece.pieceType[0].toLowerCase();
-                    const pType = piece.pieceType[1].toLowerCase();
-                    if (pColor !== myColor || pType !== diceRolledPieceType) {
-                      playIllegalMoveSound();
-                      return false;
-                    }
-                    return executeMoveIfLegal(sourceSquare, targetSquare);
-                  },
-                  onSquareClick: isReplayMode ? undefined : ({ square }) => {
-                    handleSquareClick(square);
-                  },
-                }}
-              />
+            <div className="chessboard-container flex-1 min-h-0 relative" data-board-element>
+              <div className="w-full h-full">
+                <Chessboard
+                  options={{
+                    position: boardFen,
+                    boardOrientation: boardOrientation,
+                    pieces: customPieces,
+                    boardStyle: {
+                      ...boardStyle,
+                      backgroundImage: `url('/boards/${boardTheme}.png')`,
+                      backgroundSize: 'cover',
+                    },
+                    squareStyles: {
+                      ...(selectedSquare ? { [selectedSquare]: { background: 'rgba(139,92,246,0.4)' } } : {}),
+                      ...customSquareStyles,
+                    },
+                    allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
+                    animationDurationInMs: 180,
+                    showAnimations: true,
+                    canDragPiece: ({ piece, isSparePiece }) => {
+                      if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
+                      const pColor = piece.pieceType[0].toLowerCase();
+                      const pType = piece.pieceType[1].toLowerCase();
+                      return pColor === myColor && pType === diceRolledPieceType;
+                    },
+                    onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
+                      if (!targetSquare) return false;
+                      const pColor = piece.pieceType[0].toLowerCase();
+                      const pType = piece.pieceType[1].toLowerCase();
+                      if (pColor !== myColor || pType !== diceRolledPieceType) {
+                        playIllegalMoveSound();
+                        return false;
+                      }
+                      return executeMoveIfLegal(sourceSquare, targetSquare);
+                    },
+                    onSquareClick: isReplayMode ? undefined : ({ square }) => {
+                      handleSquareClick(square);
+                    },
+                  }}
+                />
+              </div>
               {/* Replay overlay */}
               {isReplayMode && (
                 <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-sm rounded-lg px-2.5 py-1.5 text-[10px] text-amber-400 font-bold uppercase tracking-widest flex items-center gap-1.5 pointer-events-none">
@@ -1010,7 +1086,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
             </div>
 
             {/* My player (bottom) */}
-            <div className="mt-2">
+            <div className="mt-1.5 shrink-0">
               <PlayerCard
                 profile={myProfile}
                 isActive={isMyTurn && !isGameOver}
@@ -1022,39 +1098,56 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         </div>
 
         {/* ── Right Panel ─────────────────────────────────────────────────── */}
-        <div className="w-[300px] shrink-0 border-l border-zinc-800/60 flex flex-col bg-zinc-900/40 overflow-hidden">
+        <div className="w-[280px] shrink-0 border-l border-zinc-800/60 flex flex-col bg-zinc-900/40 overflow-hidden min-h-0">
 
           {/* Panel Tab Switcher */}
           <div className="flex border-b border-zinc-800 shrink-0">
             {(['game', 'chat'] as const).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActivePanel(tab)}
-                className={`flex-1 py-2.5 text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                onClick={() => {
+                  setActivePanel(tab);
+                  // Reset unread count when opening chat
+                  if (tab === 'chat') setUnreadChatCount(0);
+                }}
+                className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${
                   activePanel === tab
                     ? 'text-violet-400 border-b-2 border-violet-500 bg-violet-500/5'
                     : 'text-slate-600 hover:text-slate-400'
                 }`}
               >
-                {tab === 'game' ? <><Trophy className="w-3 h-3" />Game</> : <><MessageCircle className="w-3 h-3" />Chat</>}
+                {tab === 'game' ? (
+                  <><Trophy className="w-3 h-3" />Game</>
+                ) : (
+                  <>
+                    <MessageCircle className="w-3 h-3" />
+                    Chat
+                    {/* Unread message badge (issue 4) */}
+                    {unreadChatCount > 0 && activePanel !== 'chat' && (
+                      <span className="absolute top-1 right-3 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center px-1 shadow-lg">
+                        {unreadChatCount > 9 ? '9+' : unreadChatCount}
+                      </span>
+                    )}
+                  </>
+                )}
               </button>
             ))}
           </div>
 
           {/* Game Panel */}
           {activePanel === 'game' && (
-            <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-3 min-h-0">
+            <div className="flex-1 overflow-y-auto scrollbar-thin p-2.5 space-y-2.5 min-h-0">
 
               {/* Status message */}
               {statusMessage && (
-                <div className="bg-violet-950/30 border border-violet-500/20 rounded-xl p-2.5 text-[10px] text-violet-300 text-center animate-pulse">
+                <div className="bg-violet-950/30 border border-violet-500/20 rounded-xl p-2 text-[10px] text-violet-300 text-center animate-pulse">
                   {statusMessage}
                 </div>
               )}
 
               {/* Check warning */}
               {gameState && !isGameOver && chess.isCheck() && (
-                <div className="bg-red-950/30 border border-red-500/20 rounded-xl p-2.5 flex items-center gap-2 text-[10px] text-red-400">
+                <div className="bg-red-950/30 border border-red-500/20 rounded-xl p-2 flex items-center gap-2 text-[10px] text-red-400">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0 animate-pulse" />
                   <span className="font-semibold">King is in check!</span>
                 </div>
@@ -1062,7 +1155,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
               {/* Turn indicator */}
               {gameState && !isGameOver && !isReplayMode && (
-                <div className={`rounded-xl p-2.5 border text-[10px] text-center font-bold uppercase tracking-widest ${
+                <div className={`rounded-xl p-2 border text-[10px] text-center font-bold uppercase tracking-widest ${
                   isMyTurn
                     ? 'bg-violet-600/10 border-violet-500/30 text-violet-400'
                     : 'bg-zinc-800/50 border-zinc-700 text-slate-500'
@@ -1075,8 +1168,8 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
               )}
 
               {/* ── Dice ─────────────────────────────────────────────────── */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-                <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold mb-2.5 text-center">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5">
+                <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold mb-2 text-center">
                   {isReplayMode ? 'Dice (Replay)' : 'Dice Roll'}
                 </p>
                 {isReplayMode ? (
@@ -1104,7 +1197,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
               </div>
 
               {/* ── Game Controls ─────────────────────────────────────────── */}
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-2">
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 space-y-2">
                 <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold">Controls</p>
 
                 {/* Replay navigation */}
@@ -1112,7 +1205,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                   <button
                     onClick={handleReplayBack}
                     disabled={!gameState?.moveHistory?.length}
-                    className="flex items-center justify-center gap-1 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-slate-300 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-slate-300 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                     Back
@@ -1120,7 +1213,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                   <button
                     onClick={handleReplayNext}
                     disabled={!isReplayMode}
-                    className="flex items-center justify-center gap-1 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-slate-300 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-slate-300 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     Next
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -1131,7 +1224,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                 <button
                   onClick={handleSkip}
                   disabled={!isMyTurn || !gameState?.diceRolled || isGameOver || isReplayMode}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-zinc-800 hover:bg-amber-600/20 border border-zinc-700 hover:border-amber-500/30 text-slate-400 hover:text-amber-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-amber-600/20 border border-zinc-700 hover:border-amber-500/30 text-slate-400 hover:text-amber-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <SkipForward className="w-3.5 h-3.5" />
                   Skip Turn
@@ -1143,7 +1236,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     <button
                       onClick={() => setShowResignConfirm(true)}
                       disabled={isReplayMode}
-                      className="flex items-center justify-center gap-1 py-2 rounded-lg bg-red-950/20 hover:bg-red-950/40 border border-red-500/20 hover:border-red-500/40 text-red-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
+                      className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-red-950/20 hover:bg-red-950/40 border border-red-500/20 hover:border-red-500/40 text-red-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
                     >
                       <Flag className="w-3 h-3" />
                       Resign
@@ -1151,7 +1244,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     <button
                       onClick={handleOfferDraw}
                       disabled={isReplayMode || !!gameState?.drawOffer}
-                      className="flex items-center justify-center gap-1 py-2 rounded-lg bg-zinc-800 hover:bg-emerald-900/20 border border-zinc-700 hover:border-emerald-500/30 text-slate-400 hover:text-emerald-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
+                      className="flex items-center justify-center gap-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-emerald-900/20 border border-zinc-700 hover:border-emerald-500/30 text-slate-400 hover:text-emerald-400 text-[10px] font-semibold transition-all cursor-pointer disabled:opacity-40"
                     >
                       <Handshake className="w-3 h-3" />
                       Draw
@@ -1163,7 +1256,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                 {isGameOver && (
                   <button
                     onClick={onExit}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[10px] font-bold transition-all cursor-pointer border border-violet-500/25"
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-[10px] font-bold transition-all cursor-pointer border border-violet-500/25"
                   >
                     <Home className="w-3 h-3" />
                     Return to Dashboard
@@ -1171,43 +1264,72 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                 )}
               </div>
 
-              {/* ── Move History ──────────────────────────────────────────── */}
+              {/* ── Move History Table (issue 8) ───────────────────────────── */}
               {(gameState?.moveHistory?.length ?? 0) > 0 && (
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3">
-                  <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold mb-2">Move History</p>
-                  <div className="max-h-32 overflow-y-auto scrollbar-thin space-y-0.5">
-                    {(gameState?.moveHistory ?? []).map((m, i) => (
-                      <div
-                        key={i}
-                        onClick={() => {
-                          setReplayIndex(i);
-                          setReplayFen(m.fen);
-                        }}
-                        className={`flex items-center gap-2 px-2 py-1 rounded-lg text-[10px] cursor-pointer transition-all ${
-                          replayIndex === i
-                            ? 'bg-violet-600/20 text-violet-300'
-                            : 'hover:bg-zinc-800 text-slate-400'
-                        }`}
-                      >
-                        <span className="w-5 text-right text-slate-600 shrink-0">{m.moveNumber}.</span>
-                        <span className="shrink-0">{PIECE_SYMBOLS[m.pieceType] ?? '?'}</span>
-                        <span className={m.skipped ? 'italic text-slate-600' : 'font-mono'}>
-                          {m.skipped ? 'skip' : m.san}
-                        </span>
-                        {m.diceRoll !== undefined && (
-                          <span className="ml-auto text-slate-600 shrink-0">
-                            🎲{m.diceRoll + 1}
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5">
+                  <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold mb-1.5">Move History</p>
+                  <div className="max-h-36 overflow-y-auto scrollbar-thin">
+                    <table className="w-full text-[9px] border-collapse">
+                      <thead>
+                        <tr className="text-slate-600 uppercase tracking-wider border-b border-zinc-800">
+                          <th className="text-right pr-1.5 py-1 w-6">#</th>
+                          <th className="text-left px-1 py-1">Side</th>
+                          <th className="text-left px-1 py-1">Piece</th>
+                          <th className="text-left px-1 py-1">Move</th>
+                          <th className="text-left px-1 py-1">SAN</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(gameState?.moveHistory ?? []).map((m, i) => {
+                          // Determine player side from move color perspective:
+                          // White is always the first to move, so odd moveNumbers = white
+                          const isWhiteMove = m.moveNumber % 2 === 1;
+                          const playerName = isWhiteMove
+                            ? (whiteProfile?.displayName || 'White')
+                            : (blackProfile?.displayName || 'Black');
+                          const isHighlighted = replayIndex === i;
+                          return (
+                            <tr
+                              key={i}
+                              onClick={() => {
+                                setReplayIndex(i);
+                                setReplayFen(m.fen);
+                              }}
+                              className={`cursor-pointer transition-colors ${
+                                isHighlighted
+                                  ? 'bg-violet-600/20 text-violet-300'
+                                  : 'hover:bg-zinc-800 text-slate-400'
+                              }`}
+                            >
+                              <td className="text-right pr-1.5 py-0.5 text-slate-600 font-mono">{m.moveNumber}.</td>
+                              <td className="px-1 py-0.5 max-w-[60px] truncate text-slate-400">{playerName}</td>
+                              <td className="px-1 py-0.5 text-center">{PIECE_SYMBOLS[m.pieceType] ?? '?'}</td>
+                              <td className="px-1 py-0.5 font-mono text-slate-300">
+                                {m.skipped ? (
+                                  <span className="italic text-slate-600">skip</span>
+                                ) : (
+                                  <span>{m.from}→{m.to}{m.capturedPiece ? '×' : ''}</span>
+                                )}
+                              </td>
+                              <td className="px-1 py-0.5 font-mono">
+                                {m.skipped ? (
+                                  <span className="italic text-slate-600">—</span>
+                                ) : (
+                                  <span>{m.san}</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
 
               {/* ── Captured Pieces ───────────────────────────────────────── */}
               {(capturedByWhiteFiles.length > 0 || capturedByBlackFiles.length > 0) && (
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 space-y-1.5">
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-2.5 space-y-1.5">
                   <p className="text-[9px] text-slate-600 uppercase tracking-widest font-bold">Captures</p>
                   <CapturedPieces label="White took" pieces={capturedByWhiteFiles} pieceTheme={pieceTheme} />
                   <CapturedPieces label="Black took" pieces={capturedByBlackFiles} pieceTheme={pieceTheme} />
@@ -1219,7 +1341,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
           {/* Chat Panel */}
           {activePanel === 'chat' && (
-            <div className="flex-1 flex flex-col p-3 min-h-0 overflow-hidden">
+            <div className="flex-1 flex flex-col p-2.5 min-h-0 overflow-hidden">
               <div className="flex-1 overflow-y-auto min-h-0">
                 {user && (
                   <GameChat
@@ -1227,6 +1349,12 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     currentUser={{ uid: user.uid, displayName: user.displayName, photoURL: user.photoURL }}
                     currentProfile={profile}
                     disabled={isGameOver}
+                    onNewMessages={(count) => {
+                      // Only increment when chat panel is not active
+                      if (activePanel !== 'chat') {
+                        setUnreadChatCount(prev => prev + count);
+                      }
+                    }}
                   />
                 )}
               </div>
@@ -1310,34 +1438,30 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         />
       )}
 
-      {/* Settings shortcut info */}
+      {/* In-Game Settings Modal (issue 3) — renders the full SettingsPanelContent */}
       {settingsOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 max-w-sm w-full mx-4 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-lg mx-4 flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <Settings className="w-4 h-4 text-violet-400" />
-                Active Settings
+                Game Settings
               </h3>
-              <button onClick={() => setSettingsOpen(false)} className="text-slate-500 hover:text-white cursor-pointer">
+              <button onClick={() => setSettingsOpen(false)} className="text-slate-500 hover:text-white cursor-pointer transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-2 text-xs text-slate-300">
-              <div className="flex justify-between bg-zinc-800 rounded-lg px-3 py-2">
-                <span className="text-slate-500">Board Theme</span>
-                <span className="font-mono text-violet-400 capitalize">{boardTheme.replace(/_/g, ' ')}</span>
-              </div>
-              <div className="flex justify-between bg-zinc-800 rounded-lg px-3 py-2">
-                <span className="text-slate-500">Piece Style</span>
-                <span className="font-mono text-violet-400 capitalize">{pieceTheme.replace(/_/g, ' ')}</span>
-              </div>
-              <div className="flex justify-between bg-zinc-800 rounded-lg px-3 py-2">
-                <span className="text-slate-500">Legal Move Hints</span>
-                <span className={showLegalMoves ? 'text-emerald-400' : 'text-slate-500'}>{showLegalMoves ? 'On' : 'Off'}</span>
-              </div>
+            {/* Scrollable settings panel content */}
+            <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+              <SettingsPanelContent
+                onSettingsChange={() => {
+                  // Increment settingsVersion to force RollmateGame to re-derive
+                  // board/piece theme from localStorage immediately (live refresh)
+                  setSettingsVersion(v => v + 1);
+                }}
+              />
             </div>
-            <p className="text-[10px] text-slate-600 text-center">Change settings via the main Settings page</p>
           </div>
         </div>
       )}

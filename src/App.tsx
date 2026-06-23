@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import { Navbar } from './components/Navbar';
 import { SocialView, FriendChatModal } from './components/SocialView';
@@ -37,11 +37,17 @@ const AppContent: React.FC = () => {
   const [isChallengePopupOpen, setIsChallengePopupOpen] = useState(false);
   const [onlineStatuses, setOnlineStatuses] = useState<Record<string, any>>({});
   const [challengeSuccessMsg, setChallengeSuccessMsg] = useState('');
+  // refreshTick increments when the popup opens to force onlineFriends re-evaluation (issue 1)
+  const [refreshTick, setRefreshTick] = useState(0);
+  // Track challenge IDs already processed so finished games never re-launch (issue 10)
+  const processedChallengeIds = useRef<Set<string>>(new Set());
 
-  // Derive online friends list reactively
+  // Derive online friends list reactively.
+  // refreshTick is included so the memo re-evaluates when the popup opens (issue 1).
   const onlineFriends = React.useMemo(() => {
+    void refreshTick; // intentional dependency to force re-evaluation on popup open
     return friendsList.filter(f => onlineStatuses[f.uid]?.state === 'online');
-  }, [friendsList, onlineStatuses]);
+  }, [friendsList, onlineStatuses, refreshTick]);
 
   // 1. Monitor Friend list for chat subscriptions and challenge modal
   useEffect(() => {
@@ -115,17 +121,31 @@ const AppContent: React.FC = () => {
     };
   }, [user, friendsUids]);
 
-  // 4. Listen to accepted challenges in RTDB for automatic game launch
+  // 4. Listen to accepted challenges in RTDB for automatic game launch.
+  // Only launches games for challenges that:
+  //   a) Are freshly accepted (created within the last 10 minutes)
+  //   b) Have not already been processed in this session
+  // This prevents finished games from leaking into active game pages (issue 10).
   useEffect(() => {
     if (!user) return;
 
+    const TEN_MINUTES_MS = 10 * 60 * 1000;
     const userChallengesRef = rRef(rtdb, `user_challenges/${user.uid}`);
     const unsubscribe = onValue(userChallengesRef, (snap) => {
       if (!snap.exists()) return;
       const challenges = snap.val();
+      const now = Date.now();
       for (const cid in challenges) {
         const ch = challenges[cid];
+        // Skip if already processed in this session
+        if (processedChallengeIds.current.has(cid)) continue;
+        // Skip old challenges (older than 10 minutes) — prevents stale state leaks
+        if (ch.createdAt && now - ch.createdAt > TEN_MINUTES_MS) {
+          processedChallengeIds.current.add(cid);
+          continue;
+        }
         if (ch.status === 'accepted' && ch.matchId) {
+          processedChallengeIds.current.add(cid);
           setActiveMatchId(ch.matchId);
           setView('game');
         }
@@ -356,6 +376,9 @@ const AppContent: React.FC = () => {
                   <button
                     onClick={() => {
                       setChallengeSuccessMsg('');
+                      // Increment refreshTick to force onlineFriends memo to re-evaluate
+                      // with the latest RTDB + Firestore data (issue 1: first-load fix)
+                      setRefreshTick(t => t + 1);
                       setIsChallengePopupOpen(true);
                     }}
                     className="w-full sm:w-auto flex items-center justify-center space-x-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-bold px-6 py-3 rounded-xl transition-all cursor-pointer border border-violet-500/25 shadow-lg shadow-violet-600/10 hover:shadow-violet-600/20 text-xs"

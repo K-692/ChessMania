@@ -185,11 +185,13 @@ export function getLegalMoveSquares(
     const isCapture = !!move.captured;
     styles[move.to] = isCapture
       ? {
-          background: 'radial-gradient(circle, rgba(239,68,68,0.6) 40%, transparent 41%)',
+          // Red ring for capture squares — clearly visible on all board themes
+          background: 'radial-gradient(circle, rgba(220,38,38,0.75) 36%, transparent 37%)',
           borderRadius: '50%',
         }
       : {
-          background: 'radial-gradient(circle, rgba(139,92,246,0.5) 25%, transparent 26%)',
+          // Black dot for legal move squares — standard chess convention
+          background: 'radial-gradient(circle, rgba(0,0,0,0.65) 28%, transparent 29%)',
           borderRadius: '50%',
         };
   }

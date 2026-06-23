@@ -123,11 +123,9 @@ export const DiceComponent: React.FC<DiceComponentProps> = ({
                 backfaceVisibility: 'visible',
               }}
             >
+              {/* Show only the chess piece symbol — no text label or number on the dice face */}
               <span className="text-2xl select-none leading-none" style={{ filter: 'drop-shadow(0 1px 3px rgba(0,0,0,0.5))' }}>
                 {PIECE_SYMBOLS[pieceType]}
-              </span>
-              <span className="text-[8px] font-bold text-white/60 uppercase tracking-wider mt-0.5 select-none">
-                {PIECE_TYPE_NAMES[pieceType].slice(0, 3)}
               </span>
             </div>
           ))}
