@@ -61,20 +61,60 @@ export function getPieceTypeName(pieceType: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns all legal moves for the given color and piece type.
- * Relies on chess.js which already filters out moves that leave king in check.
+ * Returns a new Chess instance loaded from `fen`, but with its active color
+ * forcibly set to `color`. This is critical because chess.moves() only
+ * returns moves for the currently active color in the FEN. If the stored
+ * FEN's active color doesn't match the player whose turn it is (due to
+ * skip-flip or timing issues), we need to correct it before querying moves.
  *
- * @param chess  - Active chess.js Chess instance
- * @param color  - 'w' or 'b'
+ * @param fen   - Current board FEN string
+ * @param color - The player whose turn it actually is
+ * @returns A fresh Chess instance with the correct active color
+ */
+export function chessWithCorrectTurn(fen: string, color: 'w' | 'b'): Chess {
+  const parts = fen.split(' ');
+  const originalColor = parts[1]; // Save original active color before overwriting
+  // parts[1] is the active color field in FEN — force it to the desired color
+  parts[1] = color;
+  // If we changed the active color, also reset the en passant square to '-'.
+  // An en passant target square is only valid for the side that just moved
+  // (the opponent). If we flip the active color without a real move having
+  // occurred, the en passant square would be invalid for the new active color,
+  // causing chess.js to reject the FEN or compute incorrect legal moves.
+  if (originalColor !== color) {
+    parts[3] = '-';
+  }
+  const normalizedFen = parts.join(' ');
+  const tempChess = new Chess();
+  try {
+    tempChess.load(normalizedFen);
+  } catch {
+    // Fallback: load original FEN if normalized version fails
+    try { tempChess.load(fen); } catch { /* ignore */ }
+  }
+  return tempChess;
+}
+
+/**
+ * Returns all legal moves for the given color and piece type.
+ * IMPORTANT: Uses a temporary chess instance with the correct active color
+ * so that chess.moves() returns the right player's moves regardless of what
+ * active color is encoded in the FEN. This prevents false "no legal moves"
+ * results when the FEN's active color gets out of sync with gameState.turn.
+ *
+ * @param fen    - Current board FEN string
+ * @param color  - 'w' or 'b' — the player whose turn it is
  * @param type   - piece type letter: p, n, b, r, q, k
  * @returns Array of verbose move objects that match the piece type
  */
 export function getLegalMovesForPieceType(
-  chess: Chess,
+  fen: string,
   color: 'w' | 'b',
   type: string
 ) {
-  const allMoves = chess.moves({ verbose: true });
+  // Use a temporary chess instance with the correct active color
+  const tempChess = chessWithCorrectTurn(fen, color);
+  const allMoves = tempChess.moves({ verbose: true });
   return allMoves.filter(
     (m) => m.color === color && m.piece === type
   );
@@ -101,18 +141,19 @@ export function hasPieceType(chess: Chess, color: 'w' | 'b', type: string): bool
 
 /**
  * Returns true if the rolled piece type has any legal moves this turn.
- * This encapsulates both the "no pieces of that type" and "no legal moves" cases.
+ * Uses the FEN-based approach to correctly identify legal moves regardless
+ * of the chess instance's current active color state.
  *
- * @param chess     - Active chess.js Chess instance
+ * @param fen       - Current board FEN string
  * @param color     - Active player color
  * @param pieceType - Piece type letter from dice roll
  */
 export function hasLegalMovesForRoll(
-  chess: Chess,
+  fen: string,
   color: 'w' | 'b',
   pieceType: string
 ): boolean {
-  return getLegalMovesForPieceType(chess, color, pieceType).length > 0;
+  return getLegalMovesForPieceType(fen, color, pieceType).length > 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -162,23 +203,27 @@ export function getCaptures(moveHistory: RollmateMoveRecord[]): {
 /**
  * Returns highlighted squares for legal moves of a selected piece.
  * Used to render move-hint dots on the board.
+ * Uses a FEN-based temporary chess instance to correctly handle the active
+ * color, preventing move hints from failing when FEN color is out of sync.
  *
- * @param chess      - Active chess.js Chess instance
+ * @param fen        - Current board FEN string
  * @param square     - Currently selected square (e.g., "e2")
  * @param pieceType  - Rolled piece type (only show hints if piece matches)
  * @param color      - Active player color
  * @returns Record of square → style object for react-chessboard customSquareStyles
  */
 export function getLegalMoveSquares(
-  chess: Chess,
+  fen: string,
   square: string,
   pieceType: string,
   color: 'w' | 'b'
 ): Record<string, CSSProperties> {
-  const piece = chess.get(square as any);
+  // Use a temporary chess instance with the correct active color
+  const tempChess = chessWithCorrectTurn(fen, color);
+  const piece = tempChess.get(square as any);
   if (!piece || piece.type !== pieceType || piece.color !== color) return {};
 
-  const moves = chess.moves({ square: square as any, verbose: true });
+  const moves = tempChess.moves({ square: square as any, verbose: true });
   const styles: Record<string, CSSProperties> = {};
 
   for (const move of moves) {

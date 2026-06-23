@@ -27,6 +27,7 @@ import {
   getLegalMoveSquares,
   getCaptures,
   flipFenActiveColor,
+  chessWithCorrectTurn,
   PIECE_SYMBOLS,
 } from '../utils/chess';
 import { getSoundSettings } from '../utils/sound';
@@ -395,6 +396,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
   const [customSquareStyles, setCustomSquareStyles] = useState<Record<string, React.CSSProperties>>({});
   const [promotionPending, setPromotionPending] = useState<{ from: string; to: string } | null>(null);
+  /**
+   * localBoardFen provides an optimistic board update immediately after the
+   * current player makes a move, so the UI shows the new position without
+   * waiting for the RTDB round-trip. Cleared when RTDB fires back with the
+   * authoritative new state.
+   */
+  const [localBoardFen, setLocalBoardFen] = useState<string | null>(null);
 
   // ── Replay mode ─────────────────────────────────────────────────────────────
   const [replayIndex, setReplayIndex] = useState<number>(-1); // -1 = live
@@ -498,11 +506,19 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       setGameState(state);
       gameStateRef.current = state;
 
-      // Sync local chess instance to current FEN
+      // Clear optimistic local board FEN — RTDB is now authoritative
+      setLocalBoardFen(null);
+
+      // Sync local chess instance to current FEN with the correct active color.
+      // We always normalise the FEN's active color to match state.turn so that
+      // chess.moves() returns the right player's moves throughout this component.
       try {
-        chess.load(state.fen);
+        const normalizedFen = state.fen.split(' ').map((p, i) => i === 1 ? state.turn : p).join(' ');
+        chess.load(normalizedFen);
       } catch (e) {
         console.warn('Failed to load FEN:', e);
+        // Attempt to load raw FEN as fallback
+        try { chess.load(state.fen); } catch { /* ignore */ }
       }
 
       // Check if game just ended
@@ -565,8 +581,12 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     // Always read from ref for latest state
     const currentState = gameStateRef.current!;
 
-    // Check if this roll has any legal moves
-    const hasLegal = hasLegalMovesForRoll(chess, myColor, pieceType);
+    // Check if this roll has any legal moves.
+    // IMPORTANT: Pass the FEN and myColor (not the chess instance) so that
+    // hasLegalMovesForRoll uses a temporary chess instance with the correct
+    // active color. This prevents false "no moves" when the stored FEN's
+    // active color doesn't match myColor due to skip/turn sync issues.
+    const hasLegal = hasLegalMovesForRoll(currentState.fen, myColor, pieceType);
 
     // Write the dice roll to RTDB
     const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
@@ -578,7 +598,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         san: `(skip)`,
         from: '',
         to: '',
-        fen: chess.fen(),
+        fen: currentState.fen,
         diceRoll: faceIndex,
         pieceType,
         timestamp: Date.now(),
@@ -592,12 +612,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       // CRITICAL: flip the FEN's active color so chess.js knows whose turn it is next.
       // Without this, chess.moves() would return the wrong player's moves on the
       // following turn, causing hasLegalMovesForRoll to falsely return 0 => infinite auto-skips.
+      const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
       await rSet(stateRef, {
         ...currentState,
-        fen: flipFenActiveColor(chess.fen()),
+        fen: flipFenActiveColor(currentState.fen),
         diceRoll: faceIndex,
         diceRolled: false,
-        turn: currentState.turn === 'w' ? 'b' : 'w',
+        turn: nextTurn,
         moveHistory: newHistory,
         moveCount: (currentState.moveCount ?? 0) + 1,
       });
@@ -610,15 +631,18 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       });
       setStatusMessage(`Roll: ${getPieceTypeName(pieceType)} — choose your move!`);
     }
-  }, [isMyTurn, gameState?.diceRolled, rolling, myColor, chess, matchId]);
+  }, [isMyTurn, gameState?.diceRolled, rolling, myColor, matchId]);
 
   // ── Manual skip handler ───────────────────────────────────────────────────
   const handleSkip = useCallback(async () => {
     if (!isMyTurn || !gameState?.diceRolled || !myColor) return;
     if (!diceRolledPieceType) return;
 
-    // Verify there are actually no legal moves (skip must be valid)
-    const hasLegal = hasLegalMovesForRoll(chess, myColor, diceRolledPieceType);
+    const currentState = gameStateRef.current!;
+
+    // Verify there are actually no legal moves (skip must be valid).
+    // Use the FEN-based check so the active color is always correct.
+    const hasLegal = hasLegalMovesForRoll(currentState.fen, myColor, diceRolledPieceType);
     if (hasLegal) {
       playIllegalMoveSound();
       setStatusMessage('You still have legal moves — you cannot skip!');
@@ -626,31 +650,33 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       return;
     }
 
-    const currentState = gameStateRef.current!;
     const skipRecord: RollmateMoveRecord = {
       moveNumber: (currentState.moveCount ?? 0) + 1,
       san: '(skip)',
       from: '',
       to: '',
-      fen: chess.fen(),
+      fen: currentState.fen,
       diceRoll: currentState.diceRoll!,
       pieceType: diceRolledPieceType,
       timestamp: Date.now(),
       skipped: true,
     };
 
+    const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
     const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-    // CRITICAL: flip FEN active color so chess.js is in sync with our turn field
+    // CRITICAL: flip FEN active color so the next player's chess.moves() returns
+    // the right moves. We flip from currentState.fen (not chess.fen()) to avoid
+    // any discrepancy caused by the chess instance being mutated elsewhere.
     await rSet(stateRef, {
       ...currentState,
-      fen: flipFenActiveColor(chess.fen()),
+      fen: flipFenActiveColor(currentState.fen),
       diceRoll: null,
       diceRolled: false,
-      turn: currentState.turn === 'w' ? 'b' : 'w',
+      turn: nextTurn,
       moveHistory: [...(currentState.moveHistory ?? []), skipRecord],
       moveCount: (currentState.moveCount ?? 0) + 1,
     });
-  }, [isMyTurn, gameState?.diceRolled, myColor, chess, matchId, diceRolledPieceType]);
+  }, [isMyTurn, gameState?.diceRolled, myColor, matchId, diceRolledPieceType]);
 
   // ── Finalize game in Firestore ────────────────────────────────────────────
   const finalizeGame = useCallback(async (
@@ -714,17 +740,33 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
   // ── Execute a legal move ──────────────────────────────────────────────────
   /**
-   * Attempts to execute a chess move. Reads game state from the ref (not closure)
-   * to guarantee we always write the freshest state to RTDB — preventing
-   * the critical bug where moves appeared local-only and turns never advanced.
+   * Attempts to execute a chess move.
+   *
+   * KEY FIXES:
+   * 1. Uses a temporary chess instance created from currentState.fen with the
+   *    correct active color (myColor). This prevents chess.move() from failing
+   *    when the shared chess instance's active color doesn't match myColor due
+   *    to FEN/turn sync issues — which was causing turns to silently advance.
+   * 2. Immediately sets localBoardFen after a successful move for optimistic
+   *    UI update, so the board shows the new position without waiting for the
+   *    RTDB round-trip (fixes the "piece not showing after move" UI bug).
+   * 3. Reads game state from the ref (not closure) to guarantee we always
+   *    write the freshest state to RTDB.
    */
   const executeMoveIfLegal = useCallback((from: string, to: string, promotionPiece?: string): boolean => {
-    // Always read from ref for latest state — critical fix for issues 6 & 11
+    // Always read from ref for latest state
     const currentState = gameStateRef.current;
     if (!currentState || !myColor || !diceRolledPieceType) return false;
 
-    // Check for pawn promotion
-    const piece = chess.get(from as any);
+    // Create a temporary chess instance with the correct active color.
+    // This is the critical fix: if the stored FEN's active color differs from
+    // myColor (due to a skip or other sync issue), the shared chess instance
+    // would reject the move. Using a fresh instance with myColor ensures that
+    // legal moves are always accepted for the correct player.
+    const tempChess = chessWithCorrectTurn(currentState.fen, myColor);
+
+    // Check for pawn promotion using the temp instance
+    const piece = tempChess.get(from as any);
     if (piece?.type === 'p') {
       const toRank = to[1];
       if ((myColor === 'w' && toRank === '8') || (myColor === 'b' && toRank === '1')) {
@@ -736,7 +778,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     }
 
     try {
-      const moveResult = chess.move({
+      const moveResult = tempChess.move({
         from: from as any,
         to: to as any,
         promotion: (promotionPiece as any) || undefined,
@@ -756,35 +798,46 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         playMoveSound();
       }
 
-      if (chess.isCheck()) playCheckSound();
+      if (tempChess.isCheck()) playCheckSound();
 
       setSelectedSquare(null);
       setCustomSquareStyles({});
 
+      // New FEN after the move (chess.js automatically flips active color)
+      const newFen = tempChess.fen();
+
+      // Optimistic UI update: immediately show the moved piece on the board
+      // without waiting for RTDB to confirm. This fixes the bug where the
+      // board appeared frozen after a move until the opponent's next action.
+      setLocalBoardFen(newFen);
+
+      // Also sync the shared chess instance so subsequent queries (e.g. isCheck)
+      // reflect the current board position
+      try { chess.load(newFen); } catch { /* ignore */ }
+
       // Detect game end conditions
-      const newFen = chess.fen();
       let newStatus: 'active' | 'completed' = 'active';
       let newWinnerUid: string | null = null;
       let endReason = '';
 
-      if (chess.isCheckmate()) {
+      if (tempChess.isCheckmate()) {
         newStatus = 'completed';
         newWinnerUid = user?.uid ?? null;
         endReason = 'checkmate';
         playWinSound();
-      } else if (chess.isStalemate()) {
+      } else if (tempChess.isStalemate()) {
         newStatus = 'completed';
         newWinnerUid = null;
         endReason = 'stalemate';
-      } else if (chess.isInsufficientMaterial()) {
+      } else if (tempChess.isInsufficientMaterial()) {
         newStatus = 'completed';
         newWinnerUid = null;
         endReason = 'insufficient material';
-      } else if (chess.isThreefoldRepetition()) {
+      } else if (tempChess.isThreefoldRepetition()) {
         newStatus = 'completed';
         newWinnerUid = null;
         endReason = 'threefold repetition';
-      } else if (chess.isDraw()) {
+      } else if (tempChess.isDraw()) {
         newStatus = 'completed';
         newWinnerUid = null;
         endReason = 'draw (50-move rule)';
@@ -806,12 +859,13 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       };
 
       const newHistory = [...(currentState.moveHistory ?? []), moveRecord];
+      const nextTurn = currentState.turn === 'w' ? 'b' : 'w';
 
       // Write new state to RTDB using the freshest currentState from ref
       const newRTDBState: RollmateRTDBState = {
         ...currentState,
         fen: newFen,
-        turn: currentState.turn === 'w' ? 'b' : 'w',
+        turn: nextTurn,
         diceRoll: null,
         diceRolled: false,
         status: newStatus,
@@ -821,7 +875,11 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       };
 
       const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-      rSet(stateRef, newRTDBState).then(() => {
+      rSet(stateRef, newRTDBState).catch((err) => {
+        // If RTDB write fails, clear the optimistic update so the board reverts
+        console.error('Failed to write move to RTDB:', err);
+        setLocalBoardFen(null);
+      }).then(() => {
         if (newStatus === 'completed') {
           finalizeGame(newWinnerUid, newHistory, endReason);
         }
@@ -849,13 +907,18 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     // Only allow moves on my turn
     if (currentState.turn !== myColor || currentState.status !== 'active') return;
 
-    const piece = chess.get(square as any);
+    // Use a temp chess instance with the correct active color for piece lookup
+    // so we can correctly identify pieces regardless of FEN/turn sync state
+    const tempChess = chessWithCorrectTurn(currentState.fen, myColor);
+    const piece = tempChess.get(square as any);
 
     // Selecting a piece of the correct type
     if (piece && piece.color === myColor && piece.type === diceRolledPieceType) {
       setSelectedSquare(square);
       if (showLegalMoves) {
-        setCustomSquareStyles(getLegalMoveSquares(chess, square, diceRolledPieceType, myColor));
+        // Pass the FEN (not chess instance) so getLegalMoveSquares uses the
+        // correct active color when computing move hints
+        setCustomSquareStyles(getLegalMoveSquares(currentState.fen, square, diceRolledPieceType, myColor));
       }
       return;
     }
@@ -864,7 +927,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     if (selectedSquare) {
       executeMoveIfLegal(selectedSquare, square);
     }
-  }, [myColor, chess, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves, executeMoveIfLegal]);
+  }, [myColor, diceRolledPieceType, selectedSquare, isReplayMode, showLegalMoves, executeMoveIfLegal]);
 
   // ── Handle promotion choice ───────────────────────────────────────────────
   const handlePromotionSelect = useCallback((piece: 'q' | 'r' | 'b' | 'n') => {
@@ -985,8 +1048,17 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
   }
 
   const isGameOver = gameState?.status === 'completed' || gameState?.status === 'terminated';
-  // Live board always shows gameState.fen; replay mode shows the selected history FEN
-  const boardFen = isReplayMode && replayFen ? replayFen : (gameState?.fen ?? new Chess().fen());
+  /**
+   * Board FEN priority:
+   * 1. Replay mode: show the selected history position
+   * 2. Optimistic local FEN: immediately show piece after current player's move
+   *    (before RTDB round-trip completes, avoids the "piece not showing" bug)
+   * 3. Authoritative RTDB state FEN
+   * 4. Fallback to initial position
+   */
+  const boardFen = isReplayMode && replayFen
+    ? replayFen
+    : (localBoardFen ?? gameState?.fen ?? new Chess().fen());
   const boardOrientation = myColor === 'b' ? 'black' : 'white';
 
   // Determine currently shown replay move for dice display in replay
