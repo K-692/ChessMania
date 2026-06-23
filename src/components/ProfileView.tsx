@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { db } from '../firebase';
 import { collection, getDocs, query, where, orderBy, limit, getDoc, doc } from 'firebase/firestore';
-import { ChevronLeft, Camera, User, Calendar, Trophy, Users, History, Edit2, Lock, X } from 'lucide-react';
+import { ChevronLeft, Camera, User, Calendar, Users, History, Edit2, Lock, X } from 'lucide-react';
 import type { UserProfile } from '../types';
 
 interface ProfileViewProps {
@@ -256,11 +256,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onBack }) => {
                 <span className="flex items-center gap-1">
                   <Calendar className="w-3.5 h-3.5 text-violet-400" />
                   <span>Joined {new Date(profile.createdAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long' })}</span>
-                </span>
-                <span className="text-zinc-700 hidden sm:inline">•</span>
-                <span className="flex items-center gap-1 text-amber-400">
-                  <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="font-semibold font-mono">{profile.rating || 1200} Elo</span>
                 </span>
                 <span className="text-zinc-700 hidden sm:inline">•</span>
                 <span className="flex items-center gap-1 text-slate-300">

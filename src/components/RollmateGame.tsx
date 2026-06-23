@@ -73,12 +73,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
     );
   }
 
-  // Helper ELO expectation logic
-  const calculateEloChange = (ratingA: number, ratingB: number, score: number) => {
-    const K = 20;
-    const expected = 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
-    return Math.round(K * (score - expected));
-  };
+
 
   const handleSimulateOutcome = async (outcome: 'win-white' | 'win-black' | 'draw') => {
     if (!matchData || !whiteProfile || !blackProfile || !user) return;
@@ -87,30 +82,15 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
     try {
       const now = Date.now();
-      const whiteRating = whiteProfile.rating;
-      const blackRating = blackProfile.rating;
 
       let winnerUid: string | null = null;
-      let whiteScore = 0.5;
-      let blackScore = 0.5;
       let matchStatus: 'completed' | 'terminated' = 'completed';
 
       if (outcome === 'win-white') {
         winnerUid = matchData.whiteUid;
-        whiteScore = 1;
-        blackScore = 0;
       } else if (outcome === 'win-black') {
         winnerUid = matchData.blackUid;
-        whiteScore = 0;
-        blackScore = 1;
       }
-
-      // Calculate new ratings
-      const whiteDelta = calculateEloChange(whiteRating, blackRating, whiteScore);
-      const blackDelta = calculateEloChange(blackRating, whiteRating, blackScore);
-
-      const newWhiteRating = Math.max(0, whiteRating + whiteDelta);
-      const newBlackRating = Math.max(0, blackRating + blackDelta);
 
       // 1. Save finalized match document to Firestore matches
       const matchDocRef = doc(db, 'matches', matchId);
@@ -123,11 +103,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         status: matchStatus,
         winnerUid: winnerUid,
         createdAt: matchData.createdAt || now,
-        finishedAt: now,
-        whiteRatingBefore: whiteRating,
-        blackRatingBefore: blackRating,
-        whiteRatingAfter: newWhiteRating,
-        blackRatingAfter: newBlackRating
+        finishedAt: now
       });
 
       // 2. Update White player stats in Firestore
@@ -139,7 +115,6 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       const newWhiteWinRate = newWhiteGames > 0 ? Math.round((newWhiteWins / newWhiteGames) * 100) : 0;
 
       await setDoc(whiteDocRef, {
-        rating: newWhiteRating,
         wins: newWhiteWins,
         losses: newWhiteLosses,
         draws: newWhiteDraws,
@@ -157,7 +132,6 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       const newBlackWinRate = newBlackGames > 0 ? Math.round((newBlackWins / newBlackGames) * 100) : 0;
 
       await setDoc(blackDocRef, {
-        rating: newBlackRating,
         wins: newBlackWins,
         losses: newBlackLosses,
         draws: newBlackDraws,
@@ -219,12 +193,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
           <div className="space-y-1">
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">White Player</span>
             <span className="text-sm font-bold text-white block">{whiteProfile?.displayName || 'Loading...'}</span>
-            <span className="text-xs text-amber-400 font-mono font-semibold">{whiteProfile?.rating || 1200} Elo</span>
           </div>
           <div className="space-y-1 border-l border-zinc-800/80">
             <span className="text-[10px] text-slate-500 uppercase tracking-wider block font-semibold">Black Player</span>
             <span className="text-sm font-bold text-white block">{blackProfile?.displayName || 'Loading...'}</span>
-            <span className="text-xs text-amber-400 font-mono font-semibold">{blackProfile?.rating || 1200} Elo</span>
           </div>
         </div>
 

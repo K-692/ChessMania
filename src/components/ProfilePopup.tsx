@@ -92,16 +92,10 @@ export const ProfilePopup: React.FC<ProfilePopupProps> = ({ profile, onClose }) 
           </div>
         </div>
 
-        {/* ELO Rating & Total Games Card */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-zinc-950 border border-zinc-850 p-3.5 rounded-xl text-center">
-            <p className="text-[8px] text-slate-500 uppercase tracking-wider font-semibold">Elo Rating</p>
-            <p className="text-base font-bold text-amber-400 font-mono mt-1">{profile.rating || 1200} Elo</p>
-          </div>
-          <div className="bg-zinc-950 border border-zinc-850 p-3.5 rounded-xl text-center">
-            <p className="text-[8px] text-slate-500 uppercase tracking-wider font-semibold">Total Battles</p>
-            <p className="text-base font-bold text-violet-300 font-mono mt-1">{totalGames} Matches</p>
-          </div>
+        {/* Total Games Card */}
+        <div className="bg-zinc-950 border border-zinc-850 p-3.5 rounded-xl text-center">
+          <p className="text-[8px] text-slate-500 uppercase tracking-wider font-semibold">Total Battles</p>
+          <p className="text-base font-bold text-violet-300 font-mono mt-1">{totalGames} Matches</p>
         </div>
 
         {/* Match records */}

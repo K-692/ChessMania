@@ -630,8 +630,6 @@ export const SocialView: React.FC<SocialViewProps> = ({ onBack, onStartGame, set
                             <span>{fProfile.displayName}</span>
                           </p>
                           <p className="text-[10px] text-slate-400 font-mono flex flex-wrap items-center gap-1.5 mt-0.5">
-                            <span className="text-amber-400 font-semibold">{fProfile.rating || 1200} Elo</span>
-                            <span>•</span>
                             <span className={online ? "text-emerald-400" : "text-slate-500"}>
                               {online ? 'Online' : 'Offline'}
                             </span>

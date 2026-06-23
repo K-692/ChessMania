@@ -298,21 +298,10 @@ const AppContent: React.FC = () => {
             </div>
 
             {/* Main Dash Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-              
-              {/* ELO card */}
-              <div className="bg-zinc-900 border border-zinc-850 p-6 rounded-2xl flex flex-col justify-between text-center space-y-4">
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Chess Rating</span>
-                <div className="py-2">
-                  <h3 className="text-4xl font-extrabold text-amber-400 font-mono tracking-tight">
-                    {profile?.rating || 1200}
-                  </h3>
-                  <span className="text-[10px] text-slate-500 mt-1 block">Global ELO Standing</span>
-                </div>
-              </div>
+            <div className="grid grid-cols-1 gap-5">
 
               {/* Rollmate Game Mode Card */}
-              <div className="sm:col-span-2 bg-zinc-900 border border-zinc-850 p-6 rounded-2xl flex flex-col justify-between space-y-6">
+              <div className="bg-zinc-900 border border-zinc-850 p-6 rounded-2xl flex flex-col justify-between space-y-6">
                 <div className="space-y-2">
                   <div className="flex items-center justify-between border-b border-zinc-850 pb-2">
                     <span className="text-sm font-bold text-white uppercase tracking-wider">Game Mode</span>
@@ -384,7 +373,6 @@ const AppContent: React.FC = () => {
                       <img src={f.photoURL} alt={f.displayName} className="w-7 h-7 rounded-full object-cover border border-zinc-800" />
                       <div>
                         <span className="text-xs font-semibold text-white block">{f.displayName}</span>
-                        <span className="text-[9px] text-amber-400 font-mono font-semibold">{f.rating || 1200} Elo</span>
                       </div>
                     </div>
                     <button

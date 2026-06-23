@@ -149,9 +149,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
                     <p className="text-xs font-semibold text-slate-200">
                       {profile?.displayName || user.displayName}
                     </p>
-                    <p className="text-[9px] text-amber-400 font-mono font-semibold">
-                      {profile?.rating || 1200} Elo
-                    </p>
                   </div>
                 </div>
 
@@ -284,9 +281,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
               <div className="text-left leading-none">
                 <p className="text-sm font-semibold text-slate-200">
                   {profile?.displayName || user.displayName}
-                </p>
-                <p className="text-[10px] text-amber-400 font-mono font-semibold mt-1">
-                  {profile?.rating || 1200} Elo
                 </p>
               </div>
             </div>
