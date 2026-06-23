@@ -183,6 +183,15 @@ const AppContent: React.FC = () => {
     }
   };
 
+  // Dynamic background image selection based on active tab/view
+  useEffect(() => {
+    if (user && view === 'profile') {
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.85) 0%, rgba(13, 14, 18, 0.95) 100%), url('/chess_king_neon.png')";
+    } else {
+      document.body.style.backgroundImage = "linear-gradient(to bottom, rgba(13, 14, 18, 0.85) 0%, rgba(13, 14, 18, 0.95) 100%), url('/chess_cinematic_bg.png')";
+    }
+  }, [user, view]);
+
   // Loading indicator for authentication
   if (loading) {
     return (

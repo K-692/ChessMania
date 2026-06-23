@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db, rtdb } from '../firebase';
 import type { UserProfile } from '../types';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { ref as rRef, set as rSet, onDisconnect, onValue, serverTimestamp } from 'firebase/database';
 
 interface AuthContextType {
@@ -108,22 +108,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const docSnap = await getDoc(userDocRef);
 
       if (!docSnap.exists()) {
-        const actualName = firebaseUser.displayName || 'Player';
-        // Clean display name of symbols
+        // Use user's Gmail display name or email prefix before @ as fallback
+        const actualName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Player';
+        // Clean display name of symbols and spaces - keep ONLY alphabets and numbers
         let alphanumericName = actualName.replace(/[^a-zA-Z0-9]/g, '');
         if (alphanumericName.length < 3) {
-          alphanumericName = 'Player';
+          alphanumericName = alphanumericName ? 'Player' + alphanumericName : 'Player';
+        }
+        if (alphanumericName.length > 15) {
+          alphanumericName = alphanumericName.substring(0, 15);
         }
         
-        // Ensure name is unique
+        // Ensure name is unique by querying firestore users collection
         let candidate = alphanumericName;
         let attempts = 0;
         let isUnique = false;
-        while (!isUnique && attempts < 10) {
-          const suffix = attempts === 0 ? '' : Math.floor(100 + Math.random() * 900);
+        while (!isUnique && attempts < 20) {
+          const suffix = attempts === 0 ? '' : Math.floor(100 + Math.random() * 9000).toString();
           candidate = `${alphanumericName}${suffix}`;
-          // Let's assume unique or let Firestore update succeed
-          isUnique = true; 
+          
+          const q = query(collection(db, 'users'), where('displayName', '==', candidate));
+          const snap = await getDocs(q);
+          if (snap.empty) {
+            isUnique = true;
+          }
           attempts++;
         }
 
