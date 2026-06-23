@@ -5,6 +5,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref as rRef, onValue } from 'firebase/database';
 import { db, rtdb } from '../firebase';
 import { NetworkSignal } from './NetworkSignal';
+import { playNotifySound } from '../utils/sound';
 
 interface NavbarProps {
   onNavigate: (view: 'dashboard' | 'social' | 'profile' | 'settings') => void;
@@ -18,6 +19,10 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
   const [fCount, setFCount] = useState(0);
   const [cCount, setCCount] = useState(0);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  // Refs to track previous counts so we play sounds only when counts increase
+  const prevFCountRef = React.useRef(0);
+  const prevCCountRef = React.useRef(0);
 
   const pendingCount = fCount + cCount + unreadChatsCount;
 
@@ -34,7 +39,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
       where('status', '==', 'pending_received')
     );
     const unsubFriendships = onSnapshot(qFriendships, (snap) => {
-      setFCount(snap.size);
+      const newCount = snap.size;
+      // Play notification only when count increases (not on initial load)
+      if (newCount > prevFCountRef.current) {
+        playNotifySound();
+      }
+      prevFCountRef.current = newCount;
+      setFCount(newCount);
     }, (err) => {
       console.warn("Error listening to pending friendships in Navbar:", err);
     });
@@ -51,8 +62,14 @@ export const Navbar: React.FC<NavbarProps> = ({ onNavigate, currentView, isGameA
             count++;
           }
         }
+        // Play notification only when count increases (not on initial load)
+        if (count > prevCCountRef.current) {
+          playNotifySound();
+        }
+        prevCCountRef.current = count;
         setCCount(count);
       } else {
+        prevCCountRef.current = 0;
         setCCount(0);
       }
     }, (err) => {

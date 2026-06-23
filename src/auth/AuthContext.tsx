@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, type User as FirebaseUser } from 'firebase/auth';
+import { signInWithPopup, signOut, setPersistence, browserSessionPersistence, signInAnonymously, type User as FirebaseUser } from 'firebase/auth';
 import { auth, googleProvider, db, rtdb } from '../firebase';
 import type { UserProfile } from '../types';
 import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
@@ -99,8 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  // Bootstrap user profile document
-  const bootstrapProfile = async (firebaseUser: FirebaseUser) => {
+  // Bootstrap user profile document with optional displayName override
+  const bootstrapProfile = async (firebaseUser: FirebaseUser, forcedDisplayName?: string) => {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     const now = Date.now();
 
@@ -108,8 +108,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const docSnap = await getDoc(userDocRef);
 
       if (!docSnap.exists()) {
-        // Use user's Gmail display name or email prefix before @ as fallback
-        const actualName = firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Player';
+        // Use user's Gmail display name, prefix or forcedDisplayName
+        const actualName = forcedDisplayName || firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Player';
         // Clean display name of symbols and spaces - keep ONLY alphabets and numbers
         let alphanumericName = actualName.replace(/[^a-zA-Z0-9]/g, '');
         if (alphanumericName.length < 3) {
@@ -172,6 +172,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           };
           await setDoc(userDocRef, { settings: existingData.settings }, { merge: true });
         }
+        // If we want to force display name update for a mock user even if profile doc already existed:
+        if (forcedDisplayName && existingData.displayName !== forcedDisplayName) {
+          existingData.displayName = forcedDisplayName;
+          await setDoc(userDocRef, { displayName: forcedDisplayName }, { merge: true });
+        }
         setProfile(existingData);
       }
     } catch (error) {
@@ -180,6 +185,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const mockUserParam = params.get('mockUser');
+      const mockNameParam = params.get('mockName');
+      if (mockUserParam) {
+        localStorage.setItem('mock_user_uid', mockUserParam);
+        if (mockNameParam) {
+          localStorage.setItem('mock_user_name', mockNameParam);
+        } else {
+          localStorage.setItem('mock_user_name', mockUserParam);
+        }
+      }
+    }
+
+    const mockUid = typeof window !== 'undefined' ? localStorage.getItem('mock_user_uid') : null;
+
+    if (mockUid && !auth.currentUser) {
+      signInAnonymously(auth).catch((err) => {
+        console.error("Failed to sign in anonymously for mock user:", err);
+      });
+      return;
+    }
+
     const unsubscribeAuth = auth.onAuthStateChanged(async (firebaseUser) => {
       if (profileUnsubRef.current) {
         profileUnsubRef.current();
@@ -193,11 +221,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Listen to profile document in real-time
         profileUnsubRef.current = onSnapshot(userDocRef, async (docSnap) => {
           if (!docSnap.exists()) {
-            await bootstrapProfile(firebaseUser);
+            const currentMockName = localStorage.getItem('mock_user_name');
+            await bootstrapProfile(firebaseUser, currentMockName || undefined);
             return;
           }
 
           const rawData = docSnap.data() as UserProfile;
+          // Ensure mock name is synced to document if needed
+          const currentMockName = localStorage.getItem('mock_user_name');
+          if (currentMockName && rawData.displayName !== currentMockName) {
+            rawData.displayName = currentMockName;
+            await setDoc(userDocRef, { displayName: currentMockName }, { merge: true });
+          }
           setProfile(rawData);
           setLoading(false);
         });

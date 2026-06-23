@@ -313,26 +313,8 @@ export function playLoseSound() {
 export function playIllegalMoveSound() {
   if (!settings.effectsEnabled) return;
   try {
-    const ctx = getAudioContext();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(120, now);
-    osc.frequency.linearRampToValueAtTime(100, now + 0.15);
-    
-    gain.gain.setValueAtTime(0.15, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
-    
-    osc.start(now);
-    osc.stop(now + 0.15);
+    const audio = new Audio('/sound/illegal.mp3');
+    audio.play().catch(e => console.warn('Failed to play illegal move sound:', e));
   } catch (e) {
     console.warn("Failed to play illegal move sound:", e);
   }

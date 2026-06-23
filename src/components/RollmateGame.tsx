@@ -31,7 +31,27 @@ import {
   PIECE_SYMBOLS,
 } from '../utils/chess';
 import { getSoundSettings } from '../utils/sound';
-import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playIllegalMoveSound } from '../utils/sound';
+import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playIllegalMoveSound, playNotifySound } from '../utils/sound';
+
+// Safely parse piece details from react-chessboard events/objects
+const getPieceDetails = (piece: any): { color: string; type: string } | null => {
+  if (!piece) return null;
+  let pieceStr = '';
+  if (typeof piece === 'string') {
+    pieceStr = piece;
+  } else if (piece && typeof piece.pieceType === 'string') {
+    pieceStr = piece.pieceType;
+  } else if (piece && typeof piece.piece === 'string') {
+    pieceStr = piece.piece;
+  }
+  if (pieceStr.length >= 2) {
+    return {
+      color: pieceStr[0].toLowerCase(),
+      type: pieceStr[1].toLowerCase(),
+    };
+  }
+  return null;
+};
 import type { Match, UserProfile, RollmateMoveRecord, GameChatMessage, RollmateRTDBState } from '../types';
 import { SettingsPanelContent } from './SettingsView';
 
@@ -1244,25 +1264,19 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
                     animationDurationInMs: 180,
                     showAnimations: true,
-                    // react-chessboard v5: `piece` in canDragPiece/onPieceDrop is a string
-                    // like "wP", "bN" — NOT an object with a .pieceType field.
-                    // Index 0 = color ('w'/'b'), index 1 = type ('p','n','b','r','q','k').
+                    // Safely parse and validate piece dragging / dropping with getPieceDetails helper
                     canDragPiece: ({ piece, isSparePiece }) => {
                       if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
-                      // piece.pieceType is a string like "wP" or "bN" (react-chessboard v5)
-                      // [0] = color ('w'/'b'), [1] = piece letter (uppercase) -> lowercase for chess.js
-                      const pColor = piece.pieceType[0].toLowerCase();
-                      const pType  = piece.pieceType[1].toLowerCase();
-                      return pColor === myColor && pType === diceRolledPieceType;
+                      const details = getPieceDetails(piece);
+                      if (!details) return false;
+                      return details.color === myColor && details.type === diceRolledPieceType;
                     },
                     onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
                       // Set the drop flag so that the subsequent onSquareClick click event is ignored
                       justDroppedRef.current = true;
                       if (!targetSquare) return false;
-                      // piece.pieceType is a string like "wP" or "bN" (react-chessboard v5)
-                      const pColor = piece.pieceType[0].toLowerCase();
-                      const pType  = piece.pieceType[1].toLowerCase();
-                      if (pColor !== myColor || pType !== diceRolledPieceType) {
+                      const details = getPieceDetails(piece);
+                      if (!details || details.color !== myColor || details.type !== diceRolledPieceType) {
                         playIllegalMoveSound();
                         return false;
                       }
@@ -1572,6 +1586,8 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                     if (activePanel !== 'chat') {
                       setUnreadChatCount(prev => prev + count);
                     }
+                    // Play notification sound for any new incoming message
+                    playNotifySound();
                   }}
                 />
               )}

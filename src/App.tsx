@@ -10,7 +10,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref as rRef, onValue, update as rUpdate, get as rGet } from 'firebase/database';
 import { db, rtdb } from './firebase';
 import { Swords, Users, X, Sparkles, Volume2, VolumeX } from 'lucide-react';
-import { getSoundSettings, updateSoundSettings } from './utils/sound';
+import { getSoundSettings, updateSoundSettings, playNotifySound } from './utils/sound';
 import { NetworkSignal } from './components/NetworkSignal';
 
 const AppContent: React.FC = () => {
@@ -96,7 +96,11 @@ const AppContent: React.FC = () => {
     }
 
     const unsubscribers: (() => void)[] = [];
+    // Per-friend ref map to track previous unread count within this closure.
+    // Using a local object (not state) avoids stale-closure bugs in the Firestore callbacks.
+    const prevCountsRef: Record<string, number> = {};
     friendsUids.forEach((friendUid) => {
+      prevCountsRef[friendUid] = 0;
       const threadId = [user.uid, friendUid].sort().join('_');
       const q = query(
         collection(db, 'users', user.uid, 'chatThreads', threadId, 'messages'),
@@ -105,6 +109,11 @@ const AppContent: React.FC = () => {
       );
 
       const unsub = onSnapshot(q, (snap) => {
+        // Play notification sound when new unread messages arrive from this friend
+        if (snap.size > (prevCountsRef[friendUid] ?? 0)) {
+          playNotifySound();
+        }
+        prevCountsRef[friendUid] = snap.size;
         setUnreadCounts((prev) => ({
           ...prev,
           [friendUid]: snap.size
