@@ -972,27 +972,23 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
       const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
 
-      // Optimistically update local game state immediately so the UI
-      // reflects the turn flip without waiting for the RTDB onValue round-trip.
-      // This fixes the bug where status still said "choose your move!" and the
-      // turn indicator still showed the current player after a successful move.
-      setGameState(newRTDBState);
-      gameStateRef.current = newRTDBState;
-      // Clear the status message so the stale "Roll: X — choose your move!"
-      // banner disappears immediately after a successful move.
-      setStatusMessage('');
-
+      // Write new state to RTDB first. On success, optimistically update local UI.
       rSet(stateRef, newRTDBState)
         .then(() => {
+          // Optimistically update local game state after successful write to ensure consistency.
+          setGameState(newRTDBState);
+          gameStateRef.current = newRTDBState;
+          // Clear the status message so the stale "Roll: X — choose your move!" banner disappears.
+          setStatusMessage('');
           if (newStatus === 'completed') {
             finalizeGame(newWinnerUid, newHistory, endReason);
           }
         })
         .catch((err) => {
-          // If RTDB write fails, revert the optimistic state updates
+          // If RTDB write fails, revert any optimistic UI changes.
           console.error('Failed to write move to RTDB:', err);
           setLocalBoardFen(null);
-          // Revert game state to what was in the ref before we optimistically updated it
+          // Revert game state to previous state.
           setGameState(currentState);
           gameStateRef.current = currentState;
         });
