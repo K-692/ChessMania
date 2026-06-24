@@ -31,7 +31,7 @@ import {
   PIECE_SYMBOLS,
 } from '../utils/chess';
 import { getSoundSettings } from '../utils/sound';
-import { playMoveSound, playCaptureSound, playCheckSound, playWinSound, playIllegalMoveSound, playNotifySound } from '../utils/sound';
+import { playMoveSound, soundEngine.play('move-self'), playCheckSound, playWinSound, playIllegalMoveSound, playNotifySound } from '../utils/sound';
 
 // Safely parse piece details from react-chessboard events/objects
 const getPieceDetails = (piece: any): { color: string; type: string } | null => {
@@ -149,20 +149,18 @@ interface PlayerCardProps {
 }
 
 const PlayerCard: React.FC<PlayerCardProps> = ({ profile, isActive, color, label }) => (
-  <div className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all ${
-    isActive
+  <div className={`flex items-center gap-2.5 p-2 rounded-xl border transition-all ${isActive
       ? 'bg-violet-600/10 border-violet-500/40 shadow-lg shadow-violet-500/10'
       : 'bg-zinc-900/60 border-zinc-800'
-  }`}>
+    }`}>
     <div className="relative shrink-0">
       <img
         src={profile?.photoURL || 'https://images.unsplash.com/photo-1529665253569-6d01c0eaf7b6?w=100&h=100&fit=crop'}
         alt={profile?.displayName || '?'}
         className="w-7 h-7 rounded-full object-cover border-2 border-zinc-700"
       />
-      <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-900 ${
-        color === 'w' ? 'bg-white' : 'bg-zinc-900 border-zinc-600'
-      }`} />
+      <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-zinc-900 ${color === 'w' ? 'bg-white' : 'bg-zinc-900 border-zinc-600'
+        }`} />
     </div>
     <div className="flex-1 min-w-0">
       <p className="text-xs font-bold text-white truncate">{profile?.displayName || 'Player'}</p>
@@ -292,11 +290,10 @@ const GameChat: React.FC<GameChatProps> = ({ matchId, currentUser, currentProfil
                   alt=""
                   className="w-5 h-5 rounded-full object-cover shrink-0 mt-0.5"
                 />
-                <div className={`max-w-[75%] rounded-xl px-2.5 py-1.5 text-[11px] break-words ${
-                  isMine
+                <div className={`max-w-[75%] rounded-xl px-2.5 py-1.5 text-[11px] break-words ${isMine
                     ? 'bg-violet-600/20 border border-violet-500/20 text-violet-100'
                     : 'bg-zinc-800 border border-zinc-700 text-slate-200'
-                }`}>
+                  }`}>
                   {!isMine && (
                     <p className="text-[9px] text-slate-500 font-semibold mb-0.5">{msg.displayName}</p>
                   )}
@@ -423,7 +420,7 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
    * authoritative new state.
    */
   const [localBoardFen, setLocalBoardFen] = useState<string | null>(null);
-  
+
   // ── Interaction flow control refs to prevent double move executions and double sounds ──────
   const justDroppedRef = useRef(false);
   const lastExecutedMoveCountRef = useRef(-1);
@@ -890,14 +887,9 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
         return false;
       }
 
-      // Move succeeded — play sounds
-      if (moveResult.captured) {
-        playCaptureSound();
-      } else {
-        playMoveSound();
-      }
-
-      if (tempChess.isCheck()) playCheckSound();
+      // Move succeeded — play only the generic move sound for any piece movement.
+      // This ensures that even captures use the same "move-self.mp3" sound, satisfying the requirement.
+      playMoveSound();
 
       // Guard against double execution on the same turn
       lastExecutedMoveCountRef.current = currentCount;
@@ -912,6 +904,8 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       // without waiting for RTDB to confirm. This fixes the bug where the
       // board appeared frozen after a move until the opponent's next action.
       setLocalBoardFen(newFen);
+      // Clear dice result after move
+      setLocalDiceResult(null);
 
       // Also sync the shared chess instance so subsequent queries (e.g. isCheck)
       // reflect the current board position
@@ -977,15 +971,31 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
       };
 
       const stateRef = rRef(rtdb, `matches/${matchId}/gameState`);
-      rSet(stateRef, newRTDBState).catch((err) => {
-        // If RTDB write fails, clear the optimistic update so the board reverts
-        console.error('Failed to write move to RTDB:', err);
-        setLocalBoardFen(null);
-      }).then(() => {
-        if (newStatus === 'completed') {
-          finalizeGame(newWinnerUid, newHistory, endReason);
-        }
-      });
+
+      // Optimistically update local game state immediately so the UI
+      // reflects the turn flip without waiting for the RTDB onValue round-trip.
+      // This fixes the bug where status still said "choose your move!" and the
+      // turn indicator still showed the current player after a successful move.
+      setGameState(newRTDBState);
+      gameStateRef.current = newRTDBState;
+      // Clear the status message so the stale "Roll: X — choose your move!"
+      // banner disappears immediately after a successful move.
+      setStatusMessage('');
+
+      rSet(stateRef, newRTDBState)
+        .then(() => {
+          if (newStatus === 'completed') {
+            finalizeGame(newWinnerUid, newHistory, endReason);
+          }
+        })
+        .catch((err) => {
+          // If RTDB write fails, revert the optimistic state updates
+          console.error('Failed to write move to RTDB:', err);
+          setLocalBoardFen(null);
+          // Revert game state to what was in the ref before we optimistically updated it
+          setGameState(currentState);
+          gameStateRef.current = currentState;
+        });
 
       // Exit replay mode if we were somehow in it
       setReplayIndex(-1);
@@ -1247,50 +1257,50 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                 height: 'min(calc(62vw - 16px), calc(100vh - 156px))',
               }}
             >
-                <Chessboard
-                  options={{
-                    position: boardFen,
-                    boardOrientation: boardOrientation,
-                    pieces: customPieces,
-                    boardStyle: {
-                      ...boardStyle,
-                      backgroundImage: `url('/boards/${boardTheme}.png')`,
-                      backgroundSize: 'cover',
-                    },
-                    squareStyles: {
-                      ...(selectedSquare ? { [selectedSquare]: { background: 'rgba(139,92,246,0.4)' } } : {}),
-                      ...customSquareStyles,
-                    },
-                    allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
-                    animationDurationInMs: 180,
-                    showAnimations: true,
-                    // Safely parse and validate piece dragging / dropping with getPieceDetails helper
-                    canDragPiece: ({ piece, isSparePiece }) => {
-                      if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
-                      const details = getPieceDetails(piece);
-                      if (!details) return false;
-                      return details.color === myColor && details.type === diceRolledPieceType;
-                    },
-                    onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
-                      // Set the drop flag so that the subsequent onSquareClick click event is ignored
-                      justDroppedRef.current = true;
-                      if (!targetSquare) return false;
-                      const details = getPieceDetails(piece);
-                      if (!details || details.color !== myColor || details.type !== diceRolledPieceType) {
-                        playIllegalMoveSound();
-                        return false;
-                      }
-                      return executeMoveIfLegal(sourceSquare, targetSquare);
-                    },
-                    onSquareClick: isReplayMode ? undefined : ({ square }) => {
-                      if (justDroppedRef.current) {
-                        justDroppedRef.current = false;
-                        return;
-                      }
-                      handleSquareClick(square);
-                    },
-                  }}
-                />
+              <Chessboard
+                options={{
+                  position: boardFen,
+                  boardOrientation: boardOrientation,
+                  pieces: customPieces,
+                  boardStyle: {
+                    ...boardStyle,
+                    backgroundImage: `url('/boards/${boardTheme}.png')`,
+                    backgroundSize: 'cover',
+                  },
+                  squareStyles: {
+                    ...(selectedSquare ? { [selectedSquare]: { background: 'rgba(139,92,246,0.4)' } } : {}),
+                    ...customSquareStyles,
+                  },
+                  allowDragging: !isReplayMode && isMyTurn && !!gameState?.diceRolled,
+                  animationDurationInMs: 180,
+                  showAnimations: true,
+                  // Safely parse and validate piece dragging / dropping with getPieceDetails helper
+                  canDragPiece: ({ piece, isSparePiece }) => {
+                    if (isReplayMode || !isMyTurn || !gameState?.diceRolled || isSparePiece) return false;
+                    const details = getPieceDetails(piece);
+                    if (!details) return false;
+                    return details.color === myColor && details.type === diceRolledPieceType;
+                  },
+                  onPieceDrop: isReplayMode ? undefined : ({ piece, sourceSquare, targetSquare }) => {
+                    // Set the drop flag so that the subsequent onSquareClick click event is ignored
+                    justDroppedRef.current = true;
+                    if (!targetSquare) return false;
+                    const details = getPieceDetails(piece);
+                    if (!details || details.color !== myColor || details.type !== diceRolledPieceType) {
+                      playIllegalMoveSound();
+                      return false;
+                    }
+                    return executeMoveIfLegal(sourceSquare, targetSquare);
+                  },
+                  onSquareClick: isReplayMode ? undefined : ({ square }) => {
+                    if (justDroppedRef.current) {
+                      justDroppedRef.current = false;
+                      return;
+                    }
+                    handleSquareClick(square);
+                  },
+                }}
+              />
               {/* Replay overlay */}
               {isReplayMode && (
                 <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-sm rounded-lg px-2.5 py-1.5 text-[10px] text-amber-400 font-bold uppercase tracking-widest flex items-center gap-1.5 pointer-events-none">
@@ -1325,11 +1335,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                   // Reset unread count when opening chat
                   if (tab === 'chat') setUnreadChatCount(0);
                 }}
-                className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${
-                  activePanel === tab
+                className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-widest transition-all cursor-pointer flex items-center justify-center gap-1.5 relative ${activePanel === tab
                     ? 'text-violet-400 border-b-2 border-violet-500 bg-violet-500/5'
                     : 'text-slate-600 hover:text-slate-400'
-                }`}
+                  }`}
               >
                 {tab === 'game' ? (
                   <><Trophy className="w-3 h-3" />Game</>
@@ -1373,11 +1382,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
 
                 {/* Turn indicator */}
                 {gameState && !isGameOver && !isReplayMode && (
-                  <div className={`rounded-xl p-2 border text-[10px] text-center font-bold uppercase tracking-widest ${
-                    isMyTurn
+                  <div className={`rounded-xl p-2 border text-[10px] text-center font-bold uppercase tracking-widest ${isMyTurn
                       ? 'bg-violet-600/10 border-violet-500/30 text-violet-400'
                       : 'bg-zinc-800/50 border-zinc-700 text-slate-500'
-                  }`}>
+                    }`}>
                     {isMyTurn
                       ? (gameState.diceRolled ? `Move your ${getPieceTypeName(diceRolledPieceType!)}` : 'Your turn — Roll the dice!')
                       : `Waiting for ${opponentProfile?.displayName || 'opponent'}…`
@@ -1524,11 +1532,10 @@ export const RollmateGame: React.FC<RollmateGameProps> = ({ matchId, onExit }) =
                                   setReplayIndex(i);
                                   setReplayFen(m.fen);
                                 }}
-                                className={`cursor-pointer transition-colors ${
-                                  isHighlighted
+                                className={`cursor-pointer transition-colors ${isHighlighted
                                     ? 'bg-violet-600/20 text-violet-300'
                                     : 'hover:bg-zinc-800 text-slate-400'
-                                }`}
+                                  }`}
                               >
                                 <td className="text-right pr-1.5 py-0.5 text-slate-600 font-mono">{m.moveNumber}.</td>
                                 <td className="px-1 py-0.5 max-w-[60px] truncate text-slate-400">{playerName}</td>
